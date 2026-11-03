@@ -13,9 +13,11 @@
  * helper mirrors that contract so previews and validators don't drift.
  */
 
+import { pullTabWallInset } from '@/shared/utils/pullTabPlan';
+
 import { GRIDFINITY } from '@/features/bin-designer/constants/gridfinity';
 import { socketHeightMm } from '@/shared/printSettings/gridfinityGeometry';
-import { hasDetachableFeet } from '@/features/bin-designer/types/base';
+import { DEFAULT_FEET_MODE, hasDetachableFeet } from '@/features/bin-designer/types/base';
 import type {
   BaseConfig,
   BinParams,
@@ -33,6 +35,7 @@ import {
 import { isPartialMask } from '@/shared/utils/cellMask';
 import type { CellMask } from '@/shared/utils/cellMask';
 import { resolveOverhang } from '@/shared/utils/overhang';
+import { resolveDetachableFeet } from '@/shared/utils/detachableFeetPlan';
 
 export interface BinDimensions {
   /** Outer bin width in mm (XY footprint, includes tolerance) */
@@ -64,8 +67,7 @@ export interface BinDimensions {
 /**
  * Derive every dimension that downstream code needs from a `BinParams`.
  *
- * Pure function — safe to call inline in render paths (no allocations
- * beyond the result object). Callers that need only one field should
+ * Pure function — safe to call inline in render paths. Callers that need only one field should
  * still call this rather than recomputing, so the math stays canonical.
  */
 /** The slice of a base these Z helpers read — narrow so partial callers fit. */
@@ -164,8 +166,9 @@ export function binDimensions(params: BinParams): BinDimensions {
   const gridUnitMmY = params.gridUnitMmY ?? params.gridUnitMm;
   const outerW = params.width * params.gridUnitMm - GRIDFINITY.TOLERANCE;
   const outerD = params.depth * gridUnitMmY - GRIDFINITY.TOLERANCE;
-  const innerW = outerW - 2 * params.wallThickness;
-  const innerD = outerD - 2 * params.wallThickness;
+  const inset = pullTabWallInset(params);
+  const innerW = outerW - 2 * params.wallThickness - (inset.left + inset.right);
+  const innerD = outerD - 2 * params.wallThickness - (inset.front + inset.back);
   const totalH = params.height * params.heightUnitMm;
   const isFlat = params.base.style === 'flat';
   // Mirrors the worker's `deriveDimensions`. A tray bin is socketless
@@ -174,7 +177,12 @@ export function binDimensions(params: BinParams): BinDimensions {
   // overlays, the cutout and divider editors, the scoop bounds — reads these
   // two numbers, so getting them wrong here misplaces all of them at once.
   const wallHeight = baseWallHeight(params.base, totalH);
-  const floorZ = baseFloorZ(params.base, params.heightUnitMm, params.lid, params.cellMask);
+  // Detachable feet that place no foot leave the integral socket on the body.
+  const floorBase =
+    hasDetachableFeet(params.base) && resolveDetachableFeet(params).placements.length === 0
+      ? { ...params.base, feet: DEFAULT_FEET_MODE }
+      : params.base;
+  const floorZ = baseFloorZ(floorBase, params.heightUnitMm, params.lid, params.cellMask);
   return { outerW, outerD, innerW, innerD, totalH, wallHeight, floorZ, isFlat };
 }
 
@@ -187,13 +195,14 @@ export interface TaperBandSides {
 }
 
 export interface CutoutInterior {
-  /** Interior cavity width in mm, overhang folded in. */
+  /** Interior cavity width in mm, overhang and pull tab walls folded in. */
   readonly innerW: number;
-  /** Interior cavity depth in mm, overhang folded in. */
+  /** Interior cavity depth in mm, overhang and pull tab walls folded in. */
   readonly innerD: number;
   /**
    * X shift (mm, +X) of the expanded cavity center inside the outer body when
-   * opposite overhang sides differ. Zero for symmetric/absent overhang. Only
+   * opposite overhang sides differ, or when a pull tab thickens one side wall
+   * and not the other. Zero when neither applies. Only
    * model-space consumers (the 3D ghost) need it; the flat 2D cutout editor
    * works in the offset-free `[0, innerW]` in-cavity frame.
    */
@@ -216,10 +225,20 @@ export interface CutoutInterior {
  * overhang leaves the interior nominal, overhang is suppressed for polygon
  * masks (the mask defines its own footprint), negative side values clamp to
  * zero, and the asymmetry offset is `(right − left) / 2` / `(back − front) / 2`.
+ *
+ * Pull tab walls fold in the same way: each wall `pullTabWallInset` thickens
+ * shrinks the interior and moves its center away from that wall, so a tab on
+ * the left or front alone shifts the offset with no overhang at all.
  */
 export function cutoutInterior(params: BinParams): CutoutInterior {
   const { innerW, innerD } = binDimensions(params);
-  return expandInteriorForOverhang(innerW, innerD, params.overhang, params.cellMask);
+  const cavity = expandInteriorForOverhang(innerW, innerD, params.overhang, params.cellMask);
+  const inset = pullTabWallInset(params);
+  return {
+    ...cavity,
+    offsetX: cavity.offsetX - (inset.right - inset.left) / 2,
+    offsetY: cavity.offsetY + (inset.front - inset.back) / 2,
+  };
 }
 
 /**

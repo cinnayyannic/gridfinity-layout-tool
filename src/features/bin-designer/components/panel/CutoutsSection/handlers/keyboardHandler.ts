@@ -58,15 +58,29 @@ export interface KeyboardHandlerContext {
 }
 
 /**
+ * A focused field, switch or radio keeps its own keys: typing stays typing,
+ * Space flips the switch, arrows move between a segmented control's options,
+ * and Tab moves focus on rather than cycling the selection.
+ */
+export function focusOwnsKeys(target: EventTarget | null): boolean {
+  // A key sent to the window or the document has neither.
+  const element = target as Partial<Pick<HTMLElement, 'tagName' | 'getAttribute'>> | null;
+  return (
+    element?.tagName === 'INPUT' ||
+    element?.tagName === 'TEXTAREA' ||
+    element?.getAttribute?.('role') === 'switch' ||
+    element?.getAttribute?.('role') === 'radio'
+  );
+}
+
+/**
  * Handle a keydown event in the cutout editor.
  *
  * Inspects the keyboard event and, when it matches a supported shortcut,
  * updates the cutouts and calls `preventDefault` on the event directly.
  */
 export function handleCutoutKeyDown(e: KeyboardEvent, ctx: KeyboardHandlerContext): void {
-  // Don't capture when typing in an input
-  const target = e.target as HTMLElement;
-  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+  if (focusOwnsKeys(e.target)) return;
 
   // Path drawing mode: Escape to cancel, Ctrl+Z to undo last point
   if (ctx.mode.type === 'path-drawing') {

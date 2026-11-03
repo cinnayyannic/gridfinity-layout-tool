@@ -20,6 +20,7 @@ export {
   registryEdgeFields,
   registryHeightFields,
   registryOverhangFields,
+  registrySlantFields,
   loadRegistry,
   subscribeToRegistry,
 } from './store';
@@ -29,6 +30,7 @@ export {
 // must persist a full BinParams (compartment cells, texts) before navigating.
 // The `createFrom=bin` query-string handoff cannot carry that payload.
 export { loadDesign, deleteDesign, listDesigns, updateDesignParams, saveDesign } from './storage';
+export { ensureSlantRowDesign } from './utils/slantRowDesign';
 
 // Concrete DesignStorePort. Exposed for `shared/storage/` to register with the
 // core-owned port so core/storage can persist/read designs without a
@@ -41,6 +43,7 @@ export { designStoreAdapter } from './storage/designStoreAdapter';
 // This module is eagerly imported by App and the sync flows, so going through the
 // barrel would pull three core onto first paint.
 export { useBackgroundThumbnailRegen } from './hooks/useBackgroundThumbnailRegen';
+export { useMeshFileMaintenance } from './hooks/useMeshFileMaintenance';
 export { useCustomBins } from './hooks/useCustomBins';
 export {
   useDesignThumbnail,

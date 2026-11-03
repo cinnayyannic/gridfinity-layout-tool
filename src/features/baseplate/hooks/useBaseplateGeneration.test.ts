@@ -96,6 +96,30 @@ describe('selectGenerationTriggers', () => {
     expect(shallowEqual(selectGenerationTriggers(off), selectGenerationTriggers(on))).toBe(false);
   });
 
+  it('regenerates when magnet crush ribs or the chamfered mouth toggle', () => {
+    const plain = selectGenerationTriggers(makeState(undefined, { magnetHoles: true }));
+    for (const flag of ['magnetCrushRibs', 'magnetChamfer'] as const) {
+      const on = selectGenerationTriggers(
+        makeState(undefined, { magnetHoles: true, [flag]: true })
+      );
+      expect(shallowEqual(plain, on)).toBe(false);
+    }
+  });
+
+  it('ignores the press-fit flags while magnet holes are off', () => {
+    const a = selectGenerationTriggers(makeState(undefined));
+    const b = selectGenerationTriggers(
+      makeState(undefined, { magnetCrushRibs: true, magnetChamfer: true })
+    );
+    expect(shallowEqual(a, b)).toBe(true);
+  });
+
+  it('regenerates when eco plate mode toggles', () => {
+    const off = makeState(undefined, { ecoPlate: false });
+    const on = makeState(undefined, { ecoPlate: true });
+    expect(shallowEqual(selectGenerationTriggers(off), selectGenerationTriggers(on))).toBe(false);
+  });
+
   it('produces a different trigger selection when solidFloorThickness changes (floor on)', () => {
     const thin = makeState(undefined, { solidFloor: true, solidFloorThickness: mm(0.8) });
     const thick = makeState(undefined, { solidFloor: true, solidFloorThickness: mm(2) });
@@ -170,6 +194,38 @@ describe('selectGenerationTriggers', () => {
       const b = makeState(undefined, {
         stackPrint: stack,
         screwHoles: screws({ diameter: mm(4.5) }),
+      });
+      expect(shallowEqual(selectGenerationTriggers(a), selectGenerationTriggers(b))).toBe(true);
+    });
+  });
+
+  describe('mount magnet params', () => {
+    const magnets = (over: Partial<StoredBaseplateParams['mountMagnets'] & object> = {}) =>
+      ({
+        enabled: true,
+        diameter: mm(6.5),
+        depth: mm(2),
+        ...over,
+      }) as StoredBaseplateParams['mountMagnets'];
+
+    it.each([
+      ['toggle', undefined, magnets()],
+      ['depth', magnets(), magnets({ depth: mm(2.5) })],
+      ['diameter', magnets(), magnets({ diameter: mm(6) })],
+      ['count', magnets({ perPiece: 4 }), magnets({ perPiece: 6 })],
+      ['chamfer', magnets(), magnets({ chamfer: true })],
+    ])('produces a different trigger selection when the %s changes', (_field, before, after) => {
+      const a = makeState(undefined, { mountMagnets: before });
+      const b = makeState(undefined, { mountMagnets: after });
+      expect(shallowEqual(selectGenerationTriggers(a), selectGenerationTriggers(b))).toBe(false);
+    });
+
+    it('ignores magnet fields while stacking strips them (no needless regen)', () => {
+      const stack = { enabled: true, gapMm: mm(0.2) } as const;
+      const a = makeState(undefined, { stackPrint: stack, mountMagnets: magnets() });
+      const b = makeState(undefined, {
+        stackPrint: stack,
+        mountMagnets: magnets({ depth: mm(2.5) }),
       });
       expect(shallowEqual(selectGenerationTriggers(a), selectGenerationTriggers(b))).toBe(true);
     });

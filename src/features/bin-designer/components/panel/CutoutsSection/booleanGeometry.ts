@@ -16,18 +16,18 @@
 import polygonClipping, { type MultiPolygon, type Polygon, type Ring } from 'polygon-clipping';
 import type { Cutout, GroupOp } from '@/features/bin-designer/types';
 import { DEFAULT_GROUP_OP } from '@/features/bin-designer/types';
-import { cutoutOutlineRing } from '@/shared/utils/cutoutOutline';
+import { cutoutHoleRings, cutoutOutlineRing } from '@/shared/utils/cutoutOutline';
 
 /**
- * Convert a cutout to a polygon-clipping `Polygon` (single outer ring,
- * no holes). Returns `null` for cutouts that are too degenerate to outline.
- * The ring itself comes from `@/shared/utils/cutoutOutline`, which the worker
- * and the lip-gap plan sample too, so a group's preview and its open-side
- * channels measure the same shape.
+ * Convert a cutout to a polygon-clipping `Polygon`: its outer ring, then a
+ * path's islands as holes. Returns `null` for cutouts that are too degenerate
+ * to outline. The rings come from `@/shared/utils/cutoutOutline`, which the
+ * worker and the lip-gap plan sample too, so a group's preview and its
+ * open-side channels measure the same shape.
  */
 export function cutoutToPolygon(c: Cutout): Polygon | null {
   const ring = cutoutOutlineRing(c);
-  return ring ? [ring] : null;
+  return ring ? [ring, ...cutoutHoleRings(c)] : null;
 }
 
 /**
@@ -47,10 +47,23 @@ export function applyGroupOp(
   members: readonly Cutout[],
   op: GroupOp = DEFAULT_GROUP_OP
 ): MultiPolygon | null {
-  const polygons = members
-    .map((c) => ({ cutout: c, polygon: cutoutToPolygon(c) }))
-    .filter((e): e is { cutout: Cutout; polygon: Polygon } => e.polygon !== null);
+  return combineGroupPolygons(
+    members
+      .map((c) => ({ cutout: c, polygon: cutoutToPolygon(c) }))
+      .filter((e): e is { cutout: Cutout; polygon: Polygon } => e.polygon !== null),
+    op
+  );
+}
 
+/**
+ * {@link applyGroupOp} over outlines the caller has already drawn, each with
+ * the member it stands for (its z-order picks a subtract's cutter): what lets
+ * a caller grow every member by its clearance before the op.
+ */
+export function combineGroupPolygons(
+  polygons: readonly { readonly cutout: Cutout; readonly polygon: Polygon }[],
+  op: GroupOp = DEFAULT_GROUP_OP
+): MultiPolygon | null {
   if (polygons.length === 0) return null;
   if (polygons.length === 1) return [polygons[0].polygon];
 

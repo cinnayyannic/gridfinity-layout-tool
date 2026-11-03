@@ -1,16 +1,19 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { renderHook, act, waitFor } from '@testing-library/react';
 import { useDrawInteraction } from '@/shared/hooks/interactions/useDrawInteraction';
 import { useLayoutStore } from '@/core/store/layout';
 import { useSelectionStore } from '@/core/store/selection';
 import { useInteractionStore } from '@/core/store/interaction';
-import { useHalfGridModeStore, useToastStore } from '@/core/store';
+import { useHalfGridModeStore, useSharedPreviewStore, useToastStore } from '@/core/store';
 import { useBinExampleGalleryStore } from '@/core/store/binExampleGallery';
 import { useGapFitStore } from '@/core/store/gapFit';
 import { createTestBin, resetAllStores } from '@/test/testUtils';
 import { ok } from '@/core/result';
-import { binId, gridUnits, heightUnits } from '@/core/types';
-import type { Coord } from '@/core/types';
+import { binId, designId, gridUnits, heightUnits, layerId, layoutId } from '@/core/types';
+import { registerSlantRowDesigner } from '@/shared/utils/slantRowDesign';
+import { mlTracking } from '@/shared/analytics/useMLTracking';
+import { trackPaintMode } from '@/shared/analytics/posthog';
+import type { Coord, SlantConfig } from '@/core/types';
 import type { RefObject } from 'react';
 import type {
   InteractionContext,
@@ -48,7 +51,7 @@ describe('useDrawInteraction', () => {
   const mockCtrlKeyRef: RefObject<boolean> = { current: false };
   const mockGridRef: RefObject<HTMLDivElement | null> = { current: null };
 
-  const createContext = (paintSize?: PaintSize): InteractionContext => {
+  const createContext = (paintSize?: PaintSize, paintSlant?: SlantConfig): InteractionContext => {
     const { layout } = useLayoutStore.getState();
     const { activeLayerId, activeCategoryId } = useSelectionStore.getState();
 
@@ -61,6 +64,7 @@ describe('useDrawInteraction', () => {
       activeLayerId,
       activeCategoryId,
       paintSize: paintSize ?? null,
+      paintSlant: paintSlant ?? null,
       selectedBinIds: [],
       setInteraction: mockSetInteraction,
       setDropTarget: vi.fn(),
@@ -274,6 +278,97 @@ describe('useDrawInteraction', () => {
     });
   });
 
+  describe('slanted rows', () => {
+    const slant = { angleDeg: 45, side: 'back' as const };
+
+    afterEach(() => registerSlantRowDesigner(null));
+
+    it('starts a paint drag carrying the slant', () => {
+      const paintSize = { width: 2, depth: 1 };
+      const { result } = renderHook(() => useDrawInteraction(createContext(paintSize, slant)));
+      act(() => result.current.start(coord(1, 0)));
+      expect(mockSetInteraction).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'paint', slant })
+      );
+    });
+
+    it('fills the drag with rows linked to one design, the lead carrying the support', async () => {
+      const paintSize = { width: 2, depth: 1 };
+      registerSlantRowDesigner(async () => designId('row-design'));
+      mockAddBin.mockReturnValue(ok('new-bin-id'));
+      useInteractionStore.setState({
+        interaction: { type: 'paint', paintSize, start: coord(1, 0), current: coord(2, 7), slant },
+      });
+      const { result } = renderHook(() => useDrawInteraction(createContext(paintSize, slant)));
+      act(() => result.current.handleUp());
+
+      await waitFor(() => expect(mockSetSelectedBins).toHaveBeenCalled());
+      const placed = mockAddBin.mock.calls.map(([bin]) => bin);
+      expect(placed.every((bin) => bin.linkedDesignId === 'row-design')).toBe(true);
+      expect(placed.filter((bin) => bin.slant?.endSupport)).toHaveLength(1);
+      expect(mlTracking.trackBulkCreation).toHaveBeenCalledWith(expect.any(Array), 'paint');
+      expect(trackPaintMode).toHaveBeenCalledWith('exited', placed.length);
+    });
+
+    const paintWhileSaving = async (meanwhile: () => void): Promise<void> => {
+      const paintSize = { width: 2, depth: 1 };
+      let finishSave: (id: ReturnType<typeof designId>) => void = () => undefined;
+      registerSlantRowDesigner(
+        () =>
+          new Promise((resolve) => {
+            finishSave = resolve;
+          })
+      );
+      mockAddBin.mockReturnValue(ok('new-bin-id'));
+      useInteractionStore.setState({
+        interaction: { type: 'paint', paintSize, start: coord(1, 0), current: coord(2, 7), slant },
+      });
+      const { result } = renderHook(() => useDrawInteraction(createContext(paintSize, slant)));
+      act(() => result.current.handleUp());
+
+      meanwhile();
+      await act(async () => {
+        finishSave(designId('row-design'));
+        await Promise.resolve();
+      });
+    };
+
+    it.each([
+      [
+        'the editor opens another layout',
+        () => useLayoutStore.setState({ activeLayoutId: layoutId('preview') }),
+      ],
+      [
+        'the category is deleted',
+        () => {
+          const { layout } = useLayoutStore.getState();
+          useLayoutStore.setState({
+            layout: { ...layout, categories: layout.categories.slice(1) },
+          });
+        },
+      ],
+    ])('places nothing when %s while the design saves', async (_what, meanwhile) => {
+      await paintWhileSaving(meanwhile);
+      expect(mockAddBin).not.toHaveBeenCalled();
+    });
+
+    // Every shared preview opens under the same editor id, so only the preview
+    // itself tells the first apart from the second.
+    it('places nothing when another shared preview opens while the design saves', async () => {
+      const { layout } = useLayoutStore.getState();
+      const { setSharedLayoutPreview } = useSharedPreviewStore.getState();
+      setSharedLayoutPreview(layout, 'First');
+      await paintWhileSaving(() => setSharedLayoutPreview({ ...layout }, 'Second'));
+      expect(mockAddBin).not.toHaveBeenCalled();
+    });
+
+    it('places the row when the same shared preview stays open', async () => {
+      useSharedPreviewStore.getState().setSharedLayoutPreview(useLayoutStore.getState().layout);
+      await paintWhileSaving(() => undefined);
+      expect(mockAddBin).toHaveBeenCalled();
+    });
+  });
+
   describe('fits-gap selection', () => {
     it('derives the gap constraint from the drawn selection and opens the gallery', () => {
       useInteractionStore.setState({
@@ -305,6 +400,94 @@ describe('useDrawInteraction', () => {
         targetPosition: { x: 2, y: 3, layerId: layout.layers[0].id },
       });
       expect(useBinExampleGalleryStore.getState().isOpen).toBe(true);
+    });
+
+    it('shrinks onto a gap that only a bin shorter than the layer default fits', () => {
+      // The 2×1 gap on layer 2 sits over a 10u bin in a 12u drawer: a 3u
+      // default would not fit there, but a 2u bin would.
+      const { layout } = useLayoutStore.getState();
+      const upper = layerId('upper');
+      const make = (id: string, layer: typeof upper, x: number, w: number, h: number) =>
+        createTestBin({
+          id: binId(id),
+          layerId: layer,
+          category: layout.categories[0].id,
+          x: gridUnits(x),
+          y: gridUnits(0),
+          width: gridUnits(w),
+          depth: gridUnits(1),
+          height: heightUnits(h),
+        });
+      useLayoutStore.setState({
+        layout: {
+          ...layout,
+          drawer: { ...layout.drawer, height: heightUnits(12) },
+          layers: [...layout.layers, { id: upper, name: 'Upper', height: heightUnits(3) }],
+          bins: [make('tall', layout.layers[0].id, 0, 2, 10), make('neighbour', upper, 2, 1, 2)],
+        },
+      });
+      useSelectionStore.setState({ activeLayerId: upper });
+      useInteractionStore.setState({
+        interaction: {
+          type: 'draw',
+          start: coord(0, 0),
+          current: coord(2, 0),
+          fitsGap: 'right-drag',
+        },
+      });
+
+      const { result } = renderHook(() => useDrawInteraction(createContext()));
+      act(() => {
+        result.current.handleUp();
+      });
+
+      expect(useGapFitStore.getState().constraint).toMatchObject({ maxWidth: 2, maxHeight: 2 });
+    });
+
+    it('lowers the gap height until a bin there no longer lifts clearance under a bin above', () => {
+      // Layer 2: a 2u bin with 1u clearance beside a 6u bin; layer 3: a 2u
+      // bridge over both, held by the 6u bin. The drawer allows 5u in the
+      // gap under the clearance bin, but above 3u its clearance would rise
+      // past the 6u bin and carry the bridge.
+      const { layout } = useLayoutStore.getState();
+      const [middle, top] = [layerId('middle'), layerId('top')];
+      const make = (id: string, layer: typeof middle, x: number, w: number, h: number) =>
+        createTestBin({
+          id: binId(id),
+          layerId: layer,
+          category: layout.categories[0].id,
+          x: gridUnits(x),
+          y: gridUnits(0),
+          width: gridUnits(w),
+          depth: gridUnits(1),
+          height: heightUnits(h),
+        });
+      useLayoutStore.setState({
+        layout: {
+          ...layout,
+          drawer: { ...layout.drawer, height: heightUnits(10) },
+          layers: [
+            ...layout.layers,
+            { id: middle, name: 'Middle', height: heightUnits(3) },
+            { id: top, name: 'Top', height: heightUnits(3) },
+          ],
+          bins: [
+            { ...make('tools', middle, 0, 1, 2), clearanceHeight: heightUnits(1) },
+            make('solid', middle, 1, 1, 6),
+            make('bridge', top, 0, 2, 2),
+          ],
+        },
+      });
+      useInteractionStore.setState({
+        interaction: { type: 'draw', start: coord(0, 0), current: coord(0, 0), fitsGap: 'armed' },
+      });
+
+      const { result } = renderHook(() => useDrawInteraction(createContext()));
+      act(() => {
+        result.current.handleUp();
+      });
+
+      expect(useGapFitStore.getState().constraint).toMatchObject({ maxWidth: 1, maxHeight: 3 });
     });
 
     it('derives half-grid constraints at 0.5 steps', () => {

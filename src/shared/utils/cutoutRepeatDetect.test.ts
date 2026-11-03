@@ -211,6 +211,35 @@ describe('arrangements that are not a pattern', () => {
     expect(detectRepeatPattern(placed, BIN_W, BIN_D)).toBeNull();
   });
 
+  it('declines cutouts whose depth follows the bin differently', () => {
+    const placed = asPlacedCutouts(cutout(), cfg({ cols: 3, rows: 1 }));
+    placed[1] = { ...placed[1], depthMode: 'floor', floorMm: 8 };
+
+    expect(detectRepeatPattern(placed, BIN_W, BIN_D)).toBeNull();
+  });
+
+  it('declines cutouts whose entry edges differ', () => {
+    const placed = asPlacedCutouts(cutout({ chamferWidth: 1 }), cfg({ cols: 3, rows: 1 }));
+    placed[1] = { ...placed[1], entryProfile: 'round' };
+
+    expect(detectRepeatPattern(placed, BIN_W, BIN_D)).toBeNull();
+  });
+
+  it('declines slots where only some are finger cuts', () => {
+    const placed = asPlacedCutouts(cutout({ shape: 'slot' }), cfg({ cols: 3, rows: 1 }));
+    placed[1] = { ...placed[1], finger: { bottom: 'curved' } };
+
+    expect(detectRepeatPattern(placed, BIN_W, BIN_D)).toBeNull();
+  });
+
+  it('declines pockets split along different lines', () => {
+    const split = { a: { x: 0, y: -5 }, b: { x: 0, y: 5 }, cutDepth: 4 };
+    const placed = asPlacedCutouts(cutout({ split }), cfg({ cols: 3, rows: 1 }));
+    placed[1] = { ...placed[1], split: { ...split, a: { x: 2, y: -5 } } };
+
+    expect(detectRepeatPattern(placed, BIN_W, BIN_D)).toBeNull();
+  });
+
   it('declines mixed rotations in a grid, which cannot be expressed', () => {
     const placed = asPlacedCutouts(cutout(), cfg({ cols: 3, rows: 1 }));
     placed[1] = { ...placed[1], rotation: 45 };

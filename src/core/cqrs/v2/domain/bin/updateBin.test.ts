@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { produce } from 'immer';
 import { isOk } from '@/core/result';
 import { STAGING_ID } from '@/core/constants';
-import { binId, designId, gridUnits } from '@/core/types';
+import { binId, designId, gridUnits, heightUnits, layerId } from '@/core/types';
 import { updateBin } from './updateBin';
+import { registerLinkedSlantResolver } from '@/shared/utils/placedSlant';
 import { makeLayout, makeBin } from './_testHelpers';
 
 describe('v2 bin.update', () => {
@@ -42,6 +43,59 @@ describe('v2 bin.update', () => {
       { aggregate: layout }
     );
     expect(result.ok).toBe(false);
+  });
+
+  describe('restacking', () => {
+    const twoLayers = {
+      layers: [
+        { id: layerId('layer_1'), name: 'Layer 1', height: heightUnits(3) },
+        { id: layerId('layer_2'), name: 'Layer 2', height: heightUnits(3) },
+      ],
+    };
+
+    it('refuses a height that lifts the bin on top past the drawer', () => {
+      const layout = makeLayout({
+        ...twoLayers,
+        bins: [
+          makeBin('low', { height: heightUnits(3) }),
+          makeBin('top', { layerId: layerId('layer_2'), height: heightUnits(4) }),
+        ],
+      });
+      // drawer.height = 7: 3 + 4 fits, 4 + 4 does not.
+      expect(
+        updateBin.handle({ id: 'low', updates: { height: 4 } }, { aggregate: layout }).ok
+      ).toBe(false);
+      expect(
+        updateBin.handle({ id: 'low', updates: { height: 2 } }, { aggregate: layout }).ok
+      ).toBe(true);
+    });
+
+    it('refuses clearance that the bin on top would rest on', () => {
+      const layout = makeLayout({
+        ...twoLayers,
+        bins: [
+          makeBin('low', { height: heightUnits(3) }),
+          makeBin('top', { layerId: layerId('layer_2'), height: heightUnits(2) }),
+        ],
+      });
+      const result = updateBin.handle(
+        { id: 'low', updates: { clearanceHeight: 1 } },
+        { aggregate: layout }
+      );
+      expect(result.ok).toBe(false);
+    });
+
+    it('never refuses linking or unlinking a design', () => {
+      const layout = makeLayout({
+        drawer: { width: gridUnits(6), depth: gridUnits(4), height: heightUnits(2) },
+        bins: [makeBin('over', { height: heightUnits(5), linkedDesignId: designId('d') })],
+      });
+      const result = updateBin.handle(
+        { id: 'over', updates: { linkedDesignId: null } },
+        { aggregate: layout }
+      );
+      expect(isOk(result)).toBe(true);
+    });
   });
 
   it('skips placement validation for staging bins', () => {
@@ -134,6 +188,92 @@ describe('v2 bin.update', () => {
       expect(isOk(result)).toBe(true);
       if (!isOk(result)) return;
       expect('overhang' in result.value.event.payload.changes).toBe(false);
+    });
+  });
+
+  describe('slant', () => {
+    const SLANT = { angleDeg: 40, side: 'back' as const, endSupport: true };
+
+    it('sets a placed slant and clears it with null, keeping the previous for undo', () => {
+      const layout = makeLayout({ bins: [makeBin('bin_1')] });
+      const set = updateBin.handle(
+        { id: 'bin_1', updates: { slant: SLANT } },
+        { aggregate: layout }
+      );
+      expect(isOk(set) && set.value.event.payload.changes.slant).toEqual(SLANT);
+      const slanted = makeLayout({ bins: [makeBin('bin_1', { slant: SLANT })] });
+      const cleared = updateBin.handle(
+        { id: 'bin_1', updates: { slant: null } },
+        { aggregate: slanted }
+      );
+      expect(isOk(cleared)).toBe(true);
+      if (!isOk(cleared)) return;
+      expect(cleared.value.event.payload.changes.slant).toBeUndefined();
+      expect(cleared.value.event.payload.previous.slant).toEqual(SLANT);
+    });
+
+    it('refuses a slant whose end support lands on another bin', () => {
+      const layout = makeLayout({
+        bins: [makeBin('bin_1'), makeBin('behind', { y: gridUnits(1) })],
+      });
+      const result = updateBin.handle(
+        { id: 'bin_1', updates: { slant: SLANT } },
+        { aggregate: layout }
+      );
+      expect(result.ok).toBe(false);
+    });
+
+    it('clears a slant whose support already overlaps', () => {
+      const layout = makeLayout({
+        bins: [makeBin('bin_1', { slant: SLANT }), makeBin('behind', { y: gridUnits(1) })],
+      });
+      const result = updateBin.handle(
+        { id: 'bin_1', updates: { slant: null } },
+        { aggregate: layout }
+      );
+      expect(isOk(result)).toBe(true);
+    });
+
+    describe("a design's own support coming back", () => {
+      afterEach(() => registerLinkedSlantResolver(null));
+      const behind = makeBin('behind', { y: gridUnits(1) });
+
+      it('refuses clearing a placed slant when the design support would cover a bin', () => {
+        registerLinkedSlantResolver(() => ({ config: SLANT }));
+        const linked = makeBin('bin_1', {
+          linkedDesignId: designId('d'),
+          slant: { angleDeg: 40, side: 'back' },
+        });
+        const layout = makeLayout({ bins: [linked, behind] });
+        const result = updateBin.handle(
+          { id: 'bin_1', updates: { slant: null } },
+          { aggregate: layout }
+        );
+        expect(result.ok).toBe(false);
+      });
+
+      it('refuses resetting the overhang that keeps such a bin upright', () => {
+        registerLinkedSlantResolver(() => ({ config: SLANT }));
+        const expanded = makeBin('bin_1', {
+          linkedDesignId: designId('d'),
+          overhang: { left: 5, right: 0, front: 0, back: 0 },
+        });
+        const layout = makeLayout({ bins: [expanded, behind] });
+        const result = updateBin.handle(
+          { id: 'bin_1', updates: { overhang: null } },
+          { aggregate: layout }
+        );
+        expect(result.ok).toBe(false);
+      });
+    });
+
+    // Nothing in a slant depends on where the bin stands, unlike an overhang.
+    it('keeps the slant when the bin moves', () => {
+      const layout = makeLayout({ bins: [makeBin('bin_1', { slant: SLANT })] });
+      const result = updateBin.handle({ id: 'bin_1', updates: { x: 3 } }, { aggregate: layout });
+      expect(isOk(result)).toBe(true);
+      if (!isOk(result)) return;
+      expect('slant' in result.value.event.payload.changes).toBe(false);
     });
   });
 
@@ -254,6 +394,42 @@ describe('v2 bin.update', () => {
         updateBin.apply({ type: 'bin.updated', payload: result.value.event.payload }, draft);
       });
       expect(next.bins[0].locked).toBe(true);
+    });
+  });
+
+  describe('items', () => {
+    const items = [{ id: 'i1', name: 'M3 screws', qty: 40 }];
+
+    it('sets a bin’s items and records the previous list', () => {
+      const layout = makeLayout({ bins: [makeBin('bin_1')] });
+      const result = updateBin.handle({ id: 'bin_1', updates: { items } }, { aggregate: layout });
+      expect(isOk(result)).toBe(true);
+      if (!isOk(result)) return;
+      expect(result.value.event.payload.changes.items).toEqual(items);
+      expect(result.value.event.payload.previous.items).toBeUndefined();
+    });
+
+    it('clears them with an empty list', () => {
+      const layout = makeLayout({ bins: [makeBin('bin_1', { items })] });
+      const result = updateBin.handle(
+        { id: 'bin_1', updates: { items: [] } },
+        { aggregate: layout }
+      );
+      expect(isOk(result)).toBe(true);
+      if (!isOk(result)) return;
+      expect('items' in result.value.event.payload.changes).toBe(true);
+      expect(result.value.event.payload.changes.items).toBeUndefined();
+    });
+
+    it.each([
+      ['two items sharing an id', [items[0], { ...items[0], name: 'Nuts' }]],
+      ['an empty name', [{ id: 'i1', name: '  ' }]],
+      ['a fractional quantity', [{ id: 'i1', name: 'Screws', qty: 1.5 }]],
+      ['a name past the cap', [{ id: 'i1', name: 'x'.repeat(49) }]],
+    ])('rejects %s', (_name, list) => {
+      expect(updateBin.payload.safeParse({ id: 'bin_1', updates: { items: list } }).success).toBe(
+        false
+      );
     });
   });
 });

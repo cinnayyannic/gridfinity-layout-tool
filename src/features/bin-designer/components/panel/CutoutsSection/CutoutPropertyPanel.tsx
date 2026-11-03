@@ -6,11 +6,16 @@
  */
 
 import type { Cutout } from '@/features/bin-designer/types';
-import { Button, Collapsible, SliderInput } from '@/design-system';
+import { Button, SliderInput } from '@/design-system';
+import { MoreDisclosure } from '@/shared/components/MoreDisclosure';
 import { useTranslation } from '@/i18n';
 import { clampRotationToBounds, flipCutoutHorizontal, flipCutoutVertical } from './geometry';
 import { CutoutScoopControls } from '../../CutoutWorkspace/CutoutScoopControls';
 import { CutoutShapeControls } from './CutoutShapeControls';
+import { CutoutDepthControl } from './CutoutDepthControl';
+import { isThroughCut } from '@/shared/utils/cutoutDepth';
+import { fingerBottom } from '@/shared/utils/fingerAccess';
+import { FingerAccessControls } from '../../CutoutWorkspace/FingerAccessControls';
 import { CutoutFitControls } from './CutoutFitControls';
 import { CutoutShapeBadge } from './CutoutShapeBadge';
 import { hasFitControls, formatFitSummary, repeatBlockedReason } from './cutoutSectionVisibility';
@@ -33,6 +38,7 @@ interface CutoutPropertyPanelProps {
   readonly onFitCue?: (cue: FitCue) => void;
   /** Flatten the cutout's array into independent cutouts. */
   readonly onFlattenArray?: (id: string) => void;
+  readonly onAddFingerAccess?: (id: string) => void;
   /** Offered when the Repeat section is blocked by grouping. */
   readonly onUngroup?: (ids: readonly string[]) => void;
 }
@@ -48,9 +54,12 @@ export function CutoutPropertyPanel({
   disabled = false,
   onFitCue,
   onFlattenArray,
+  onAddFingerAccess,
   onUngroup,
 }: CutoutPropertyPanelProps) {
   const t = useTranslation();
+  // A through cut has no floor, so the generator drops its floor fillet.
+  const throughCut = useDesignerStore((s) => isThroughCut(cutout, s.params));
   const setCutoutArray = useDesignerStore((s) => s.setCutoutArray);
 
   return (
@@ -58,7 +67,7 @@ export function CutoutPropertyPanel({
       <div className="border-b border-stroke-subtle pb-2">
         <CutoutShapeBadge cutout={cutout} />
       </div>
-      <Collapsible title={t('binDesigner.cutouts.section.transform')} size="sm">
+      <MoreDisclosure label={t('binDesigner.cutouts.section.transform')} defaultOpen>
         <div className="space-y-1">
           <SliderInput
             label={t('binDesigner.cutouts.positionX')}
@@ -104,14 +113,14 @@ export function CutoutPropertyPanel({
               />
             </>
           )}
-          <SliderInput
-            label={t('binDesigner.cutouts.cutDepth')}
-            value={cutout.cutDepth}
-            onChange={(cutDepth) => onUpdate(cutout.id, { cutDepth })}
-            min={0.5}
-            max={maxCutDepth}
-            step={0.5}
-            unit="mm"
+          <CutoutDepthControl
+            variant="slider"
+            cutouts={[cutout]}
+            maxCutDepth={maxCutDepth}
+            onUpdate={(updates) => {
+              const patch = updates.get(cutout.id);
+              if (patch) onUpdate(cutout.id, patch);
+            }}
             disabled={disabled}
           />
           <SliderInput
@@ -128,9 +137,9 @@ export function CutoutPropertyPanel({
             disabled={disabled}
           />
         </div>
-      </Collapsible>
+      </MoreDisclosure>
 
-      <Collapsible title={t('binDesigner.cutouts.section.shape')} size="sm">
+      <MoreDisclosure label={t('binDesigner.cutouts.section.shape')} defaultOpen>
         <div className="space-y-1">
           {cutout.shape === 'rectangle' && (
             <SliderInput
@@ -151,21 +160,29 @@ export function CutoutPropertyPanel({
             onUpdate={(patch) => onUpdate(cutout.id, patch)}
             disabled={disabled}
           />
-          <CutoutScoopControls
-            key={cutout.id}
+          {!throughCut && fingerBottom(cutout) !== 'curved' && (
+            <CutoutScoopControls
+              key={cutout.id}
+              cutout={cutout}
+              disabled={disabled}
+              onUpdate={(patch) => onUpdate(cutout.id, patch)}
+            />
+          )}
+          <FingerAccessControls
             cutout={cutout}
-            disabled={disabled}
             onUpdate={(patch) => onUpdate(cutout.id, patch)}
+            onAdd={onAddFingerAccess ? () => onAddFingerAccess(cutout.id) : undefined}
+            disabled={disabled}
           />
         </div>
-      </Collapsible>
+      </MoreDisclosure>
 
       {/* Above Fit: repeating a shape is a placement decision, so it belongs
           next to the sections used while placing one. Expanded by default —
           collapsed behind an "Off" summary is how it went unnoticed. */}
-      <Collapsible
-        title={t('binDesigner.cutouts.section.repeat')}
-        size="sm"
+      <MoreDisclosure
+        label={t('binDesigner.cutouts.section.repeat')}
+        defaultOpen
         summary={
           cutout.array
             ? t('binDesigner.cutouts.repeat.instances', {
@@ -185,13 +202,11 @@ export function CutoutPropertyPanel({
           blockedReason={repeatBlockedReason(cutout)}
           onUngroup={() => onUngroup?.([cutout.id])}
         />
-      </Collapsible>
+      </MoreDisclosure>
 
       {hasFitControls(cutout) && (
-        <Collapsible
-          title={t('binDesigner.cutouts.section.fit')}
-          size="sm"
-          defaultExpanded={false}
+        <MoreDisclosure
+          label={t('binDesigner.cutouts.section.fit')}
           summary={formatFitSummary(cutout, {
             clearance: t('binDesigner.cutouts.clearance'),
             chamfer: t('binDesigner.cutouts.chamfer'),
@@ -204,7 +219,7 @@ export function CutoutPropertyPanel({
             onCueChange={onFitCue}
             disabled={disabled}
           />
-        </Collapsible>
+        </MoreDisclosure>
       )}
 
       <div className="space-y-2">

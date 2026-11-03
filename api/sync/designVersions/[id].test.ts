@@ -5,8 +5,10 @@
  * the designer validator has to accept, and the absence of a thumbnail.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { userMeshesKey } from '../../lib/redisKeys';
+import { MESH_MISSING_STATUS } from '../lib/resourceHandler';
 
 let redisStore: Map<string, string>;
 let redisHashes: Map<string, Map<string, string>>;
@@ -29,6 +31,9 @@ const mockRedis = {
     const h = redisHashes.get(k);
     return h ? Object.fromEntries(h) : {};
   }),
+  hmget: vi.fn(async (k: string, ...fields: string[]) =>
+    fields.map((f) => redisHashes.get(k)?.get(f) ?? null)
+  ),
   pipeline: vi.fn(() => makePipeline()),
 };
 
@@ -318,6 +323,144 @@ describe('PUT', () => {
     );
 
     expect(res._status).toBe(409);
+  });
+});
+
+describe('PUT: mesh refs', () => {
+  const HELD = 'a'.repeat(64);
+  const UNHELD = 'b'.repeat(64);
+
+  function contentNaming(hash: string) {
+    return {
+      name: 'Router Bit Holder',
+      params: {
+        ...VALID_DESIGN,
+        cutouts: [{ id: 'c1', shape: 'mesh', meshId: 'm1' }],
+        meshAssets: {
+          m1: { name: 'bit', hash, triangleCount: 12, sizeMm: { x: 8, y: 8, z: 30 }, bytes: 900 },
+        },
+      },
+    };
+  }
+
+  async function put(hash: string): Promise<MockRes> {
+    const { default: handler } = await import('./[id]');
+    const res = makeRes();
+    await handler(
+      makeReq({ method: 'PUT', body: validBody({ content: contentNaming(hash) }) }),
+      res as unknown as VercelResponse
+    );
+    return res;
+  }
+
+  beforeEach(() => {
+    vi.stubEnv('MESH_STORE_ENABLED', 'true');
+    redisHashes.set(
+      userMeshesKey('user-1'),
+      new Map([[HELD, JSON.stringify({ sizeBytes: 900, url: `https://blob/meshes/${HELD}` })]])
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('stores a version whose refs name files the account holds', async () => {
+    const res = await put(HELD);
+
+    expect(res._status).toBe(200);
+    const body = res._body as {
+      envelope: { designVersion: { content: { params: { meshAssets: unknown } } } };
+    };
+    expect(body.envelope.designVersion.content.params.meshAssets).toEqual(
+      contentNaming(HELD).params.meshAssets
+    );
+  });
+
+  it('answers 424 listing a file the account lacks, and stores nothing', async () => {
+    const res = await put(UNHELD);
+
+    expect(res._status).toBe(MESH_MISSING_STATUS);
+    expect(res._body).toMatchObject({ code: 'MESH_MISSING', missing: [UNHELD] });
+    expect(blobStore.size).toBe(0);
+  });
+});
+
+describe('PUT: imported mesh versions', () => {
+  const HELD = 'a'.repeat(64);
+  const UNHELD = 'b'.repeat(64);
+
+  function importedContent(hash: string, structureExtra: Record<string, unknown> = {}) {
+    return {
+      name: 'Parts bin',
+      kind: 'importedMesh',
+      envelope: {
+        width: 2,
+        depth: 1.5,
+        gridUnitMm: 42,
+        heightUnitMm: 7,
+        attachment: {
+          magnetHoles: false,
+          magnetDiameter: 6.5,
+          magnetDepth: 2.4,
+          screwHoles: false,
+          screwDiameter: 3,
+        },
+        featureColors: { enabled: false },
+      },
+      structure: {
+        kind: 'importedMesh',
+        heightUnits: 4,
+        asset: { name: 'bin', hash, triangleCount: 4, sizeMm: { x: 83, y: 62, z: 28 }, bytes: 900 },
+        sourceFileName: 'parts_bin.stl',
+        ...structureExtra,
+      },
+    };
+  }
+
+  async function put(content: unknown): Promise<MockRes> {
+    const { default: handler } = await import('./[id]');
+    const res = makeRes();
+    await handler(
+      makeReq({ method: 'PUT', body: validBody({ content }) }),
+      res as unknown as VercelResponse
+    );
+    return res;
+  }
+
+  beforeEach(() => {
+    vi.stubEnv('MESH_STORE_ENABLED', 'true');
+    redisHashes.set(
+      userMeshesKey('user-1'),
+      new Map([[HELD, JSON.stringify({ sizeBytes: 900, url: `https://blob/meshes/${HELD}` })]])
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('stores a version of an imported mesh design whose ref the account holds', async () => {
+    const res = await put(importedContent(HELD));
+
+    expect(res._status).toBe(200);
+    const body = res._body as { envelope: { designVersion: { content: unknown } } };
+    expect(body.envelope.designVersion.content).toEqual(importedContent(HELD));
+  });
+
+  it('answers 424 for a ref the account lacks, and stores nothing', async () => {
+    const res = await put(importedContent(UNHELD));
+
+    expect(res._status).toBe(MESH_MISSING_STATUS);
+    expect(res._body).toMatchObject({ code: 'MESH_MISSING', missing: [UNHELD] });
+    expect(blobStore.size).toBe(0);
+  });
+
+  it('rejects a structure the mirror refuses with 400', async () => {
+    const res = await put(importedContent(HELD, { heightUnits: 0 }));
+
+    expect(res._status).toBe(400);
+    expect((res._body as { error: string }).error).toContain('structure.heightUnits');
   });
 });
 

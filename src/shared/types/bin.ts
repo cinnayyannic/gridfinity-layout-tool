@@ -10,6 +10,7 @@ import type {
   MagnetAnchor,
   OutlineOverhang,
   ScrewHoleParams,
+  MountMagnetParams,
   SplitOverride,
   StackPrintParams,
 } from '@/core/types';
@@ -51,6 +52,8 @@ export type {
   Cutout,
   CutoutShape,
   CutoutColorScope,
+  CutoutDepthMode,
+  CutoutEntryProfile,
   CutoutConfig,
   CutoutArrayConfig,
   CutoutScoopEdges,
@@ -67,6 +70,10 @@ export type {
   SplitConnectorConfig,
   WallConnectorStyle,
   HandleConfig,
+  PullTabConfig,
+  PullTabWall,
+  PullTabOuterWall,
+  PullTabCenterAxis,
   HandleCutoutShape,
   HandleSide,
   HandleWallSide,
@@ -105,7 +112,9 @@ export type {
   TextStyleOverride,
   SurfaceTextConfig,
   WallTextSide,
+  WallTextFace,
   WallTextVerticalAlign,
+  TextQuarterTurn,
   DividerOverride,
   OverhangConfig,
   WallTaperConfig,
@@ -117,6 +126,9 @@ export type {
 
 export {
   MIN_PATH_POINTS,
+  MAX_CUTOUT_FLOOR_MM,
+  MAX_PATH_POINTS,
+  MAX_CUTOUT_HOLES,
   DEFAULT_KNIFE_SPEC,
   knifeSlotDimensions,
   knifeBlockTopZMm,
@@ -237,6 +249,8 @@ export {
   lidGripRequestedDepthMm,
   lidGripHeightMm,
   hasLidGrip,
+  lidHasFill,
+  lidFillBottomZ,
   hasBinLipDip,
   lidGripModeAllowed,
   DEFAULT_SCOOP_EDGES,
@@ -269,6 +283,8 @@ export {
   matchTextPreset,
   normalizeTextInput,
   resolveTextStyle,
+  resolveWallTextStyle,
+  resolveFloorTextStyle,
   snapToTypeScale,
   splitTextLines,
   MIN_POLYGON_SIDES,
@@ -294,7 +310,11 @@ export {
   FLOOR_PATTERN_TYPES,
   DEFAULT_FLOOR_PATTERN_CONFIG,
   WALL_TEXT_SIDES,
+  WALL_TEXT_FACES,
   WALL_TEXT_ALIGNS,
+  isTextQuarterTurn,
+  topRowAnchor,
+  wallTextFace,
   // A base-only bin's body IS this slab, so the worker and the height readout
   // have to resolve its thickness through the same function.
   resolveTileFloorThickness,
@@ -323,6 +343,7 @@ export {
   binFloorMm,
   DETACHABLE_PIN_TARGET_ENGAGEMENT_MM,
   DETACHABLE_PIN_LEAD_IN_MM,
+  DETACHABLE_PIN_END_CLEARANCE_MM,
 } from '@/features/bin-designer/types';
 
 /**
@@ -347,6 +368,7 @@ export {
  * against different bins.
  */
 export { slideLidPlanForParams } from '@/features/bin-designer/utils/slideLidPlanForParams';
+export { binDimensions } from '@/features/bin-designer/utils/binDimensions';
 
 /**
  * Re-export compartment-edge predicates so worker-side feature builders
@@ -635,6 +657,13 @@ export interface ResolvedBaseplateParams {
    * built for it. Absent ⇒ standard.
    */
   readonly lowProfileBase?: boolean;
+  /**
+   * Millimetres planed off the plate top, set only while stack printing. The
+   * grid ridges come to a zero-width edge there, which is exactly where the
+   * stacked plates meet, and a slicer drops the sub-line slivers; see
+   * `STACK_SEAM_TRIM_MM`.
+   */
+  readonly stackSeamTrimMm?: number;
   readonly paddingLeft: number;
   readonly paddingRight: number;
   readonly paddingFront: number;
@@ -711,6 +740,12 @@ export interface ResolvedBaseplateParams {
    * carry nothing and stay byte-identical to unshifted plates.
    */
   readonly outlineOverhang?: OutlineOverhang;
+  /**
+   * The {@link outline} only rounds the plate's corners. Geometry reads the
+   * outline; stack flip planning reads this to plan the plate like plain
+   * rounding rather than a shape.
+   */
+  readonly outlineIsCornerRounding?: boolean;
   /** Enable registration nubs/holes on join edges for split piece alignment. */
   readonly connectorNubs?: boolean;
   /** Swap tongue/groove convention on all join edges (default false). */
@@ -758,6 +793,8 @@ export interface ResolvedBaseplateParams {
   readonly nozzleSizeMm?: number;
   /** Remove center floor material, keeping only magnet pads. */
   readonly lightweight?: boolean;
+  /** Hollow the straight grid joints while retaining corner posts and a bottom bridge. */
+  readonly ecoPlate?: boolean;
   /**
    * Leave a solid floor under every socket instead of through-cutting the
    * pockets — a rigid/weighted plate. The floor is added below the 5mm socket
@@ -782,6 +819,8 @@ export interface ResolvedBaseplateParams {
    * out stepped. Never recompute this per piece.
    */
   readonly screwPadThicknessMm?: number;
+  /** Underside mount magnets. Omitted ⇒ none. */
+  readonly mountMagnets?: MountMagnetParams;
   /** Uniform outer corner radius in mm. */
   readonly cornerRadius?: number;
   /** Per-corner radius overrides (tl/tr/bl/br in mm). */

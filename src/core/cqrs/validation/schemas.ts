@@ -10,6 +10,7 @@
 
 import * as z from 'zod';
 import { CONSTRAINTS } from '@/core/constants';
+import { binItemsSchema } from './binItems';
 import {
   SOLID_FLOOR_MIN_MM,
   SOLID_FLOOR_MAX_MM,
@@ -20,6 +21,14 @@ import {
   SCREW_COUNTERBORE_MAX_DEPTH_MM,
   SCREWS_PER_PIECE_MIN,
   SCREWS_PER_PIECE_MAX,
+  SCREW_EDGE_INSET_CELLS_MIN,
+  SCREW_EDGE_INSET_CELLS_MAX,
+  MOUNT_MAGNET_MIN_DIAMETER_MM,
+  MOUNT_MAGNET_MAX_DIAMETER_MM,
+  MOUNT_MAGNET_MIN_DEPTH_MM,
+  MOUNT_MAGNET_MAX_DEPTH_MM,
+  MOUNT_MAGNETS_PER_PIECE_MIN,
+  MOUNT_MAGNETS_PER_PIECE_MAX,
 } from '@/core/baseplateDefaults';
 import { STACK_PRINT_MIN_GAP_MM, STACK_PRINT_MAX_GAP_MM } from '@/core/types';
 import { BASEPLATE_CONNECTOR_STYLES } from '@/shared/types/bin';
@@ -39,6 +48,7 @@ import {
 } from './librarySchemas';
 import { designerSaveSchema } from './designerSchemas';
 import { drawerOutlineSchema } from './outlineSchema';
+import { slantSchema } from './slant';
 /** Branded string IDs are strings at runtime */
 const binIdSchema = z.string().min(1);
 const layerIdSchema = z.string().min(1);
@@ -83,9 +93,11 @@ const binAddSchema = z.object({
   label: labelStr,
   notes: notesStr,
   customProperties: z.record(z.string(), z.string()).optional(),
+  items: binItemsSchema.optional(),
   linkedDesignId: z.string().optional(),
   pairId: z.string().min(1).optional(),
   pairRole: z.enum(['block', 'rest']).optional(),
+  slant: slantSchema.optional(),
 });
 
 /** Partial bin fields for updates */
@@ -102,6 +114,7 @@ const binPartialSchema = z
     label: labelStr,
     notes: notesStr,
     customProperties: z.record(z.string(), z.string()),
+    items: binItemsSchema,
     linkedDesignId: z.string().nullable(),
     extendToMargin: z.boolean(),
     marginTaper: z.object({
@@ -124,6 +137,7 @@ const binPartialSchema = z
     locked: z.boolean(),
     pairId: z.string().min(1).nullable(),
     pairRole: z.enum(['block', 'rest']).nullable(),
+    slant: slantSchema.nullable(),
     id: binIdSchema,
   })
   .partial();
@@ -312,6 +326,7 @@ const baseplateParamsSchema = z.object({
   connectorStyle: z.enum(BASEPLATE_CONNECTOR_STYLES).optional(),
   lightweight: z.boolean().optional(),
   solidFloor: z.boolean().optional(),
+  ecoPlate: z.boolean().optional(),
   solidFloorThickness: z.number().min(SOLID_FLOOR_MIN_MM).max(SOLID_FLOOR_MAX_MM).optional(),
   syncWithLayout: z.boolean().optional(),
   baseplateWidth: z.number().min(CONSTRAINTS.GRID_MIN).max(CONSTRAINTS.GRID_MAX).optional(),
@@ -352,6 +367,27 @@ const baseplateParamsSchema = z.object({
         .min(SCREWS_PER_PIECE_MIN)
         .max(SCREWS_PER_PIECE_MAX)
         .optional(),
+      edgeInsetCells: z
+        .number()
+        .int()
+        .min(SCREW_EDGE_INSET_CELLS_MIN)
+        .max(SCREW_EDGE_INSET_CELLS_MAX)
+        .optional(),
+      cellCorner: z.enum(['outer', 'inner']).optional(),
+    })
+    .optional(),
+  mountMagnets: z
+    .object({
+      enabled: z.boolean(),
+      diameter: z.number().min(MOUNT_MAGNET_MIN_DIAMETER_MM).max(MOUNT_MAGNET_MAX_DIAMETER_MM),
+      depth: z.number().min(MOUNT_MAGNET_MIN_DEPTH_MM).max(MOUNT_MAGNET_MAX_DEPTH_MM),
+      perPiece: z
+        .number()
+        .int()
+        .min(MOUNT_MAGNETS_PER_PIECE_MIN)
+        .max(MOUNT_MAGNETS_PER_PIECE_MAX)
+        .optional(),
+      chamfer: z.boolean().optional(),
     })
     .optional(),
 });

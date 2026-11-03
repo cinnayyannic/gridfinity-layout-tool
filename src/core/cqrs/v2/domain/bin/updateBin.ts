@@ -10,6 +10,7 @@ import type { Result, ValidationError, LayoutError } from '@/core/result';
 import { ok, err } from '@/core/result';
 import { STAGING_ID, CONSTRAINTS } from '@/core/constants';
 import { canPlaceBin } from '@/shared/utils/validation';
+import { sanitizeBinItems } from '@/shared/utils/binItems';
 import { toPlacementError } from '@/core/store/layout/helpers';
 import { layoutInvalidOperation } from '@/core/result';
 import type { Bin, BinId } from '@/core/types';
@@ -22,6 +23,8 @@ import {
   heightUnits,
 } from '@/core/types';
 import { defineCommand } from '../../defineCommand';
+import { binItemsSchema } from '../../../validation/binItems';
+import { slantSchema } from '../../../validation/slant';
 
 /** Explicit per-placement overhang (mm). `null` clears it (inspector Reset). */
 const overhangSchema = z
@@ -48,6 +51,7 @@ const updatesSchema = z
     label: z.string().max(CONSTRAINTS.LABEL_MAX_LENGTH),
     notes: z.string().max(CONSTRAINTS.NOTES_MAX_LENGTH),
     customProperties: z.record(z.string(), z.string()),
+    items: binItemsSchema,
     linkedDesignId: z.string().nullable(),
     extendToMargin: z.boolean(),
     marginTaper: z.object({
@@ -61,6 +65,7 @@ const updatesSchema = z
     // `null` unpairs (the wire form of "clear", like overhang).
     pairId: z.string().min(1).nullable(),
     pairRole: z.enum(['block', 'rest']).nullable(),
+    slant: slantSchema.nullable(),
   })
   .partial();
 
@@ -88,6 +93,7 @@ function brandUpdates(updates: z.infer<typeof updatesSchema>): Partial<Bin> {
   if (updates.label !== undefined) result.label = updates.label;
   if (updates.notes !== undefined) result.notes = updates.notes;
   if (updates.customProperties !== undefined) result.customProperties = updates.customProperties;
+  if (updates.items !== undefined) result.items = sanitizeBinItems(updates.items);
   if (updates.linkedDesignId !== undefined)
     result.linkedDesignId =
       updates.linkedDesignId === null ? undefined : toDesignId(updates.linkedDesignId);
@@ -98,6 +104,7 @@ function brandUpdates(updates: z.infer<typeof updatesSchema>): Partial<Bin> {
   if (updates.locked !== undefined) result.locked = updates.locked;
   if (updates.pairId !== undefined) result.pairId = updates.pairId ?? undefined;
   if (updates.pairRole !== undefined) result.pairRole = updates.pairRole ?? undefined;
+  if (updates.slant !== undefined) result.slant = updates.slant ?? undefined;
   return result;
 }
 
@@ -173,10 +180,26 @@ export const updateBin = defineCommand({
 
     const merged: Bin = { ...existing, ...changes };
 
-    if (spatial && merged.layerId !== STAGING_ID) {
+    // A new height or clearance moves every bin resting on this one, and a
+    // change to the slant, or to the overhang that keeps a bin upright, can
+    // bring an end support back, so each is validated like a move. Linking is
+    // not: the rise it brings is derived from the design, and unlinking a
+    // deleted design must never be refused.
+    const restacks = changes.height !== undefined || 'clearanceHeight' in changes;
+    const reslants = 'slant' in changes || 'overhang' in changes || 'extendToMargin' in changes;
+
+    if ((spatial || restacks || reslants) && merged.layerId !== STAGING_ID) {
       const rect = { x: merged.x, y: merged.y, width: merged.width, depth: merged.depth };
       const validationResult = canPlaceBin(
-        { ...rect, height: merged.height, linkedDesignId: merged.linkedDesignId },
+        {
+          ...rect,
+          height: merged.height,
+          clearanceHeight: merged.clearanceHeight,
+          linkedDesignId: merged.linkedDesignId,
+          slant: merged.slant,
+          extendToMargin: merged.extendToMargin,
+          overhang: merged.overhang,
+        },
         merged.layerId,
         ctx.aggregate,
         id

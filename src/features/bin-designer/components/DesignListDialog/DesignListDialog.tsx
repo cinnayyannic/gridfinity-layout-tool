@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useState, useMemo, useRef } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import { isOk } from '@/core/result';
+import { isErr, isOk } from '@/core/result';
 import {
   listDesigns,
   deleteDesign,
@@ -34,8 +34,9 @@ import { DesignItemsView } from './DesignItemsView';
 import { filterAndSortDesigns, SORT_OPTIONS, SORT_OPTION_KEYS } from './designListSort';
 import { groupByLineage, branchesOf } from './designLineage';
 import type { SortOption } from './designListSort';
-import { removeRegistryEntry } from '../../store/customBinRegistry';
+import { removeRegistryEntry, renameRegistryEntry } from '../../store/customBinRegistry';
 import { useDesignerStore } from '../../store';
+import { settleDesignSaves } from '../../hooks/designSaveGate';
 import { useFeatureFlag } from '@/shared/hooks/useFeatureFlag';
 import type { ItemKind } from '@/shared/types/item';
 import { useDesignerRouting } from '@/shared/hooks/useDesignerRouting';
@@ -43,7 +44,7 @@ import { useFocusTrap } from '@/shared/hooks/useFocusTrap';
 import { useToastStore } from '@/core/store/toast';
 import { showErrorToast } from '@/shared/hooks/useResultToast';
 import { useSettingsStore } from '@/core/store/settings';
-import { useResponsive } from '@/shared/hooks';
+import { useLatestRef, useResponsive } from '@/shared/hooks';
 import { ItemListShell } from '@/shared/components';
 import { DesignImportView } from '../DesignImportView';
 import { ImportBinDialog, useImportBinDesign } from '../ImportBinDialog';
@@ -108,10 +109,11 @@ export function DesignListDialog({ open, onClose }: DesignListDialogProps) {
   });
 
   const loadDesign = useDesignerStore((s) => s.loadDesign);
+  const openRef = useLatestRef(open);
   const newDesign = useDesignerStore((s) => s.newDesign);
   const workshopEnabled = useFeatureFlag('workshop');
   const currentDesignId = useDesignerStore((s) => s.currentDesignId);
-  const { navigateToDesign, syncUrlToDesign } = useDesignerRouting();
+  const { navigateToDesign, syncUrlToDesign, designIdFromUrl } = useDesignerRouting();
   const addToast = useToastStore((s) => s.addToast);
 
   const handleImportedBinSaved = useCallback(
@@ -135,8 +137,17 @@ export function DesignListDialog({ open, onClose }: DesignListDialogProps) {
   const handleDownloadJSON = useCallback(
     (design: SavedDesign) => {
       if (!design.params) return;
-      downloadDesignAsFile(design.name, design.params);
-      addToast({ message: t('binDesigner.downloadDesignJson'), type: 'success', duration: 2000 });
+      void downloadDesignAsFile(design.name, design.params).then((result) => {
+        if (isOk(result)) {
+          addToast({
+            message: t('binDesigner.downloadDesignJson'),
+            type: 'success',
+            duration: 2000,
+          });
+        } else if (result.error.code === 'STORAGE_MESH_MISSING') {
+          addToast(t('toast.meshFileMissing'), 'error');
+        }
+      });
     },
     [addToast, t]
   );
@@ -232,17 +243,19 @@ export function DesignListDialog({ open, onClose }: DesignListDialogProps) {
 
   const handleLoad = useCallback(
     (design: SavedDesign) => {
-      // If clicking the active design, just close the modal
-      if (design.id === currentDesignId) {
+      // The active design just closes the modal, unless another pick is still
+      // loading: navigating back here is what supersedes it.
+      if (design.id === currentDesignId && designIdFromUrl === currentDesignId) {
         onClose();
         return;
       }
-      loadDesign(design);
+      // Through the URL rather than from this list's copy, which was read when
+      // the dialog opened: the URL load waits for the open design's edits to
+      // land first, and a variant of it picks up that change.
       navigateToDesign(design.id);
-      addToast({ message: `Loaded "${design.name}"`, type: 'success', duration: 2000 });
       onClose();
     },
-    [loadDesign, navigateToDesign, addToast, onClose, currentDesignId]
+    [navigateToDesign, onClose, currentDesignId, designIdFromUrl]
   );
 
   const [showNewDesignConfirm, setShowNewDesignConfirm] = useState(false);
@@ -251,13 +264,22 @@ export function DesignListDialog({ open, onClose }: DesignListDialogProps) {
   const [pendingNewKind, setPendingNewKind] = useState<ItemKind>('bin');
 
   const createNewDesign = useCallback(
-    (kind: ItemKind) => {
+    async (kind: ItemKind) => {
+      const openDesignId = useDesignerStore.getState().currentDesignId;
+      // Replacing the editor drops the open design's only in-memory copy.
+      const saved = await settleDesignSaves();
+      // Dismissed or moved on while the saves landed: no longer asked for.
+      if (!openRef.current || useDesignerStore.getState().currentDesignId !== openDesignId) return;
+      if (!saved) {
+        addToast({ message: t('header.saveFailed'), type: 'error', duration: 4000 });
+        return;
+      }
       newDesign(kind === 'bin' ? undefined : kind);
       syncUrlToDesign(null);
       addToast({ message: t('binDesigner.newDesignCreated'), type: 'success', duration: 2000 });
       onClose();
     },
-    [newDesign, syncUrlToDesign, addToast, onClose, t]
+    [newDesign, syncUrlToDesign, addToast, onClose, t, openRef]
   );
 
   const handleNewDesign = useCallback(
@@ -268,13 +290,13 @@ export function DesignListDialog({ open, onClose }: DesignListDialogProps) {
         setShowNewDesignConfirm(true);
         return;
       }
-      createNewDesign(kind);
+      void createNewDesign(kind);
     },
     [createNewDesign]
   );
 
   const handleConfirmNewDesign = useCallback(() => {
-    createNewDesign(pendingNewKind);
+    void createNewDesign(pendingNewKind);
   }, [createNewDesign, pendingNewKind]);
 
   const handleOpenOptionsMenu = useCallback((e: ReactMouseEvent<HTMLButtonElement>) => {
@@ -290,7 +312,13 @@ export function DesignListDialog({ open, onClose }: DesignListDialogProps) {
 
   const handleRename = useCallback(
     async (design: SavedDesign, newName: string) => {
-      await saveDesign({ ...design, name: newName });
+      const saved = await saveDesign({ ...design, name: newName });
+      if (!isOk(saved)) {
+        showErrorToast(saved.error);
+        return;
+      }
+      const registry = renameRegistryEntry(design.id, newName);
+      if (!isOk(registry)) showErrorToast(registry.error);
       setDesigns((prev) => prev.map((d) => (d.id === design.id ? { ...d, name: newName } : d)));
       if (design.id === currentDesignId) {
         useDesignerStore.getState().setDesignName(newName);
@@ -325,6 +353,12 @@ export function DesignListDialog({ open, onClose }: DesignListDialogProps) {
   // between this and Duplicate becomes visible.
   const handleCreateVariant = useCallback(
     async (design: SavedDesign) => {
+      // The variant is built from the parent's stored params, and a parent
+      // save that lands mid-creation would enumerate variants before this one.
+      if (!(await settleDesignSaves())) {
+        addToast({ message: t('header.saveFailed'), type: 'error', duration: 4000 });
+        return;
+      }
       const name = `${design.name} (${t('binDesigner.variants.label')})`;
       const result = await createVariant(design.id, name, {});
       if (isOk(result)) {
@@ -340,14 +374,15 @@ export function DesignListDialog({ open, onClose }: DesignListDialogProps) {
         // Opened rather than just listed. A variant is created with no claims,
         // so it is identical to its parent until the user claims something, and
         // leaving them in the list to find it makes the next step invisible.
-        loadDesign(result.value);
+        // Through the URL, like handleLoad: the parent's pending edit lands and
+        // propagates into the new variant before it is read.
         navigateToDesign(result.value.id);
         onClose();
       } else {
         showErrorToast(result.error);
       }
     },
-    [addToast, t, loadDesign, navigateToDesign, onClose]
+    [addToast, t, navigateToDesign, onClose]
   );
 
   const handleDelete = useCallback(
@@ -462,16 +497,21 @@ export function DesignListDialog({ open, onClose }: DesignListDialogProps) {
   const handleBulkExport = useCallback(() => {
     const ids = selection.selectedIds;
     const targets = designs.filter((d) => ids.has(d.id));
-    for (const d of targets) {
-      if (d.params) downloadDesignAsFile(d.name, d.params);
-    }
-    if (targets.length > 0) {
-      addToast({
-        message: t('binDesigner.bulk.toastExported', { count: targets.length }),
-        type: 'success',
-        duration: 2000,
-      });
-    }
+    const downloads = targets.flatMap((d) =>
+      d.params ? [downloadDesignAsFile(d.name, d.params)] : []
+    );
+    void Promise.all(downloads).then((results) => {
+      const failed = results.filter(isErr);
+      if (failed.some((result) => result.error.code === 'STORAGE_MESH_MISSING')) {
+        addToast(t('toast.meshFileMissing'), 'error');
+      } else if (failed.length === 0 && targets.length > 0) {
+        addToast({
+          message: t('binDesigner.bulk.toastExported', { count: targets.length }),
+          type: 'success',
+          duration: 2000,
+        });
+      }
+    });
     selection.exit();
   }, [selection, designs, addToast, t]);
 

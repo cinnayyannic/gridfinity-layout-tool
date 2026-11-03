@@ -10,6 +10,8 @@ import type {
   WallPatternType,
   TextAnchor,
   WallPatternSides,
+  WallTextFace,
+  WallTextSide,
 } from '@/features/bin-designer/types';
 import type { Side } from '../shared';
 import {
@@ -21,8 +23,10 @@ import {
   WALL_PATTERN_SIDES,
   WALL_TEXT_SIDES,
   isKumikoPattern,
+  wallTextFace,
 } from '@/features/bin-designer/types';
 import { isPartialMask } from '@/shared/utils/cellMask';
+import { insideWallTextBlock } from '@/shared/utils/insideWallTextPlan';
 import {
   LABEL_PLATE_HEIGHT_MM,
   effectiveLabelSocketClearance,
@@ -38,6 +42,7 @@ import { slottedWalls } from '@/shared/utils/slotMath';
 import { resolveWallPatternSides } from '@/shared/utils/wallPatternSides';
 import { assessDividerPatternFit } from '@/features/bin-designer/utils/dividerPatternFit';
 import { getCompartmentCount } from '@/features/bin-designer/utils/compartments';
+import { formatCompactMm } from '@/features/bin-designer/utils/compartmentDimensions';
 import type { SnappingSliderOption } from '../../controls/SnappingSlider';
 
 export function useWallsSection() {
@@ -51,6 +56,8 @@ export function useWallsSection() {
     clearWallText,
     setSurfaceTextAnchor,
     setSurfaceTextStyle,
+    setWallTextFace,
+    setInsideTextAnchor,
     updateWallLabelSlots,
     currentDesignId,
   } = useDesignerStore(
@@ -64,6 +71,8 @@ export function useWallsSection() {
       clearWallText: s.clearWallText,
       setSurfaceTextAnchor: s.setSurfaceTextAnchor,
       setSurfaceTextStyle: s.setSurfaceTextStyle,
+      setWallTextFace: s.setWallTextFace,
+      setInsideTextAnchor: s.setInsideTextAnchor,
       updateWallLabelSlots: s.updateWallLabelSlots,
       currentDesignId: s.currentDesignId,
     }))
@@ -169,6 +178,14 @@ export function useWallsSection() {
     return undefined;
   }, [wallPattern.pattern, params, slotBlocked, t]);
 
+  // The pattern is sized to the nominal wall, so the extra wall height above it
+  // stays solid. A bin made taller that way looks like a pattern that stopped short.
+  const extraWallMm = params.base.tile === true ? 0 : Math.max(0, params.extraWallHeightMm ?? 0);
+  const patternCollarNote =
+    extraWallMm > 0 && patternInertReason === undefined && activePatternSideCount > 0
+      ? t('binDesigner.walls.pattern.collarNote', { mm: formatCompactMm(extraWallMm) })
+      : undefined;
+
   // ── Divider walls ─────────────────────────────────────────────────
   // The same pattern and scale carried through the compartment dividers, so a
   // patterned bin doesn't read as hollow walls around solid dividers.
@@ -254,6 +271,21 @@ export function useWallsSection() {
   const wallTextDisabledReason = isPartialMask(params.cellMask)
     ? t('binDesigner.walls.text.disabledPolygon')
     : undefined;
+
+  const wallTextFaces = Object.fromEntries(
+    WALL_TEXT_SIDES.map((side) => [side, wallTextFace(params.surfaceText, side)])
+  ) as Record<WallTextSide, WallTextFace>;
+  const anyWallTextInside = WALL_TEXT_SIDES.some((side) => wallTextFaces[side] === 'inside');
+  const insideTextAnchor: TextAnchor = params.surfaceText?.insideStyle?.anchor ?? wallTextAnchor;
+  const insideFaceBlocks = Object.fromEntries(
+    WALL_TEXT_SIDES.map((side) => [side, insideWallTextBlock(params, side)])
+  ) as Record<WallTextSide, ReturnType<typeof insideWallTextBlock>>;
+  // Solid blocks every wall at once, so it is said once for the section; a
+  // scoop blocks its own wall and is said under that wall.
+  const insideFaceSolidNote = WALL_TEXT_SIDES.some((side) => insideFaceBlocks[side] === 'solid')
+    ? t('binDesigner.walls.text.face.solidNote')
+    : undefined;
+  const insideFaceScoopNote = t('binDesigner.walls.text.face.scoopNote');
 
   // Wall-text is gated behind a toggle (matching the sibling cutout/handle
   // sections). The open state is UI-only — deriving it as `local || hasText`
@@ -403,6 +435,7 @@ export function useWallsSection() {
       patternSideBlocked: slotBlocked,
       patternSidesNote,
       patternInertReason,
+      patternCollarNote,
       dividersEnabled,
       dividersAvailableReason,
       dividersNote,
@@ -411,6 +444,12 @@ export function useWallsSection() {
       wallTextMode,
       hasAnyWallText,
       wallTextDisabledReason,
+      wallTextFaces,
+      anyWallTextInside,
+      insideTextAnchor,
+      insideFaceBlocks,
+      insideFaceSolidNote,
+      insideFaceScoopNote,
       isWallTextOpen,
       labelSlotsEnabled: labelSlots.enabled,
       labelSlotSides: labelSlots.sides,
@@ -431,6 +470,8 @@ export function useWallsSection() {
       handleDividersChange,
       commitWallTextAt,
       setSurfaceTextAnchor,
+      setWallTextFace,
+      setInsideTextAnchor,
       setTextMode,
       toggleWallText,
       toggleLabelSlots,

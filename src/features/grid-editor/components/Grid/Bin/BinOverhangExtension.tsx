@@ -19,10 +19,12 @@
 
 import { useShallow } from 'zustand/react/shallow';
 import { useLayoutStore } from '@/core/store';
+import { useLinkedDesignKinds } from '@/shared/hooks/useLinkedDesignKinds';
 import { binOverhangSides } from '@/shared/utils/drawerMargin';
 import { effectiveGridUnitMmY } from '@/core/types';
 import type { Bin, Drawer } from '@/core/types';
 import type { CategoryPatternStyle } from './categoryPatterns';
+import { BinSlantExtension } from './BinSlantExtension';
 
 interface BinOverhangExtensionProps {
   bin: Bin;
@@ -61,9 +63,28 @@ export function BinOverhangExtension({
       gridUnitMmY: effectiveGridUnitMmY(s.layout),
     }))
   );
+  const designKinds = useLinkedDesignKinds();
 
-  const sides = binOverhangSides(bin, drawer, baseplate);
-  if (sides.left + sides.right + sides.front + sides.back <= 0) return null;
+  const linkedId = bin.linkedDesignId;
+  const sides = binOverhangSides(
+    bin,
+    drawer,
+    baseplate,
+    linkedId === undefined ? undefined : designKinds.get(linkedId)
+  );
+  // An overhang keeps a bin upright, so a bin reaches past its footprint one
+  // way or the other, never both.
+  if (sides.left + sides.right + sides.front + sides.back <= 0) {
+    return (
+      <BinSlantExtension
+        bin={bin}
+        cellSize={cellSize}
+        cellSizeY={cellSizeY}
+        gap={gap}
+        color={color}
+      />
+    );
+  }
 
   // One grid unit spans `cellSize + gap` px across and `cellSizeY + gap` down;
   // overhang is a fraction of a unit. The two axes need separate conversions —

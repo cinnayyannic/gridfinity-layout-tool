@@ -11,12 +11,83 @@ import {
 } from '@/core/storage';
 import type { AdapterChange, AdapterChangeListener, LayoutAdapter, SyncableItem } from './types';
 import { syncPersistError } from './persistError';
+import { LAYOUT_SCHEMA_VERSION } from '../payloadKey';
 
 // Wider than `Bin` because legacy cloud blobs (pre-validator-fix) literally
 // omit `notes`/`label`. Without this the runtime guard below reads as
 // unreachable to TypeScript.
 type IncomingBin = Omit<Bin, 'notes' | 'label'> & { notes?: unknown; label?: unknown };
 type IncomingLayout = Omit<Layout, 'bins'> & { bins: IncomingBin[] };
+
+/**
+ * Before schema 2 the server rebuilt layouts without `drawer.measuredMm`,
+ * `baseplateParams` and `activeBaseplateId`, before schema 3 it rebuilt bins
+ * without their drawer-fit fields, before schema 4 without their items, and
+ * before schema 5 without their slant, so their absence in an older copy says
+ * nothing about the other device. This
+ * device's values stand in for them.
+ */
+function restoreStrippedFields(remote: Layout, local: Layout, schemaVersion: number): Layout {
+  const withDrawer = schemaVersion < 2 ? restoreDrawerFields(remote, local) : remote;
+  return schemaVersion < 5 ? restoreBinFields(withDrawer, local, schemaVersion) : withDrawer;
+}
+
+function keepLocal<K extends keyof Bin>(remote: Bin, local: Bin, key: K): Partial<Pick<Bin, K>> {
+  return remote[key] === undefined && local[key] !== undefined
+    ? ({ [key]: local[key] } as Pick<Bin, K>)
+    : {};
+}
+
+function samePlacement(a: Bin, b: Bin): boolean {
+  return (
+    a.layerId === b.layerId &&
+    a.x === b.x &&
+    a.y === b.y &&
+    a.width === b.width &&
+    a.depth === b.depth
+  );
+}
+
+function restoredFitFields(remote: Bin, local: Bin): Partial<Bin> {
+  return {
+    ...keepLocal(remote, local, 'clearanceHeight'),
+    ...keepLocal(remote, local, 'extendToMargin'),
+    ...keepLocal(remote, local, 'marginTaper'),
+    // An overhang holds only where it was computed, so a bin moved elsewhere goes without.
+    ...(samePlacement(remote, local) ? keepLocal(remote, local, 'overhang') : {}),
+  };
+}
+
+function restoreBinFields(remote: Layout, local: Layout, schemaVersion: number): Layout {
+  const localBins = new Map(local.bins.map((bin) => [bin.id, bin]));
+  return {
+    ...remote,
+    bins: remote.bins.map((bin) => {
+      const mine = localBins.get(bin.id);
+      if (!mine) return bin;
+      return {
+        ...bin,
+        ...(schemaVersion < 3 ? restoredFitFields(bin, mine) : {}),
+        ...(schemaVersion < 4 ? keepLocal(bin, mine, 'items') : {}),
+        ...keepLocal(bin, mine, 'slant'),
+      };
+    }),
+  };
+}
+
+function restoreDrawerFields(remote: Layout, local: Layout): Layout {
+  const measuredMm = remote.drawer.measuredMm ?? local.drawer.measuredMm;
+  return {
+    ...remote,
+    drawer: measuredMm === undefined ? remote.drawer : { ...remote.drawer, measuredMm },
+    ...(remote.baseplateParams === undefined && local.baseplateParams !== undefined
+      ? { baseplateParams: local.baseplateParams }
+      : {}),
+    ...(remote.activeBaseplateId === undefined && local.activeBaseplateId !== undefined
+      ? { activeBaseplateId: local.activeBaseplateId }
+      : {}),
+  };
+}
 
 /**
  * Default missing `notes`/`label` to '' so the 3D view's `bin.notes.trim()`
@@ -88,8 +159,16 @@ export const layoutAdapter: LayoutAdapter = {
   },
 
   async applyRemote(item: SyncableItem<Layout>): Promise<void> {
+    // Restored before normalizing: the outline is clipped to an extent the
+    // measured drawer widens, so clipping first would cut it to the grid.
+    let incoming = item.payload;
+    const schemaVersion = item.schemaVersion ?? 1;
+    if (schemaVersion < LAYOUT_SCHEMA_VERSION) {
+      const local = await loadLayoutAsync(item.id);
+      if (local) incoming = restoreStrippedFields(incoming, local, schemaVersion);
+    }
     // The folder rides on the wire only; locally the entry holds it.
-    const { folderId, ...document } = normalizeIncomingLayout(item.payload);
+    const { folderId, ...document } = normalizeIncomingLayout(incoming);
     const layout: Layout = document;
     const saveResult = await saveLayoutAsync(item.id, layout);
     if (!saveResult.ok) {

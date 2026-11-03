@@ -4,8 +4,10 @@
  * focus here is the designer-specific validation contract.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { userIndexKey, userMeshesKey } from '../../lib/redisKeys';
+import { MESH_MISSING_STATUS } from '../lib/resourceHandler';
 
 let redisStore: Map<string, string>;
 let redisHashes: Map<string, Map<string, string>>;
@@ -28,6 +30,9 @@ const mockRedis = {
     const h = redisHashes.get(k);
     return h ? Object.fromEntries(h) : {};
   }),
+  hmget: vi.fn(async (k: string, ...fields: string[]) =>
+    fields.map((f) => redisHashes.get(k)?.get(f) ?? null)
+  ),
   pipeline: vi.fn(() => makePipeline()),
 };
 
@@ -175,6 +180,29 @@ describe('PUT', () => {
     expect(body.envelope.schemaVersion).toBe(1);
     expect(body.envelope.design.name).toBe('My Bin');
     expect((body.envelope.design.params as { width: number }).width).toBe(2);
+  });
+
+  it('keeps a design’s overhang in a schema-2 envelope when the client declares 2', async () => {
+    const { default: handler } = await import('./[id]');
+    const overhang = { left: 0, right: 14, front: 0, back: 0, feet: true };
+    const res = makeRes();
+    await handler(
+      makeReq({
+        method: 'PUT',
+        body: {
+          design: { name: 'Wide bin', params: { ...VALID_DESIGN, overhang } },
+          modifiedAt: 1000,
+          schemaVersion: 2,
+        },
+      }),
+      res as unknown as VercelResponse
+    );
+    expect(res._status).toBe(200);
+    const body = res._body as {
+      envelope: { schemaVersion: number; design: { params: Record<string, unknown> } };
+    };
+    expect(body.envelope.schemaVersion).toBe(2);
+    expect(body.envelope.design.params.overhang).toEqual(overhang);
   });
 
   it('records sizeBytes for the post-sanitization payload, not the raw request', async () => {
@@ -835,6 +863,227 @@ describe('variant overrides passthrough', () => {
     const stored = (res._body as { envelope: { design: Record<string, unknown> } }).envelope.design;
     expect('variantOf' in stored).toBe(false);
     expect('overrides' in stored).toBe(false);
+  });
+});
+
+describe('PUT: mesh refs', () => {
+  const HELD = 'a'.repeat(64);
+  const UNHELD = 'b'.repeat(64);
+
+  function ref(hash: string) {
+    return { name: 'wrench', hash, triangleCount: 12, sizeMm: { x: 20, y: 10, z: 5 }, bytes: 4000 };
+  }
+
+  function withMeshes(meshAssets: Record<string, unknown>) {
+    return {
+      ...VALID_DESIGN,
+      cutouts: Object.keys(meshAssets).map((meshId, i) => ({
+        id: `c${i}`,
+        shape: 'mesh',
+        meshId,
+      })),
+      meshAssets,
+    };
+  }
+
+  async function put(params: unknown, modifiedAt = 1000): Promise<MockRes> {
+    const { default: handler } = await import('./[id]');
+    const res = makeRes();
+    await handler(
+      makeReq({ method: 'PUT', body: { design: { name: 'Meshes', params }, modifiedAt } }),
+      res as unknown as VercelResponse
+    );
+    return res;
+  }
+
+  beforeEach(() => {
+    vi.stubEnv('MESH_STORE_ENABLED', 'true');
+    redisHashes.set(
+      userMeshesKey('user-1'),
+      new Map([[HELD, JSON.stringify({ sizeBytes: 4000, url: `https://blob/meshes/${HELD}` })]])
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('stores a design whose refs name files the account holds', async () => {
+    const res = await put(withMeshes({ m1: ref(HELD) }));
+
+    expect(res._status).toBe(200);
+    const stored = [...blobStore.values()][0] as { design: { params: { meshAssets: unknown } } };
+    expect(stored.design.params.meshAssets).toEqual({ m1: ref(HELD) });
+  });
+
+  it('answers 424 listing the files the account lacks, and stores nothing', async () => {
+    const res = await put(withMeshes({ m1: ref(HELD), m2: ref(UNHELD) }));
+
+    expect(res._status).toBe(MESH_MISSING_STATUS);
+    expect(res._body).toMatchObject({ code: 'MESH_MISSING', missing: [UNHELD] });
+    expect(blobStore.size).toBe(0);
+    expect(redisHashes.get(userIndexKey('user-1', 'designs'))).toBeUndefined();
+  });
+
+  it('refuses refs while the mesh store is off, and still takes inline meshes', async () => {
+    vi.stubEnv('MESH_STORE_ENABLED', 'false');
+    const refused = await put(withMeshes({ m1: ref(HELD) }));
+    expect(refused._status).toBe(MESH_MISSING_STATUS);
+    expect(refused._body).toMatchObject({ missing: [HELD] });
+
+    const inline = await put(
+      withMeshes({
+        m1: {
+          name: 'wrench',
+          data: 'QUFBQQ==',
+          triangleCount: 12,
+          sizeMm: { x: 20, y: 10, z: 5 },
+          outlines: [
+            [
+              { x: 0, y: 0 },
+              { x: 20, y: 0 },
+              { x: 20, y: 10 },
+            ],
+          ],
+        },
+      })
+    );
+    expect(inline._status).toBe(200);
+  });
+
+  it('lets a newer stored design win before asking for files', async () => {
+    expect((await put(VALID_DESIGN, 5000))._status).toBe(200);
+    expect((await put(withMeshes({ m1: ref(UNHELD) }), 1000))._status).toBe(409);
+  });
+
+  it('holds a design of refs to the size cap of a design without meshes', async () => {
+    const res = await put({ ...withMeshes({ m1: ref(HELD) }), garbage: 'x'.repeat(150_000) });
+
+    expect(res._status).toBe(400);
+    expect((res._body as { error: string }).error).toContain('100KB');
+  });
+});
+
+describe('PUT: imported mesh designs', () => {
+  const HELD = 'a'.repeat(64);
+  const UNHELD = 'b'.repeat(64);
+
+  const ENVELOPE = {
+    width: 2,
+    depth: 1.5,
+    gridUnitMm: 42,
+    heightUnitMm: 7,
+    attachment: {
+      magnetHoles: true,
+      magnetDiameter: 6.5,
+      magnetDepth: 2.4,
+      magnetCrushRibs: true,
+      screwHoles: false,
+      screwDiameter: 3,
+    },
+    featureColors: { enabled: false },
+  };
+
+  function ref(hash: string) {
+    return {
+      name: 'parts_bin',
+      hash,
+      triangleCount: 4,
+      sizeMm: { x: 83, y: 62, z: 28 },
+      bytes: 900,
+    };
+  }
+
+  const INLINE = {
+    name: 'parts_bin',
+    data: 'QUFBQQ==',
+    triangleCount: 4,
+    sizeMm: { x: 83, y: 62, z: 28 },
+    outlines: [
+      [
+        { x: 0, y: 0 },
+        { x: 83, y: 0 },
+        { x: 83, y: 62 },
+      ],
+    ],
+  };
+
+  function imported(asset: unknown, structureExtra: Record<string, unknown> = {}) {
+    return {
+      name: 'Parts bin',
+      kind: 'importedMesh',
+      envelope: ENVELOPE,
+      structure: {
+        kind: 'importedMesh',
+        heightUnits: 4,
+        asset,
+        volumeMm3: 51_000,
+        sourceFileName: 'parts_bin.stl',
+        ...structureExtra,
+      },
+      tags: ['stl'],
+    };
+  }
+
+  async function put(design: unknown): Promise<MockRes> {
+    const { default: handler } = await import('./[id]');
+    const res = makeRes();
+    await handler(
+      makeReq({ method: 'PUT', body: { design, modifiedAt: 1000 } }),
+      res as unknown as VercelResponse
+    );
+    return res;
+  }
+
+  beforeEach(() => {
+    vi.stubEnv('MESH_STORE_ENABLED', 'true');
+    redisHashes.set(
+      userMeshesKey('user-1'),
+      new Map([[HELD, JSON.stringify({ sizeBytes: 900, url: `https://blob/meshes/${HELD}` })]])
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('stores a design of refs the account holds, every field intact, and serves it back', async () => {
+    const design = imported(ref(HELD));
+    expect((await put(design))._status).toBe(200);
+
+    const { default: handler } = await import('./[id]');
+    const res = makeRes();
+    await handler(makeReq({ method: 'GET' }), res as unknown as VercelResponse);
+
+    expect(res._status).toBe(200);
+    expect((res._body as { envelope: { design: unknown } }).envelope.design).toEqual(design);
+  });
+
+  it('answers 424 for a ref the account lacks, and stores nothing', async () => {
+    const res = await put(imported(ref(UNHELD)));
+
+    expect(res._status).toBe(MESH_MISSING_STATUS);
+    expect(res._body).toMatchObject({ code: 'MESH_MISSING', missing: [UNHELD] });
+    expect(blobStore.size).toBe(0);
+  });
+
+  it('takes the mesh inline while the mesh store is off, past the cap of a design without meshes', async () => {
+    vi.stubEnv('MESH_STORE_ENABLED', 'false');
+    const big = { ...INLINE, data: 'A'.repeat(600_000) };
+
+    const res = await put(imported(big));
+
+    expect(res._status).toBe(200);
+    const stored = [...blobStore.values()][0] as { design: { structure: { asset: unknown } } };
+    expect(stored.design.structure.asset).toEqual(big);
+  });
+
+  it('rejects a field the mirror does not know with 400', async () => {
+    const res = await put(imported(ref(HELD), { scale: 2 }));
+
+    expect(res._status).toBe(400);
+    expect((res._body as { error: string }).error).toBe('structure has unknown key: scale');
+    expect(blobStore.size).toBe(0);
   });
 });
 

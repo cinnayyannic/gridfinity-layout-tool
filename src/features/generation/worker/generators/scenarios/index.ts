@@ -37,6 +37,7 @@ import { cutoutOffset } from './cutoutOffset';
 import { groupedScoop } from './groupedScoop';
 import { lipWall } from './lipWall';
 import { lipTip } from './lipTip';
+import { lipNotches } from './lipNotches';
 import { scoopMultiSide, scoopSidesDeduped } from './scoopMultiSide';
 import { handles } from './handles';
 import { honeycombJunction } from './honeycombJunction';
@@ -65,8 +66,16 @@ import { knifeBlock } from './knifeBlock';
 import { openSides } from './openSides';
 import { cutoutRepeatOverlap } from './cutoutRepeatOverlap';
 import { cutoutLean } from './cutoutLean';
+import { cutoutDepthModes } from './cutoutDepthModes';
+import { cutoutIslands } from './cutoutIslands';
+import { cutoutEntryEdges } from './cutoutEntryEdges';
+import { cutoutFingerAccess } from './cutoutFingerAccess';
+import { cutoutSplitPockets } from './cutoutSplitPockets';
 import { variantOverrides } from './variantOverrides';
 import { lowProfile } from './lowProfile';
+import { nestedChamfers } from './nestedChamfers';
+import { pullTab } from './pullTab';
+import { slideLid } from './slideLid';
 
 export type { ScenarioCase } from '../__kernel-tests__/scenarioTypes';
 
@@ -101,6 +110,7 @@ export const ALL_SCENARIOS: readonly ScenarioCase[] = [
   ...groupedScoop,
   ...lipWall,
   ...lipTip,
+  ...lipNotches,
   ...scoopMultiSide,
   ...scoopSidesDeduped,
   ...handles,
@@ -133,4 +143,12 @@ export const ALL_SCENARIOS: readonly ScenarioCase[] = [
   ...interiorFillet,
   ...interiorFilletScoops,
   ...lowProfile,
+  ...nestedChamfers,
+  ...pullTab,
+  ...slideLid,
+  ...cutoutDepthModes,
+  ...cutoutEntryEdges,
+  ...cutoutFingerAccess,
+  ...cutoutSplitPockets,
+  ...cutoutIslands,
 ];

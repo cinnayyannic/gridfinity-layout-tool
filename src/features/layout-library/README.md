@@ -38,6 +38,7 @@ badge, so these render both modes themselves rather than using `InlineEditText`.
 ### Hooks
 
 - `hooks/useLayoutRouting.ts` — URL sync for bookmarkable layouts (`/l/{id}/{slug}`)
+- `hooks/useDrawerLinkImport.ts` — opens a layout sized to a `?drawer=` link from the calculator and drawer pages; waits for translations because it stores a translated name
 
 ## Storage Keys
 
@@ -56,11 +57,11 @@ deleteLayout(id) → remove from IndexedDB + library
 ## Folders
 
 The tree lives in `LayoutLibrary.folders` with `LayoutEntry.folderId`; the rules
-(name limits, no cycles, a deleted folder lifts its contents to its parent) are pure
-functions in `@/core/storage` (`libraryFolders.ts`), and `useLayoutFolders` in
-`@/shared/hooks` applies one and saves. A `folderId` that names no folder reads as
-the root and is kept, not rewritten: on a fresh device a layout can arrive before
-its folder. Folders sync as their own kind; membership rides on each layout's
+(name limits, no cycles, places only at the top, a deleted folder lifts its contents
+to its parent) are pure functions in `@/core/storage` (`libraryFolders.ts`), and
+`useLayoutFolders` (`@/shared/hooks`) applies one and saves. A `folderId` naming no
+folder reads as the root and is kept: on a fresh device a layout can arrive before
+its folder. Folders sync on their own; membership rides on each layout's
 envelope as `folderId`, which the entry owns locally and exports never carry.
 
 ## Gotchas

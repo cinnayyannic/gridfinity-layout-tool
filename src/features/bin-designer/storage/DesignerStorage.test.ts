@@ -7,6 +7,11 @@ vi.mock('@/shared/analytics/posthog', () => ({
     trackDesignCreatedMock();
   },
 }));
+vi.mock('@/shared/generation/meshRefs', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, storeHolderMeshes: vi.fn(actual.storeHolderMeshes as () => unknown) };
+});
+import { storeHolderMeshes } from '@/shared/generation/meshRefs';
 import {
   saveDesign,
   loadDesign,
@@ -22,8 +27,11 @@ import {
   updateDesignTags,
   clearDesignPublishedId,
   setDesignPublishedId,
+  updateDesignThumbnail,
+  updateDesignName,
 } from '@/features/bin-designer/storage/DesignerStorage';
 import { DEFAULT_BIN_PARAMS } from '../constants/defaults';
+import { THUMBNAIL_VERSION } from '../types';
 import type { BinParams, SavedDesign } from '../types';
 import { getDb } from '@/features/bin-designer/storage/designerDb';
 import { expectOk, expectErr } from '@/test/testUtils';
@@ -110,6 +118,64 @@ describe('DesignerStorage', () => {
       expect(secondValue.name).toBe('Updated');
       expect(secondValue.createdAt).toBe(firstCreatedAt);
       expect(secondValue.updatedAt).not.toBe(firstCreatedAt);
+    });
+
+    it('lands saves to one design in the order they were made', async () => {
+      const id = designId('save-order');
+      let release = (): void => undefined;
+      const storing = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      vi.mocked(storeHolderMeshes).mockImplementationOnce(async (holder) => {
+        await storing;
+        return holder;
+      });
+      const save = (name: string) =>
+        saveDesign({
+          id,
+          name,
+          params: DEFAULT_BIN_PARAMS,
+          thumbnail: null,
+          exportFileNameConfig: null,
+        });
+
+      const older = save('Older, still storing its mesh');
+      const newer = save('Newer');
+      await Promise.race([newer, new Promise((r) => setTimeout(r, 50))]);
+      release();
+      await Promise.all([older, newer]);
+
+      expect(expectOk(await loadDesign(id)).name).toBe('Newer');
+    });
+
+    it('applies a thumbnail to the save queued before it, not to the design as it was', async () => {
+      const id = designId('thumbnail-order');
+      const base = {
+        id,
+        name: 'Pens',
+        params: DEFAULT_BIN_PARAMS,
+        thumbnail: null,
+        exportFileNameConfig: null,
+      };
+      expectOk(await saveDesign(base));
+      let release = (): void => undefined;
+      const storing = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      vi.mocked(storeHolderMeshes).mockImplementationOnce(async (holder) => {
+        await storing;
+        return holder;
+      });
+
+      const edit = saveDesign({ ...base, params: { ...DEFAULT_BIN_PARAMS, width: 3 } });
+      const thumbnail = updateDesignThumbnail(id, 'data:image/webp;base64,THUMB');
+      await new Promise((r) => setTimeout(r, 50));
+      release();
+      await Promise.all([edit, thumbnail]);
+
+      const stored = expectOk(await loadDesign(id));
+      expect(stored.params?.width).toBe(3);
+      expect(stored.thumbnail).toBe('data:image/webp;base64,THUMB');
     });
   });
 
@@ -468,6 +534,75 @@ describe('DesignerStorage', () => {
     it('should return error for non-existent design', async () => {
       const result = await updateDesignParams(designId('nonexistent'), DEFAULT_BIN_PARAMS);
       expectErr(result);
+    });
+
+    it('keeps the thumbnail but marks it outdated when the params change without a new one', async () => {
+      await saveDesign({
+        id: designId('thumb-test'),
+        name: 'Thumb Test',
+        params: DEFAULT_BIN_PARAMS,
+        thumbnail: 'data:image/png;base64,old',
+        exportFileNameConfig: null,
+      });
+
+      const value = expectOk(
+        await updateDesignParams(designId('thumb-test'), { ...DEFAULT_BIN_PARAMS, width: 4 })
+      );
+
+      expect(value.thumbnail).toBe('data:image/png;base64,old');
+      expect(value.thumbnailVersion).toBeUndefined();
+    });
+
+    it('keeps an outdated thumbnail outdated through a later rename', async () => {
+      await saveDesign({
+        id: designId('thumb-test'),
+        name: 'Thumb Test',
+        params: DEFAULT_BIN_PARAMS,
+        thumbnail: 'data:image/png;base64,old',
+        exportFileNameConfig: null,
+      });
+      await updateDesignParams(designId('thumb-test'), { ...DEFAULT_BIN_PARAMS, width: 4 });
+
+      const value = expectOk(await updateDesignName(designId('thumb-test'), 'Renamed'));
+
+      expect(value.thumbnailVersion).toBeUndefined();
+    });
+
+    it('marks a regenerated thumbnail current even when its bytes match the old one', async () => {
+      await saveDesign({
+        id: designId('thumb-test'),
+        name: 'Thumb Test',
+        params: DEFAULT_BIN_PARAMS,
+        thumbnail: 'data:image/png;base64,same',
+        exportFileNameConfig: null,
+      });
+      await updateDesignParams(designId('thumb-test'), { ...DEFAULT_BIN_PARAMS, width: 4 });
+
+      const value = expectOk(
+        await updateDesignThumbnail(designId('thumb-test'), 'data:image/png;base64,same')
+      );
+
+      expect(value.thumbnailVersion).toBe(THUMBNAIL_VERSION);
+    });
+
+    it('stamps a thumbnail passed with the params as current', async () => {
+      await saveDesign({
+        id: designId('thumb-test'),
+        name: 'Thumb Test',
+        params: DEFAULT_BIN_PARAMS,
+        thumbnail: null,
+        exportFileNameConfig: null,
+      });
+
+      const value = expectOk(
+        await updateDesignParams(
+          designId('thumb-test'),
+          { ...DEFAULT_BIN_PARAMS, width: 4 },
+          'data:image/png;base64,new'
+        )
+      );
+
+      expect(value.thumbnailVersion).toBe(THUMBNAIL_VERSION);
     });
   });
 

@@ -26,39 +26,84 @@ const en: Record<string, string> = {
   // and /gridfinity-baseplate-generator, which own the "Generator" queries.
   'seo.designer.title': 'Gridfinity Bin Designer — Free Custom Bin Builder',
   'seo.designer.description':
-    'Design custom Gridfinity bins in your browser: dimensions, compartments, label tabs, wall cutouts, and base styles with a real-time 3D preview. Export STL, STEP, or 3MF. Free, no account.',
+    'Design Gridfinity bins in your browser with a real-time 3D preview. Set dimensions and compartments. Export STL, STEP, or 3MF. Free, no account.',
   'seo.baseplate.title': 'Gridfinity Baseplate Maker — Free Custom Baseplate Builder',
   'seo.baseplate.description':
-    'Make custom Gridfinity baseplates in your browser: any grid size, magnet holes, edge padding, and automatic print-bed splitting. Export STL, STEP, or 3MF. Free, no account.',
+    'Build Gridfinity baseplates in-browser. Set grid size and magnet holes. Auto-split for print beds. Export STL, STEP, or 3MF. Free, no account.',
   'seo.supporters.title': 'Supporters — Gridfinity Layout Tool',
   'seo.supporters.description':
     'The people whose support keeps the Gridfinity Layout Tool free, ad-free, and independent.',
   'seo.community.title': 'Community Designs — Gridfinity Layout Tool',
   'seo.community.description':
-    'Browse Gridfinity bin designs published by the community. Preview any design in 3D, remix it into your own editable copy, and export it for printing. Free, no account.',
+    'Browse Gridfinity bin designs from other makers. Preview them in 3D, remix an editable copy, and export for printing. Free, no account.',
 
   // Supporters page
   'supporters.back': 'Back to the app',
   'supporters.heading': 'The people who keep this free',
-  'supporters.subheading':
-    'This tool is free, ad-free, and privacy-focused — thanks to the people below. Every bin is someone who chipped in to keep it running.',
   'supporters.anonymous': 'Anonymous',
-  'supporters.listAria': '{count} supporters',
   'supporters.countLabel': 'people keep this free',
   'supporters.thanksNamed': 'Thank you, {name}',
   'supporters.thanksAnon': 'Thank you, friend',
   'supporters.cta.button': 'Support on Ko-fi',
   'supporters.thisMonth': '{count} joined this month',
   'supporters.justJoined': 'Just joined',
-  'supporters.purpose':
-    'This is free, ad-free, and privacy focused, built and maintained by one person. Your support keeps it that way.',
-  'supporters.messageBy': 'from {name}',
   'supporters.find.placeholder': 'Find your bin',
   'supporters.find.submit': 'Find',
   'supporters.find.notFound': "No supporter named {name}. Anonymous supporters can't be searched.",
   'supporters.find.multiple': 'Showing 1 of {count} named {name}.',
-  'supporters.sparklineLabel': 'New supporters over the last {count} months',
-  'supporters.sparklineCaption': 'new each month',
+  'supporters.find.department': '{name} is in {department}.',
+  'supporters.credits.listLabel': 'Credits',
+  'supporters.credits.victoryLine1': 'Congratulations!',
+  'supporters.credits.victoryLine2': 'Your drawer is organized.',
+  'supporters.credits.madePossibleBy': 'made possible by',
+  'supporters.credits.people.one': 'person',
+  'supporters.credits.people.other': 'people',
+  'supporters.credits.dept.oneMoreBin': 'Dept. of Just One More Bin',
+  'supporters.credits.dept.spaghetti': 'Spaghetti Incident Response',
+  'supporters.credits.dept.magnetHoles': 'Magnet Hole Inspection',
+  'supporters.credits.dept.magnetHolesNote': 'magnets sold separately',
+  'supporters.credits.dept.firstLayer': 'First Layer Prayer Circle',
+  'supporters.credits.dept.measureTwice': 'Bureau of Measuring Twice',
+  'supporters.credits.dept.cloggedNozzle': 'Clogged Nozzle Plumbing & Heating',
+  'supporters.credits.dept.almostFit': 'Office of Bins That Almost Fit',
+  'supporters.credits.dept.lipQa': 'Stacking Lip QA (Night Shift)',
+  'supporters.credits.dept.redacted': 'Department of [REDACTED]',
+  'supporters.credits.somebody.title': 'Department of Somebody',
+  'supporters.credits.somebody.note': 'no relation to each other',
+  'supporters.credits.somebody.crowdLabel': '{count} supporters named {name}',
+  'supporters.credits.gag.cateringRole': 'Catering',
+  'supporters.credits.gag.cateringValue': 'Ko-fi',
+  'supporters.credits.gag.magnetRetrievalRole': 'Magnet Retrieval',
+  'supporters.credits.gag.magnetRetrievalValue': 'waiting on the cat',
+  'supporters.credits.gag.continuityRole': 'Continuity',
+  'supporters.credits.gag.continuityValue': '42 mm, every time',
+  'supporters.credits.gag.greetzRole': 'Greetz',
+  'supporters.credits.gag.greetzValue': 'everyone whose bin almost fit',
+  'supporters.credits.gag.developerRole': 'Developer',
+  'supporters.credits.gag.developerValue': 'Andy Aragon (still fixing one more thing)',
+  'supporters.credits.gag.noBinsHarmed': 'No bins were harmed in the making of this tool.',
+  'supporters.credits.skip': 'Skip',
+  'supporters.credits.pause': 'Pause the credits',
+  'supporters.credits.play': 'Play the credits',
+  'supporters.credits.rewind': 'Rewind',
+  'supporters.credits.fastForward': 'Fast-forward',
+  'supporters.credits.scrubHint': 'Scroll or drag to fast-forward and rewind',
+  'supporters.credits.replay': 'Replay the credits',
+  'supporters.credits.theEnd': 'The end?',
+  'supporters.credits.yourBinHere': 'your bin here',
+  'supporters.credits.soundOn': 'Turn sound on',
+  'supporters.credits.soundOff': 'Turn sound off',
+  'supporters.achievements.unlocked': 'Achievement unlocked',
+  'supporters.achievements.satThrough': 'Sat through the credits',
+  'supporters.achievements.foundOwnBin': 'Found your own bin',
+  'supporters.achievements.speedrunner': 'Speedrunner: skipped in under 3 seconds',
+  'supporters.achievements.poked10': 'Poked 10 bins',
+  'supporters.achievements.postCredits': 'Stayed for the post-credits scene',
+  'supporters.credits.postCreditsTape': 'You?',
+  'supporters.credits.nowStarring': 'Now starring',
+  'supporters.panel.assignedTo': 'Assigned to',
+  'supporters.panel.copyCreditLink': 'Copy link to my credit',
+  'supporters.panel.creditLinkCopied': 'Link copied',
   'supporters.badge.label': 'Supporter',
   'supporters.badge.aria': 'Ko-fi supporter. Open the supporters wall.',
   'supporters.badge.tooltip': 'Supports this project on Ko-fi',
@@ -111,6 +156,7 @@ const en: Record<string, string> = {
 
   'common.schemaDocsLink': 'File format reference',
   'common.customize': 'Customize',
+  'common.aboutLabel': 'About {label}',
   'common.copy': 'Copy',
   'common.copied': 'Copied!',
   'common.download': 'Download',
@@ -494,17 +540,25 @@ const en: Record<string, string> = {
   'inspector.addProperty': 'Add "{key}"',
   'inspector.binLabel': 'Bin label',
   'inspector.binNotes': 'Bin notes',
+  'inspector.contents.title': 'Contents',
+  'inspector.contents.add': 'Add an item',
+  'inspector.contents.addPlaceholder': 'Add an item, or paste a list',
+  'inspector.contents.useLabel': 'Add “{label}” as an item',
+  'inspector.contents.remove': 'Remove {name}',
+  'inspector.contents.quantity': 'Quantity of {name}',
+  'inspector.contents.qtyPlaceholder': 'Qty',
+  'inspector.contents.full': 'This bin holds as many items as it can ({max}).',
   'inspector.binsSelected': 'bins selected',
   'inspector.clearanceMmLabel': 'Clearance (mm)',
   'inspector.heightUnitsEquiv': '= {units}u',
   'inspector.nonStandardStackWarning': "Won't stack with standard bins",
   'inspector.printedAndStackHint': 'Prints {printed}mm · stacks +{pitch}mm each',
-  'inspector.minHeightHint': 'Min {min}mm: {reason}',
   'inspector.minHeightHintNoReason': 'Min {min}mm',
   'inspector.maxHeightHint': 'Max {max}mm: {reason}',
-  'inspector.heightReasonLayerHeight': 'layer height',
   'inspector.heightReasonDrawerHeight': 'drawer height',
   'inspector.heightReasonRemainingSpace': 'remaining space',
+  'inspector.restsAt': 'Rests {height}u above the plate',
+  'inspector.unevenSupport': 'Part of its base is unsupported',
   'inspector.customProperties': 'Custom Properties',
   'inspector.deleteAll': 'Delete All',
   'inspector.deselectAllBins': 'Deselect all bins',
@@ -515,6 +569,8 @@ const en: Record<string, string> = {
   'inspector.extendToMargin.hint':
     "Fills the baseplate's drawer-fit margin on every drawer edge it touches.",
   'inspector.extendToMargin.needsLink': 'Link a design to extend into the margin.',
+  'inspector.extendToMargin.fixedShape':
+    "Imported bins and Workshop designs keep their saved shape, so they can't extend into the margin.",
   'inspector.taper': 'Taper walls',
   'inspector.taper.profile': 'Profile',
   'inspector.taper.chamfer': 'Chamfer',
@@ -523,6 +579,17 @@ const en: Record<string, string> = {
   'inspector.taper.flare': 'Flare',
   'inspector.taper.flare.hint':
     "Extra width at the rim, beyond the drawer padding, so the bin reaches into the drawer's curved sides.",
+  'inspector.slant.fromDesign': 'From its design: {angle}\u00b0 \u00b7 {side}',
+  'inspector.slant.useDesign': "Use the design's slant",
+  'inspector.slant.heldBy.design': "Its design can't slant.",
+  'inspector.slant.heldBy.overhang': 'Its extended footprint keeps it upright.',
+  'inspector.slant.noRoom': 'No room for that here.',
+  'inspector.slant.issue.mismatch': 'Its top leans over a bin that slants differently.',
+  'inspector.slant.issue.unsupported':
+    'Nothing holds the end of this row. Turn on the end support.',
+  'inspector.slant.issue.pastDrawer': 'Its top leans past the drawer edge.',
+  'inspector.slant.issue.blocked': 'Something stands where the slant needs room.',
+  'inspector.slant.matchRow': 'Match row',
   'inspector.expandedFootprint': 'Expanded footprint',
   'inspector.expandedFootprint.sides': '{left} left · {right} right · {front} front · {back} back',
   'inspector.maxPropertiesReached': 'Maximum {max} properties reached',
@@ -551,6 +618,14 @@ const en: Record<string, string> = {
   'layers.binPaletteInstruction': 'Pick a size, then drag on the grid to paint bins.',
   'layers.binPaletteHint': 'Shift+click to add to stash.',
   'layers.brushStatus': 'Painting {width}×{depth} — drag to fill, Esc to exit',
+  'layers.slantedRow.title': 'Slanted row',
+  'layers.slantedRow.hint':
+    'Rows lean this way and end on a support. Every bin links to one design.',
+  'layers.slantedRow.status':
+    'Slanted {width}×{depth} rows ({angle}°, {side}): drag to fill, Esc to exit',
+  'layers.slantedRow.designName': 'Slanted {size} · {angle}°',
+  'layers.slantedRow.noRoom': 'No room for a slanted row there.',
+  'layers.slantedRow.saveFailed': "Couldn't save the row's bin design.",
   'layers.decreaseHeight': 'Decrease {name} height',
   'layers.increaseHeight': 'Increase {name} height',
   'layers.addNewLayer': 'Add new layer',
@@ -562,10 +637,7 @@ const en: Record<string, string> = {
   'layers.fillGapsTitle': 'Fill {count} empty cells with 1×1 bins',
   'layers.fillTitle': 'Fill empty space with {width}×{depth} bins',
   'layers.fillWith': 'Fill with ',
-  'layers.maxHeightFull': 'Drawer height full ({current}/{max}u)',
   'layers.maxLayersReached': 'Maximum {max} layers reached',
-  'layers.cannotAddLayerTallBins':
-    'Cannot add layer: bins on {layerName} are {binHeight}u tall but layer is only {layerHeight}u. Adjusting would exceed drawer height. Try reducing bin heights or increasing drawer height.',
   'layers.clearLayerLabel': 'Clear layer',
   'layers.noBinsToClear': 'No bins to clear',
   'layers.noGaps': 'No gaps',
@@ -583,8 +655,10 @@ const en: Record<string, string> = {
   'layers.statsTotal': '{coverage}% filled · {count} bins total',
   'layers.segmentTooltip': '{name} — {coverage}% filled, {count} bins',
   'layers.deleteLayerAria': 'Delete {name} layer',
-  'layers.unusedSpace': '{height}u headroom',
   'layers.heightTotal': '{used}/{total}u',
+  'layers.binCount': '{count} bins',
+  'layers.tallestStack': 'Tallest stack',
+  'layers.stackOverDrawer': '{over}u taller than the drawer',
   'layers.switchToTall': 'Switch to tall',
   'layers.switchToWide': 'Switch to wide',
   'layers.tall': 'Tall',
@@ -932,6 +1006,7 @@ const en: Record<string, string> = {
   'settings.tabs.integrations': 'STL Search',
   'settings.tabs.privacy': 'Privacy',
   'settings.tabs.storage': 'Storage',
+  'settings.tabs.exports': 'Exports',
   'settings.tabs.labs': 'Labs',
 
   // Settings sidebar groups
@@ -946,7 +1021,8 @@ const en: Record<string, string> = {
   'settings.search.inTab': 'in {tab}',
   'settings.search.keywords.language': 'locale, translation, internationalization',
   'settings.search.keywords.theme': 'dark, light, system, color scheme',
-  'settings.search.keywords.motion': 'animation, transitions, accessibility',
+  'settings.search.keywords.motion':
+    'animation, transitions, accessibility, video, autoplay, clips',
   'settings.search.keywords.layout':
     'drawer, dimensions, grid unit, print bed, width, depth, height',
   'settings.search.keywords.print': 'filament, nozzle, infill, layer height, cost, material',
@@ -955,6 +1031,8 @@ const en: Record<string, string> = {
   'settings.search.keywords.storageDanger': 'clear data, reset, delete, wipe',
   'settings.search.keywords.stl': 'printables, makerworld, thangs, model search',
   'settings.search.keywords.labs': 'experimental, beta, feature flags',
+  'settings.search.keywords.exportDestination':
+    'folder, upload, URL, NAS, library, webhook, download, save',
 
   // Per-section reset
   'settings.section.reset': 'Reset',
@@ -1168,6 +1246,11 @@ const en: Record<string, string> = {
     'Expand the bin body outward on any side by a few millimeters so it fills a drawer snugly. Advanced — leave at zero for standard Gridfinity fit.',
   'help.target.binDesigner.overhang.keywords':
     'overhang|drawer fit|expand|outward|oversize|snug|fill drawer|clearance|tolerance',
+  'help.target.binDesigner.slant.title': 'Slant',
+  'help.target.binDesigner.slant.description':
+    'Lean the bin toward one side so tall items such as pens fit a drawer too shallow to stand them upright.',
+  'help.target.binDesigner.slant.keywords':
+    'slant|slanted|lean|tilt|angled|diagonal|pens|markers|shallow drawer',
   'help.target.binDesigner.labelTabs.title': 'Label tabs',
   'help.target.binDesigner.labelTabs.description':
     'Add the sloped tab along a compartment edge where a printed or written label sits. Pick the edge, width, and support style. Standard bins only.',
@@ -1321,9 +1404,9 @@ const en: Record<string, string> = {
 
   // Blocked zones explanation
   'help.blockedZonesDescription':
-    'When a bin is taller than its layer height, it extends into layers above. These areas appear as striped cells and cannot have new bins placed on them.',
+    'Bins rest on whatever sits under them on lower layers, so a tall bin simply lifts the bins above it. Striped cells mark clearance another bin reserves for tall contents. Nothing can rest there.',
   'help.blockedZonesExample':
-    'A 5u tall bin on Layer 1 (3u) extends 2u into Layer 2. Those cells on Layer 2 are blocked because the physical bin occupies that space.',
+    'A 3u bin on Layer 1 with 2u of clearance stripes its cells on Layer 2. A bin placed there would press on the contents below.',
 
   // Bin clearance explanation
   'help.clearanceDescription':
@@ -1433,6 +1516,8 @@ const en: Record<string, string> = {
   'toast.baseplateReset': 'Baseplate settings reset to defaults',
   'toast.baseplateSaveFailed': 'Failed to save baseplate',
   'toast.layoutCreated': 'New layout created',
+  'toast.drawerLinkOpened': 'Layout sized to your drawer: a {width} × {depth} grid',
+  'toast.drawerLinkInvalid': "That drawer link has a size the planner can't open",
   'toast.layoutDuplicated': 'Layout duplicated',
   'toast.layoutDeleted': 'Layout deleted',
   'toast.layoutImported': 'Imported "{name}"',
@@ -1441,7 +1526,10 @@ const en: Record<string, string> = {
   'toast.stlImport.fileTooLarge': 'STL file is too large (max 50MB)',
   'toast.stlImport.notManifold': 'Mesh is not watertight — repair it in your slicer and re-export',
   'toast.stlImport.empty': 'STL contains no printable geometry',
-  'toast.stlImport.assetLimit': 'A design can hold up to {count} imported meshes',
+  'toast.stlImport.budgetFull':
+    'Triangle limit reached. Nothing imported. Remove a mesh imprint to free triangles.',
+  'toast.meshFileMissing':
+    "An imported STL used here is missing from this device, so it can't be shared or exported.",
   'toast.svgImport.success': 'Imported {count} shape(s) from SVG',
   'toast.cutoutsClipped': 'Added {added} of {requested} shapes. A lid holds at most {max}.',
   'toast.flattenNoRoom': 'Not enough room to flatten this repeat. A lid holds at most {max}.',
@@ -1465,6 +1553,7 @@ const en: Record<string, string> = {
   'scan.capture.tip.sheet':
     'Best of all: print the calibration sheet, or lay the tool on a Gridfinity baseplate',
   'scan.capture.tip.topDown': 'Shoot straight down, with the whole tool in frame',
+  'scan.capture.tip.several': 'Scanning several tools? Leave a gap between each one',
   'scan.capture.exampleAlt':
     'Example photo: a tool and a bank card laid flat on a plain surface, photographed from straight above',
   'scan.capture.label.tool': 'Your tool',
@@ -1499,11 +1588,25 @@ const en: Record<string, string> = {
   'scan.review.confirmTitle': 'Is this your tool?',
   'scan.review.tapHint': 'Tap your tool in the photo if the highlighted shape is wrong.',
   'scan.review.retakeHint': 'If this looks off, retake the photo on a plainer background.',
+  'scan.review.confirmTitleMany': 'Are these your tools?',
+  'scan.review.tapHintMany':
+    'Tap a tool in the photo to redraw its outline, or to add one that was missed.',
+  'scan.review.toolsFound': '{count} tools found',
+  'scan.review.toolLabel': 'Tool {index}',
+  'scan.review.remove': 'Remove',
+  'scan.review.removeTool': 'Remove tool {index}',
+  'scan.review.undo': 'Undo',
+  'scan.review.keepHoles': 'Keep holes',
+  'scan.review.keepHolesHint':
+    'Leaves plastic where the surface shows through a tool, like inside a ring. A reflection can look like a hole.',
   'scan.retake': 'Retake',
   'scan.use': 'Use this outline',
+  'scan.useMany': 'Use these {count} outlines',
   'scan.sending': 'Sending…',
   'scan.sent.title': 'Outline sent!',
   'scan.sent.body': 'It’s now in the bin designer on your computer.',
+  'scan.sent.titleMany': 'Outlines sent!',
+  'scan.sent.bodyMany': 'They’re now in the bin designer on your computer.',
   'scan.sent.another': 'Scan another',
   'scan.sent.done': 'Done',
   'scan.finished.title': 'All set!',
@@ -1590,6 +1693,9 @@ const en: Record<string, string> = {
   'toast.expandToFitNoGridAlignment':
     'The space cannot be divided onto the grid — try adjusting the drawer padding',
   'toast.expandToFitLocked': 'Unlock the size-locked bins in the selection to expand them',
+  'toast.expandToFitLiftsStack': 'Expanding would push a bin stacked on top past the drawer top',
+  'toast.expandToFitRestsOnClearance':
+    'Expanding would set a stacked bin down on clearance another bin reserves',
   'toast.binSizeLocked': "This bin's size is locked",
   'toast.matchHeightComplete': 'Set {count} bin(s) to height {height}u',
   'toast.moveToLayerComplete': 'Moved {count} bin(s) to {name}',
@@ -1626,6 +1732,10 @@ const en: Record<string, string> = {
   'grid.invalidLayer': 'Invalid layer',
   'grid.outOfBounds': 'Out of bounds',
   'grid.outsideDrawerShape': 'Outside the drawer shape',
+  'grid.exceedsDrawerHeight': 'Stack would be taller than the drawer',
+  'grid.restsAtBadge': 'on {height}u',
+  'grid.restsAtTitle': 'Rests {height}u above the plate',
+  'grid.unevenSupportTitle': 'Rests {height}u above the plate, part of its base unsupported',
   'grid.drawerOutlineAria': 'Drawer shape boundary',
   'grid.collapse': 'Collapse',
   'grid.dragToAddRemoveColumns': 'Drag to add/remove columns',
@@ -1669,6 +1779,12 @@ const en: Record<string, string> = {
   'grid.bin.ariaLabelLabeled': ', labeled {label}',
   'grid.bin.ariaLabelCategory': ', category {category}',
   'grid.bin.ariaLabelLocked': ', size locked',
+  'grid.bin.ariaLabelSlantIssue': ', slant needs attention',
+  'grid.bin.ariaLabelSlant': ', slant ({side})',
+  'grid.bin.slantIssue': 'Slant needs attention',
+  'grid.bin.slantToward': 'Slant ({side})',
+  'grid.bin.ariaLabelRestsAt': ', resting {height}u above the plate',
+  'grid.bin.ariaLabelUneven': ', part of its base unsupported',
   'grid.announce.movedTo': 'Moved to {label} at column {col}, row {row}',
   'grid.announce.binDimensions': '{width} by {depth} bin',
 
@@ -1768,10 +1884,86 @@ const en: Record<string, string> = {
   'toolSwitcher.switchToBaseplate': 'Switch to Baseplate Generator',
 
   // Bin Designer
+  'help.target.binDesigner.pullTab.keywords':
+    'pull tab, grip, handle, finger recess, raised wall, shoulder, two tabs, four tabs, lift, center, divider, middle',
+  'help.target.binDesigner.pullTab.title': 'Pull tab',
+  'binDesigner.pullTab.title': 'Pull tab',
+  'help.target.binDesigner.pullTab.description':
+    'Raised grips on any wall or on the center divider. Tabs share the chosen thickness; walls grow inward, and a divider grows on both sides.',
+  'binDesigner.pullTab.description':
+    'Raised grips on any wall or on the center divider. Tabs share the chosen thickness; walls grow inward, and a divider grows on both sides.',
+  'binDesigner.pullTab.wall': 'Walls',
+  'binDesigner.pullTab.sideAria': 'Walls with a pull tab',
+  'binDesigner.pullTab.side.front': 'Front',
+  'binDesigner.pullTab.side.back': 'Back',
+  'binDesigner.pullTab.side.left': 'Left',
+  'binDesigner.pullTab.side.right': 'Right',
+  'binDesigner.pullTab.side.center': 'Center',
+  'binDesigner.pullTab.centerAxis': 'Center divider',
+  'binDesigner.pullTab.centerAxis.width': 'Left to right',
+  'binDesigner.pullTab.centerAxis.depth': 'Front to back',
+  'binDesigner.pullTab.center.noDivider':
+    'A center tab needs a straight divider running wall to wall.',
+  'binDesigner.pullTab.center.lowDivider': 'A center tab needs dividers at full height.',
+  'binDesigner.pullTab.center.collar':
+    'A center tab needs dividers up to the rim. Set Extra wall height to 0.',
+  'binDesigner.pullTab.center.labelTabs': 'Turn off label tabs to put a tab on a divider.',
+  'binDesigner.pullTab.wallTooShort': 'A wall shorter than {min} mm has no room for a tab.',
+  'binDesigner.pullTab.thickness': 'Wall & tab thickness',
+  'binDesigner.pullTab.width': 'Tab width',
+  'binDesigner.pullTab.widthUnit': 'Tab width unit',
+  'binDesigner.pullTab.percentHint': 'Current tab width: {width} mm.',
+  'binDesigner.pullTab.widthPerAxis':
+    'Tab width: {front} mm left to right, {side} mm front to back.',
+  'binDesigner.pullTab.percentHintDetail':
+    '100% fills the usable wall width between the corner clearances.',
+  'binDesigner.pullTab.outlineHint':
+    'Larger radii make broad, sloping shoulders while keeping the tab height. Radii are limited by the available width.',
+  'binDesigner.pullTab.height': 'Height above rim',
+  'binDesigner.pullTab.topRadius': 'Top corner radius',
+  'binDesigner.pullTab.rootRadius': 'Wall transition radius',
+  'binDesigner.pullTab.recessHeight': 'Recess height',
+  'binDesigner.pullTab.recessBorder': 'Recess border width',
+  'binDesigner.pullTab.backRecess': 'Back recess',
+  'binDesigner.pullTab.backRecessHint':
+    'Mirrors the grip on the outside of the wall, using the same size and fillets. Depth is limited to leave at least 0.8 mm between the two recesses.',
+  'binDesigner.pullTab.recessDepth': 'Recess depth',
+  'binDesigner.pullTab.recessRadius': 'Recess corner radius',
+  'binDesigner.pullTab.recessEdgeRadius': 'Recess outside fillet',
+  'binDesigner.pullTab.recessInsideRadius': 'Recess inside fillet',
+  'binDesigner.pullTab.filletDescription':
+    'Outside rounds the lip; inside rounds into the recessed back face. Larger radii meet in a smooth slope without increasing recess depth. Up to 6 mm each, limited by recess width and height. Set either to 0 for a sharp edge.',
+  'binDesigner.pullTab.recessDescription':
+    'Border width sets the top and side margins; sloping shoulders can leave wider side margins. Smaller values widen the recess. Increasing recess height can extend it below the rim; depth leaves at least 0.8 mm of wall behind it.',
+  'binDesigner.pullTab.recessSize':
+    'Recess width: {width} mm \u00b7 Extends below rim: {below} mm.',
+  'binDesigner.pullTab.recessSizePerAxis':
+    'Recess: {front} mm left to right, {side} mm front to back \u00b7 Up to {below} mm below rim.',
+  'binDesigner.pullTab.recessSizeDetail':
+    'Border and corner radius adjust when needed to stay inside the tab.',
+  'binDesigner.pullTab.rectangularOnly': 'Pull tabs need a rectangular bin.',
+  'binDesigner.pullTab.hollowOnly': 'Pull tabs need a standard hollow bin with walls.',
+  'binDesigner.pullTab.noLid': 'Turn off the lid to make room for the raised pull tab.',
+  'binDesigner.pullTab.noOverhang': 'Turn off overhang to use a straight pull-tab wall.',
+  'binDesigner.pullTab.noRoom':
+    'The tabs leave no room inside a bin this small. Pick fewer walls or a thinner tab.',
+  'binDesigner.pullTab.needsPlainWall':
+    'Needs an unbroken wall: no cutouts, handles, patterns, text or label slots.',
+  'binDesigner.base.rimFillet': 'Round top rim',
+  'binDesigner.base.rimFillet.radius': 'Rim fillet radius',
+  'binDesigner.base.rimFillet.hint':
+    'Rounds the outer wall rim, raised pull tab and full-height grid dividers. Radius is limited by the thinner wall or divider. Lowered or tilted divider tops are not rounded. Label retaining rails keep their shape.',
+  'binDesigner.base.rimFillet.unavailable': 'Available for rectangular hollow bins with walls.',
   'binDesigner.exportSTL': 'Export bin as STL',
   'binDesigner.clickToRename': 'Click to rename design',
   'binDesigner.openDesignList': 'Open design list',
+  'binDesigner.layoutSwitch.open': 'Switch to another bin in this layout',
+  'binDesigner.layoutSwitch.allDesigns': 'All designs…',
   'binDesigner.dimensions': 'Dimensions',
+  'binDesigner.shape.section.footprint': 'Footprint',
+  'binDesigner.interiorDimensions': 'Inside',
+  'binDesigner.interiorDimensionsHint':
+    'Floor to wall top, before dividers, scoops and label tabs. The stacking lip rises above it.',
   'binDesigner.downloadJSON': 'Download JSON',
   'binDesigner.downloadDesignJson': 'Download Design JSON',
   'binDesigner.export.jsonHint':
@@ -1831,6 +2023,8 @@ const en: Record<string, string> = {
   'binDesigner.dividerAutoHeight': 'Auto',
   'binDesigner.dividerHeightLipCeiling':
     "Auto is the tallest a divider can be while bins stack, since a stacked bin's feet sit just above it. With the stacking lip off, dividers reach the rim.",
+  'binDesigner.dividerHeightLipCeilingShort':
+    "Auto stops dividers just below a stacked bin's feet.",
   'binDesigner.dividerDimensions': '{length} × {height}mm',
   'binDesigner.dividerHeightOnly': '{height}mm tall',
   'binDesigner.labelTabs': 'Label tabs',
@@ -1946,6 +2140,7 @@ const en: Record<string, string> = {
   'binDesigner.plates.blank': 'blank',
   'binDesigner.plates.preview': 'Preview plates',
   'binDesigner.plates.export': 'Export plates',
+  'binDesigner.plates.downloadFormat': 'Download label plates ({format})',
   'binDesigner.plates.exportComplete': 'Label plates exported',
   'binDesigner.plates.exportFailed': 'Label plate export failed',
   'binDesigner.plates.dialogTitle': 'Export label plates',
@@ -1967,7 +2162,6 @@ const en: Record<string, string> = {
     'Click the included plate (or any Cullenect / gflabel plate you already own) into each socket, and pick the one that snaps in firmly and releases cleanly.',
   'binDesigner.fitSample.tip3': 'Enter that socket’s embossed value in the plate fit offset field.',
   'binDesigner.angledDividers.title': 'Diagonal dividers',
-  'binDesigner.angledDividers.toggleLabel': 'Enable diagonal divider editing',
   'binDesigner.angledDividers.rowLabel': 'Comp {a} ↔ Comp {b}',
   'binDesigner.angledDividers.editRowLabel': 'Edit divider between Comp {a} and Comp {b}',
   'binDesigner.angledDividers.resetAll': 'Reset all',
@@ -1993,13 +2187,13 @@ const en: Record<string, string> = {
   'binDesigner.angledDividers.applyLeanToAxis': 'Apply lean to all parallel dividers',
   'binDesigner.angledDividers.conflictNotice':
     'Scoops, label tabs, and inserts are removed along tilted dividers.',
-  'binDesigner.angledDividers.helpButtonLabel': 'About diagonal dividers',
   'binDesigner.angledDividers.infoBody':
     'Tilt interior walls to create wedge-shaped compartments. Select a divider, then set Angle to turn it in plan, or Lean to stand it over so contents slide in at a slope.',
   'binDesigner.angledDividers.slotIncompatible':
     "Slots aren't supported on diagonal dividers (coming in v2).",
   'binDesigner.angledDividers.teaser':
-    'Tilt or lean interior walls to create wedge-shaped compartments. Click a divider on the grid to start.',
+    'Tilt or lean interior walls to create wedge-shaped compartments.',
+  'binDesigner.angledDividers.teaserDetail': 'Click a divider on the grid to start.',
   'binDesigner.compartmentNumberLabel': 'Comp. {n}',
   'binDesigner.labelText': 'Label text',
   'binDesigner.labelTextUseBinName': 'Use bin name “{name}”',
@@ -2009,6 +2203,8 @@ const en: Record<string, string> = {
   'binDesigner.labelWarningJump': 'Open {group}',
   'binDesigner.labelTextFilled': '{filled} of {total} filled',
   'binDesigner.labelTextLayout': 'Label text layout',
+  'binDesigner.labelTextLayoutLabelPlaceholder':
+    'Left blank, linked bins print their layout labels',
   'binDesigner.labelTextPerCompartment': 'One per compartment',
   'binDesigner.labelTextPerRow': 'One per row',
   'binDesigner.labelTextBlankCount.one': '1 tab will print blank',
@@ -2104,15 +2300,41 @@ const en: Record<string, string> = {
   'binDesigner.lid.section.text': 'Lid text',
   'binDesigner.lid.text.placeholder': 'e.g. Cables',
   'binDesigner.lid.text.aria': 'Lid text',
+  'binDesigner.lid.text.rotation': 'Rotation',
+  'binDesigner.lid.text.rotationOption': '{angle}°',
   'binDesigner.infoButton': 'More information',
+  'binDesigner.featureTip.watch': 'Watch a clip: {feature}',
+  'binDesigner.featureTip.play': 'Play clip',
+  'binDesigner.featureTip.scoops':
+    'A curved ramp up the wall, so small parts slide out with one finger.',
+  'binDesigner.featureTip.lids':
+    'A lid that presses on, slides in or swings open. Click-rail and magnetic lids hold tighter.',
+  'binDesigner.featureTip.cutEditor':
+    'Draw a pocket shaped like your part, then repeat it across the bin.',
+  'binDesigner.featureTip.customShape': 'Click grid cells off to make an L, T or U shaped bin.',
+  'binDesigner.featureTip.compartments':
+    'Set the columns and rows, then drag across cells to merge them.',
+  'binDesigner.featureTip.scanToPocket':
+    'Photograph a tool with your phone and get a pocket traced to its outline.',
+  'binDesigner.featureTip.labelTabs':
+    'A sloped ledge along the back of each compartment, where a label sits.',
+  'binDesigner.featureTip.handles':
+    'A slot through the wall to hook a finger in and lift the bin from a deep drawer.',
+  'binDesigner.featureTip.wallCutouts':
+    'Cut an opening through a wall, to reach in from the front or run a cable.',
+  'binDesigner.featureTip.pullTab':
+    'A grip raised above the wall, to pull the bin out of a snug drawer.',
+  'binDesigner.featureTip.overhang':
+    'Grow the walls past the grid to fill the gap at the edge of a drawer.',
+  'binDesigner.featureTip.slant': 'Lean the bin so tall things like pens fit a shallow drawer.',
   'binDesigner.lid.text.useStackLipOnly': 'Use stacking lip only',
-  'binDesigner.lid.text.disabledStackable':
-    'Not available with a full stack grid. Switch to “Stacking lip only” to free up the lid’s top face.',
+  'binDesigner.lid.text.disabledStackable': 'Not available with a full stack grid.',
   'binDesigner.lid.text.disabledPolygon': 'Not available for custom-shape bins.',
   'binDesigner.lid.text.trayHint': 'Text is placed on the tray floor, inside the rim.',
   'binDesigner.lid.text.stackLipHint': 'Text is placed on the recessed floor inside the lip.',
   'binDesigner.lid.text.stackLipEmbossWarning':
-    'Raised text sits under whatever stacks on the lid, so it won’t seat flat. Engrave or cut through instead.',
+    'Raised text sits under whatever stacks on the lid, so it won’t seat flat.',
+  'binDesigner.lid.text.stackLipEmbossWarningDetail': 'Engrave or cut through instead.',
   'binDesigner.lid.topSurface.flat': 'Flat',
   'binDesigner.lid.topSurface.stackable': 'Stackable',
   'binDesigner.lid.topSurface.tray': 'Tray',
@@ -2128,7 +2350,8 @@ const en: Record<string, string> = {
   'binDesigner.lid.stackLipOnlyNoOp':
     'No effect at this size: a single-cell top is already one pocket.',
   'binDesigner.lid.stackLipOnlyPrintNote':
-    'The lid prints upside down, so a lip-only top leaves the whole face unsupported. The separate baseplate below avoids that.',
+    'The lid prints upside down, so a lip-only top leaves the whole face unsupported.',
+  'binDesigner.lid.stackLipOnlyPrintNoteDetail': 'The separate baseplate below avoids that.',
   'binDesigner.lid.stackLipOnlyHint':
     'One lip around the edge instead of the grid: a clear top face and less filament. Bins stacked on it locate on the outer lip, not per cell.',
   'binDesigner.lid.magnetHoles': 'Magnet pockets',
@@ -2141,6 +2364,12 @@ const en: Record<string, string> = {
   'binDesigner.lid.extraHeightAria': 'Extra lid height in millimeters',
   'binDesigner.lid.extraHeightHint':
     'Raises the lid so contents that stick out of a short bin (e.g. toothpicks) are enclosed. 0 = standard lid.',
+  'binDesigner.lid.heightUnits': 'Lid height',
+  'binDesigner.lid.heightUnitsAria': 'Lid height in height units',
+  'binDesigner.lid.heightUnitToggle': 'Lid height unit',
+  'binDesigner.lid.heightUnitsHint': 'Level with the rim of a bin {units}u taller',
+  'binDesigner.lid.heightUnitsDetail':
+    'Sizes the lid in whole height units, so its top lines up with the rim of a taller bin beside it. With a stackable top, the top of its grid lines up. The lid keeps that height when other settings change.',
   'binDesigner.lid.topThickness': 'Lid thickness',
   'binDesigner.lid.topThicknessAria': 'Lid top plate thickness in millimeters',
   'binDesigner.lid.topThicknessHint':
@@ -2237,7 +2466,9 @@ const en: Record<string, string> = {
   'binDesigner.lid.retentionMagnetDepth': 'Magnet depth',
   'binDesigner.lid.retentionMagnetDepthAria': 'Retention magnet depth in millimeters',
   'binDesigner.lid.retentionMagnetHint':
-    'Press a ⌀{diameter} × {depth} mm magnet into each corner of the bin and lid. Glue them in with matching poles facing so the lid only closes one way.',
+    'Press a ⌀{diameter} × {depth} mm magnet into each corner of the bin and lid.',
+  'binDesigner.lid.retentionMagnetHintDetail':
+    'Glue them in with matching poles facing so the lid only closes one way.',
   'binDesigner.lid.retentionEdgeMagnets': 'Edge magnets',
   'binDesigner.lid.retentionEdgeMagnetsAria': 'Extra retention magnets per long edge',
   'binDesigner.lid.retentionEdgeMagnetsHint':
@@ -2247,29 +2478,44 @@ const en: Record<string, string> = {
   'binDesigner.lid.trayWall': 'Tray rim',
   'binDesigner.lid.trayWallAria': 'Tray rim wall thickness in millimeters',
   'binDesigner.lid.compat.heading': 'Compatibility notes',
-  'binDesigner.lid.compat.wallCutouts':
-    'Wall cutouts remove the lip they cut through. The click rail on {sides} stops short of each window and takes whatever wall is left.',
+  'binDesigner.lid.compat.wallCutouts': 'Wall cutouts remove the lip they cut through.',
+  'binDesigner.lid.compat.wallCutoutsDetail':
+    'The click rail on {sides} stops short of each window and takes whatever wall is left.',
   'binDesigner.lid.compat.wallCutoutsAllSides':
-    'The wall cutouts leave no lip on any wall, so the lid has nothing to mate with. Narrow them, or turn some off.',
+    'The wall cutouts leave no lip on any wall, so the lid has nothing to mate with.',
+  'binDesigner.lid.compat.wallCutoutsAllSidesDetail': 'Narrow them, or turn some off.',
   'binDesigner.lid.compat.knifeSlots':
-    'Each knife exit notches the lip where the blade leaves the block. The click rail on {sides} goes around every notch and takes the wall that is left.',
+    'Each knife exit notches the lip where the blade leaves the block.',
+  'binDesigner.lid.compat.knifeSlotsDetail':
+    'The click rail on {sides} goes around every notch and takes the wall that is left.',
   'binDesigner.lid.compat.openSides':
-    'An open-sided pocket takes its whole span out of the lip where it leaves the bin. The click rail on {sides} goes around every opening and takes the wall that is left.',
+    'An open-sided pocket takes its whole span out of the lip where it leaves the bin.',
+  'binDesigner.lid.compat.openSidesDetail':
+    'The click rail on {sides} goes around every opening and takes the wall that is left.',
   'binDesigner.lid.compat.wallPattern':
     'Wall pattern can perforate the lip, so the lid may sit loosely.',
   'binDesigner.lid.compat.shortBin':
     'Bin is 1U tall: the lid still seats but the grip is marginal.',
-  'binDesigner.lid.compat.tallLidShortBin':
+  'binDesigner.lid.compat.slanted': 'A slanted bin has no lid.',
+  'binDesigner.lid.compat.tallLidShortBin': 'A tall lid on a 1U bin can be knocked off.',
+  'binDesigner.lid.compat.tallLidShortBinDetail':
     'A tall lid on a 1U bin has a long lever arm on that marginal grip, so a knock may pop it off. Consider a taller bin or more snap-fit sides.',
-  'binDesigner.lid.compat.tallDividerPieces':
+  'binDesigner.lid.compat.tallDividerPieces': 'Divider pieces are taller than the bin interior.',
+  'binDesigner.lid.compat.tallDividerPiecesDetail':
     'Divider pieces are taller than the bin interior, so the lid will not seat with them inserted.',
-  'binDesigner.lid.compat.cellMaskHoles':
+  'binDesigner.lid.compat.cellMaskHoles': 'Inner edges of the custom shape get no rails.',
+  'binDesigner.lid.compat.cellMaskHolesDetail':
     'Custom shape has interior holes: those inner edges have lip but no rails (asymmetric grip).',
   'binDesigner.lid.relieveInterior': 'Relieve interior at the lid seam',
   'binDesigner.lid.relieveInteriorHint':
     'The top of the cavity’s perimeter is trimmed so the click rails run unbroken. Dividers stop a few mm short of the rim and label shelves sit lower.',
   'binDesigner.lid.relieveInteriorOffHint':
     'The rails notch around each divider and label tab instead. Kept for designs made before this option, so they reprint identically.',
+  'binDesigner.lid.fill': 'Lid fill',
+  'binDesigner.lid.fillHint':
+    'Fills the lid down to its bottom edge, just above the dividers, so small parts stay in their compartment. Dividers keep their full height at the walls.',
+  'binDesigner.lid.relieveInteriorFillReason':
+    'Not used while the lid fill is on: the dividers keep their full height at the walls.',
   'binDesigner.lid.editCutouts': 'Cut holes in the lid',
   'binDesigner.lid.editCutoutsCount': 'Cut holes in the lid ({count})',
   'binDesigner.lid.editCutoutsHint':
@@ -2277,26 +2523,39 @@ const en: Record<string, string> = {
   'binDesigner.lid.editCutoutsFull':
     'Holding the most shapes a lid can take ({max}). Delete one to add another.',
   'binDesigner.lid.editCutoutsBlocked':
-    'Available on a lid with a flat top and a rectangular footprint. A full stack grid covers the top face; a lip-only grid leaves it usable.',
+    'Available on a lid with a flat top and a rectangular footprint.',
+  'binDesigner.lid.editCutoutsBlockedDetail':
+    'A full stack grid covers the top face; a lip-only grid leaves it usable.',
   'binDesigner.lid.compat.compartmentDividers':
-    'Compartment dividers reach the top of the cavity, where the click rail drops in. The rail on {sides} is notched around each one so the lid can still seat.',
-  'binDesigner.lid.compat.labelTabs':
-    'Label tabs take the wall they hang from. The click rail on {sides} fills only the gaps they leave, and rails on the other walls stop short of them.',
-  'binDesigner.lid.compat.handles':
-    'Handles on {sides} reach up into the lip. The click rail on those walls stops short of each hole and takes whatever wall is left.',
+    'Compartment dividers reach the top of the cavity, where the click rail drops in.',
+  'binDesigner.lid.compat.compartmentDividersDetail':
+    'The rail on {sides} is notched around each one so the lid can still seat.',
+  'binDesigner.lid.compat.labelTabs': 'Label tabs take the wall they hang from.',
+  'binDesigner.lid.compat.labelTabsDetail':
+    'The click rail on {sides} fills only the gaps they leave, and rails on the other walls stop short of them.',
+  'binDesigner.lid.compat.handles': 'Handles on {sides} reach up into the lip.',
+  'binDesigner.lid.compat.handlesDetail':
+    'The click rail on those walls stops short of each hole and takes whatever wall is left.',
   'binDesigner.lid.compat.handlesAllSides':
-    'The handle holes leave no usable lip on any wall, so nothing is left for the lid to grip. Narrow them, or turn some off.',
+    'The handle holes leave no usable lip on any wall, so nothing is left for the lid to grip.',
+  'binDesigner.lid.compat.handlesAllSidesDetail': 'Narrow them, or turn some off.',
   'binDesigner.lid.compat.topDownCutoutsAtLip':
     'A solid-bin cutout reaches up into the lip, so the lid may sit loosely above it.',
   'binDesigner.lid.compat.scoopFillsLip':
+    'The finger scoop fills the rail recess on {sides}, so that rail is skipped.',
+  'binDesigner.lid.compat.scoopFillsLipDetail':
     'The finger scoop reaches the top of the wall on {sides}, filling the recess the click rail hooks under, so that rail is auto-skipped. Lower the scoop height, or switch it to Auto, to keep it.',
   'binDesigner.lid.compat.magnetsPolygonUnsupported':
+    'Custom shapes take no corner magnets, so the lid fits by friction.',
+  'binDesigner.lid.compat.magnetsPolygonUnsupportedDetail':
     'Custom shapes can’t place corner magnets, so the lid falls back to friction-fit with no magnets.',
   'binDesigner.lid.compat.magnetTooDeepForBin':
-    'The retention magnet is deeper than the bin interior can hold. Reduce its depth or use a taller bin.',
+    'The retention magnet is deeper than the bin interior can hold.',
+  'binDesigner.lid.compat.magnetTooDeepForBinDetail': 'Reduce its depth or use a taller bin.',
   'binDesigner.lid.compat.fix.magnetTooDeepForBin': 'reduce retention magnet depth',
-  'binDesigner.lid.compat.magnetBinTooSmall':
-    'The bin is too small to fit corner magnets. Use a larger bin or a smaller magnet diameter.',
+  'binDesigner.lid.compat.magnetBinTooSmall': 'The bin is too small to fit corner magnets.',
+  'binDesigner.lid.compat.magnetBinTooSmallDetail':
+    'Use a larger bin or a smaller magnet diameter.',
   'binDesigner.lid.compat.fix.magnetBinTooSmall': 'use a larger bin or a smaller magnet',
   'binDesigner.lid.compat.disabledOne': 'Resolve the conflict to enable lid: {detail}',
   'binDesigner.lid.compat.disabledMany': 'Resolve {count} conflicts to enable lid',
@@ -2304,26 +2563,48 @@ const en: Record<string, string> = {
   'binDesigner.lid.compat.fix.tallDividerPieces': 'reduce divider piece height',
   'binDesigner.lid.compat.fix.handlesAllSides': 'disable some handles',
   'binDesigner.lid.compat.slideFlushNeedsNoLip':
-    'A rim-height channel leaves no room for the stacking lip. Turn the lip off, or move the channel under it.',
+    'A rim-height channel leaves no room for the stacking lip.',
+  'binDesigner.lid.compat.slideFlushNeedsNoLipDetail':
+    'Turn the lip off, or move the channel under it.',
   'binDesigner.lid.compat.fix.slideFlushNeedsNoLip': 'turn off the stacking lip',
-  'binDesigner.lid.compat.slideUnbuildable':
+  'binDesigner.lid.compat.slideUnbuildable': 'This bin can’t take a sliding lid.',
+  'binDesigner.lid.compat.slideUnbuildableDetail':
     'This bin can’t take a sliding lid: it’s too small or too shallow for the channel, or its style has no cavity to cover.',
+  'binDesigner.lid.compat.fix.slideUnbuildable': 'pick another attachment',
+  'binDesigner.lid.compat.slideFillTooHigh':
+    'The solid fill sits too close to the rim for the lid’s channel.',
+  'binDesigner.lid.compat.slideFillTooHighDetail':
+    'Lowering the fill makes room for the channel. Pockets are cut from the top of the fill, so they move down with it.',
+  'binDesigner.lid.compat.fix.slideFillTooHigh': 'lower the solid fill',
   'binDesigner.lid.compat.slideInteriorBlocked':
-    'Dividers, label tabs or a scoop reach into the lid’s path and will stop it sliding. Turn on “Relieve interior” under Advanced to cut them clear.',
-  'binDesigner.lid.compat.slideLongSpan':
-    'The lid is wide enough to bow between its runners. Increase its thickness under Advanced.',
+    'Dividers, label tabs or a scoop reach into the lid’s path and will stop it sliding.',
+  'binDesigner.lid.compat.slideInteriorBlockedDetail':
+    'Turn on “Relieve interior” under Advanced to cut them clear.',
+  'binDesigner.lid.compat.slideLongSpan': 'The lid is wide enough to bow between its runners.',
+  'binDesigner.lid.compat.slideLongSpanDetail': 'Increase its thickness under Advanced.',
   'binDesigner.lid.compat.slideRimInterrupted':
-    'The stacking lip is cut away on the {sides} wall so the lid can slide in. Bins still stack on the other three.',
-  'binDesigner.lid.compat.slideCatchThin':
+    'The stacking lip is cut away on the {sides} wall so the lid can slide in.',
+  'binDesigner.lid.compat.slideRimInterruptedDetail': 'Bins still stack on the other three.',
+  'binDesigner.lid.compat.slideCatchThin': 'The finger catch is too thin to print well here.',
+  'binDesigner.lid.compat.slideCatchThinDetail':
     'The finger catch is the entry wall less the sliding clearance, which leaves it too thin to print well here. Reduce the clearance under Fine tuning, or use a thicker wall.',
   'binDesigner.lid.compat.slideChannelInterrupted':
-    'A cutout or handle opens the {sides} wall the lid runs along. The runner will bridge that opening, blocking part of it and standing unsupported across it.',
+    'A cutout or handle opens the {sides} wall the lid runs along.',
+  'binDesigner.lid.compat.slideChannelInterruptedDetail':
+    'The runner will bridge that opening, blocking part of it and standing unsupported across it.',
   'binDesigner.lid.compat.slideWallPattern':
     'The wall pattern perforates the walls the runners weld to, which weakens them.',
-  'binDesigner.lid.compat.hingeUnbuildable':
+  'binDesigner.lid.compat.hingeUnbuildable': 'This bin can’t take a hinged lid.',
+  'binDesigner.lid.compat.hingeUnbuildableDetail':
     'This bin can’t take a hinged lid: the hinge wall is too short, or cutouts and handles have left no unbroken stretch of rim for the knuckles.',
-  'binDesigner.lid.compat.hingeStackableTop':
-    'A hinged lid can’t carry a stackable top. Turn off the stackable top.',
+  'binDesigner.lid.compat.hingeStackableTop': 'A hinged lid can’t carry a stackable top.',
+  'binDesigner.lid.compat.hingeStackableTopDetail': 'Turn off the stackable top.',
+  'binDesigner.lid.compat.hingeSnapTooTall': 'The snap catch is left off at this lid height.',
+  'binDesigner.lid.compat.hingeSnapTooTallDetail':
+    'At this lid height the snap catch can’t clear the rim as the lid opens, so the lid is built without it. Pick Magnets or Nothing under “Holds shut with”, or lower the extra lid height.',
+  'binDesigner.lid.compat.hingeGripOnHinge': 'A grip on the hinge wall can’t help lift the lid.',
+  'binDesigner.lid.compat.hingeGripOnHingeDetail':
+    'A lid grip on the hinge wall can’t help lift a hinged lid, which only opens at the opposite wall. Move the grip to that wall.',
   'binDesigner.lid.compat.fix.hingeStackableTop': 'turn off the stackable top',
   'binDesigner.lid.compat.fix.hingeUnbuildable':
     'free up the hinge wall or pick another attachment',
@@ -2345,14 +2626,14 @@ const en: Record<string, string> = {
   'binDesigner.preview.lidExplodeSlider': 'Lid open/close',
   'binDesigner.overhang.title': 'Overhang',
   'binDesigner.overhang.hint':
-    'Grow the walls outward to fill a drawer gap. The base feet stay put, leaving a flat bottom under the overhang.',
+    'Grow the walls outward to fill a drawer gap. The base feet stay put, so the bottom under the overhang is flat at the top of the base and needs supports to print. On a flat base it rests on the bed.',
   'binDesigner.overhang.side.left': 'Left',
   'binDesigner.overhang.side.right': 'Right',
   'binDesigner.overhang.side.front': 'Front',
   'binDesigner.overhang.side.back': 'Back',
   'binDesigner.overhang.feet': 'Feet under overhang',
   'binDesigner.overhang.feetHint':
-    'Add grid-aligned feet beneath the overhang where they fit to print, instead of a flat bottom.',
+    'Add grid-aligned feet beneath the overhang where it is wide enough to print them, so that part reaches the bed. A narrower overhang still needs supports.',
   'binDesigner.overhang.taper.title': 'Taper walls',
   'binDesigner.overhang.taper.hint':
     "Angle the wall outward above the base so the bin reaches into a drawer's curved sides. The base keeps its overhang width, so the bin still sits flat.",
@@ -2362,6 +2643,14 @@ const en: Record<string, string> = {
   'binDesigner.overhang.taper.bandHeight': 'Rises up',
   'binDesigner.overhang.taper.sidesHeading': 'Flare, per side',
   'binDesigner.overhang.taper.sideAria': 'Flare {side}',
+  'binDesigner.overhang.placement.title': 'Overhang from the layout',
+  'binDesigner.overhang.placement.marginHint':
+    "This layout bin extends into the drawer margin, so it prints with the overhang below instead of this design's own.",
+  'binDesigner.overhang.placement.expandToFitHint':
+    "This layout bin was expanded to fit, so it prints with the overhang below instead of this design's own.",
+  'binDesigner.overhang.placement.changeInLayout': 'Change it in the layout, not here.',
+  'binDesigner.overhang.placement.prints':
+    "This bin prints with the overhang below instead of this design's own.",
   'binDesigner.itemKind.bin': 'Bin',
   'binDesigner.itemKind.bin.description': 'Custom Gridfinity storage bin',
   'binDesigner.itemKind.toolRack': 'Tool rack',
@@ -2597,6 +2886,8 @@ const en: Record<string, string> = {
   'binDesigner.lid.gripMode.scallop': 'Scallop',
   'binDesigner.lid.gripModeStackConflict':
     "A shadow line moves the lid's outer face, which is what a bin stacked on top registers against. Use a chamfer or a scallop instead.",
+  'binDesigner.lid.gripModeStackConflictShort':
+    "A shadow line can't go on a stackable lid. Use a chamfer or a scallop.",
   'binDesigner.lid.gripSides': 'Walls',
   'binDesigner.lid.gripNoSides': 'Pick at least one wall for the relief.',
   'binDesigner.lid.gripCoverage': 'Width',
@@ -2606,6 +2897,7 @@ const en: Record<string, string> = {
     'Cuts {depth}mm deep, {height}mm tall, leaving {skin}mm of lid above it',
   'binDesigner.lid.gripHeightClamped':
     'Shortened to fit: this lid has {skirt}mm above the seam, and some of it has to stay as solid material. A taller lid allows a taller relief.',
+  'binDesigner.lid.gripHeightClampedShort': 'Shortened to fit the {skirt}mm of lid above the seam.',
   'binDesigner.lid.gripClamped.cavity':
     'Limited by the lid wall: any deeper would break into the cavity that grips the bin.',
   'binDesigner.lid.gripClamped.trayWall':
@@ -2613,7 +2905,9 @@ const en: Record<string, string> = {
   'binDesigner.lid.gripClamped.edgeMagnet': 'Limited by the edge magnets sitting behind this wall.',
   'binDesigner.lid.gripBinDip': "Also dip the bin's lip",
   'binDesigner.lid.gripBinDipWarning':
-    'Removes the stacking lip across the same span so a fingertip gets under the lid, and eases the click rails there. A bin stacked on top has nothing to locate against along that stretch.',
+    'Removes the stacking lip across the same span so a fingertip gets under the lid, and eases the click rails there.',
+  'binDesigner.lid.gripBinDipStacking':
+    'A bin stacked on top has nothing to locate against along that stretch.',
   'binDesigner.lid.section.tray': 'Organizer tray',
   'binDesigner.lid.matchingTrayHint':
     'A lid keeps dust out; a tray keeps things from sliding. This starts a new design sized to this bin, with a lid base already set up.',
@@ -2726,8 +3020,29 @@ const en: Record<string, string> = {
   'binDesigner.panel.viewAsScroll': 'Single scroll',
   'binDesigner.panel.viewAsRail': 'Compact sections',
   'binDesigner.printFit.fits': 'Fits your {width} × {depth} mm print bed.',
+  'binDesigner.printFit.slantTooLarge':
+    'This slanted bin is too big for your {width} \u00d7 {depth} mm print bed.',
+  'binDesigner.slant.title': 'Slant',
+  'binDesigner.slant.hint':
+    'Leans the bin toward one side so tall items fit a shallow drawer, while its base stays flat on the grid. Bins in a row lean on each other.',
+  'binDesigner.slant.angle': 'Angle',
+  'binDesigner.slant.angleAria': 'Slant angle in degrees',
+  'binDesigner.slant.side': 'Leans toward',
+  'binDesigner.slant.endSupport': 'End support',
+  'binDesigner.slant.endSupportHint':
+    'A wedge for the last bin in a row to rest on, exported as a second part.',
+  'binDesigner.slant.topOffset': 'Top reaches {mm} mm past the base',
+  'binDesigner.slant.longestItem': 'Fits straight items up to {mm} mm long',
+  'binDesigner.slant.steep': 'Past 45\u00b0 the leaning wall prints as an unsupported overhang.',
+  'binDesigner.slant.steepDetail':
+    'The walls are also thinner across the slope: they keep their thickness level with the bed, not square to the wall.',
+  'binDesigner.slant.unavailable': 'Unavailable with {feature}.',
+  'binDesigner.slant.noStackingLip': 'A slanted bin has no stacking lip.',
+  'binDesigner.printFit.slantTooLargeDetail':
+    "A slanted bin can't be split, so lower the angle or make the bin smaller.",
   'binDesigner.dependency.enableStackingLip': 'Enable stacking lip',
   'binDesigner.dependency.editFootprint': 'Edit footprint',
+  'binDesigner.dependency.editHeight': 'Edit height',
   'binDesigner.multiColor.enableHint':
     'Assign different filaments to bin parts and export a multi-color 3MF.',
   'binDesigner.colors.body': 'Body',
@@ -2784,8 +3099,9 @@ const en: Record<string, string> = {
   'binDesigner.colors.deletePalette': 'Delete palette',
   'binDesigner.colors.noPalettes': 'No saved palettes yet',
   'binDesigner.colors.suggest': 'Suggest matching colors',
-  'binDesigner.colors.firstTimeHint':
-    'Each color zone exports as a separate filament in 3MF. Your slicer will let you assign each one to an AMS/MMU slot.',
+  'binDesigner.colors.firstTimeHint': 'Each color zone exports as a separate filament in 3MF.',
+  'binDesigner.colors.firstTimeHintDetail':
+    'Your slicer will let you assign each one to an AMS/MMU slot.',
   'binDesigner.colors.firstTimeHint.dismiss': 'Got it',
   'binDesigner.colors.slicerHandoff.title': 'Filaments in your slicer',
   'binDesigner.colors.slicerHandoff.description':
@@ -2836,6 +3152,7 @@ const en: Record<string, string> = {
   'binDesigner.shape.grid.cellLabel.empty': 'Cell {col}, {row}: empty',
   'binDesigner.shape.custom.hint':
     'Custom shape. Compartments, dividers, label tabs, and scoop are unavailable for non-rectangular bins.',
+  'binDesigner.shape.custom.unavailable': 'Needs a rectangular footprint.',
 
   'binDesigner.splitAxisInfo': 'Split along {axis} into {count} pieces',
 
@@ -2844,16 +3161,19 @@ const en: Record<string, string> = {
   'binDesigner.splitAxisBoth': 'width × depth',
   'binDesigner.splitConnectors': 'Alignment connectors',
   'binDesigner.splitConnectorsUnavailableLightweight':
-    'Unavailable on lightweight bins: the shelled floor has no solid material for the scarf. Use wall connectors instead.',
+    'Unavailable on lightweight bins: the shelled floor has no solid material for the scarf.',
   'binDesigner.splitWallConnectors': 'Wall connectors',
   'binDesigner.splitConnectorNozzleNotice':
     'Sized for a {nozzle}mm nozzle: connectors are enlarged to stay printable; very small pieces may omit them.',
+  'binDesigner.splitConnectorNozzleNoticeShort': 'Connectors sized for a {nozzle}mm nozzle.',
   'binDesigner.splitAssembled': 'Assembled',
   'binDesigner.splitExploded': 'Exploded',
   'binDesigner.cutouts.instructions':
     'Draw rectangles, circles, and custom pen paths as tool-shaped recesses in the solid bin top.',
   'binDesigner.cutouts.taperBandHint':
     'Hatched edge: a cutout that reaches the floor is trimmed here so the flared wall stays solid.',
+  'binDesigner.cutouts.taperBandHintShort':
+    'Hatched edge: cutouts that reach the floor are trimmed here.',
   'binDesigner.cutouts.instructionsWorkspaceHint':
     'Open the full editor for precise control, rulers, and alignment tools.',
   'binDesigner.cutouts.pointerTool': 'Select',
@@ -2875,6 +3195,55 @@ const en: Record<string, string> = {
   'binDesigner.cutouts.clearanceInfo': 'Extra size added so parts drop in',
   'binDesigner.cutouts.chamfer': 'Entry chamfer',
   'binDesigner.cutouts.chamferInfo': 'Beveled rim so parts self-center',
+  'binDesigner.cutouts.entryProfile': 'Entry edge',
+  'binDesigner.cutouts.entryProfile.chamfer': 'Chamfer',
+  'binDesigner.cutouts.entryProfile.round': 'Round',
+  'binDesigner.cutouts.entryRound': 'Entry round',
+  'binDesigner.cutouts.entryRoundInfo':
+    'Rounded rim, smooth to the hand, so nothing catches on the way in',
+  'binDesigner.cutouts.finger.name': 'Finger access',
+  'binDesigner.cutouts.finger.nameDetail':
+    'Makes this cut a scoop beside a pocket, so a fingertip can reach under the tool and lift it',
+  'binDesigner.cutouts.finger.form': 'Finger cut shape',
+  'binDesigner.cutouts.finger.form.slot': 'Slot',
+  'binDesigner.cutouts.finger.form.circle': 'Round',
+  'binDesigner.cutouts.finger.bottom': 'Finger cut floor',
+  'binDesigner.cutouts.finger.bottom.curved': 'Curved',
+  'binDesigner.cutouts.finger.bottom.flat': 'Flat',
+  'binDesigner.cutouts.finger.add': 'Add finger access',
+  'binDesigner.cutouts.finger.addHint':
+    'Cuts a scoop beside this pocket so you can lift the tool out',
+  'binDesigner.cutouts.finger.repeatBlocked':
+    'Each copy of a repeat needs its own. Flatten to cutouts first.',
+  'binDesigner.cutouts.split.add': 'Split into two depths',
+  'binDesigner.cutouts.split.addHint':
+    'Draw a line across the pocket to cut each side to its own depth',
+  'binDesigner.cutouts.split.drawHint': 'Drag a line across the pocket on the board',
+  'binDesigner.cutouts.split.cancel': 'Stop drawing',
+  'binDesigner.cutouts.split.blocked.group':
+    'A pocket in a group cuts as one. Ungroup it to split it.',
+  'binDesigner.cutouts.split.blocked.tilt':
+    'A leaning pocket cannot be split. Set its lean to 0° first.',
+  'binDesigner.cutouts.split.blocked.through': 'A through cut has no floor to split.',
+  'binDesigner.cutouts.split.name': 'Split pocket',
+  'binDesigner.cutouts.split.nameDetail':
+    "A line across the pocket cuts each side to its own depth from the same top, with a sharp step between them. Side A keeps the pocket's own depth; side B takes the depth set here.",
+  'binDesigner.cutouts.split.paused.group':
+    'Paused while the pocket is in a group, so it cuts at one depth.',
+  'binDesigner.cutouts.split.paused.tilt':
+    'Paused while the pocket leans, so it cuts at one depth.',
+  'binDesigner.cutouts.split.paused.through': 'Paused while the pocket cuts through.',
+  'binDesigner.cutouts.split.sideBDepth': 'Side B depth',
+  'binDesigner.cutouts.split.redraw': 'Redraw line',
+  'binDesigner.cutouts.split.remove': 'Remove split',
+  'binDesigner.cutouts.split.sidesHint':
+    "Side A keeps the pocket's depth. The board marks each side.",
+  'binDesigner.cutouts.split.sideA': 'A',
+  'binDesigner.cutouts.split.sideB': 'B',
+  'binDesigner.cutouts.split.problem.crossings':
+    'That line has to cross the pocket once, from edge to edge.',
+  'binDesigner.cutouts.split.problem.small':
+    'That line leaves a sliver. Draw it further into the pocket.',
   'binDesigner.cutouts.section.transform': 'Transform',
   'binDesigner.cutouts.section.shape': 'Shape',
   'binDesigner.cutouts.section.knife': 'Knife',
@@ -2912,8 +3281,9 @@ const en: Record<string, string> = {
   'binDesigner.cutouts.repeat.presetRing': 'Ring of {count}',
   'binDesigner.cutouts.repeat.presetNoFit': 'Not enough room from this position',
   'binDesigner.cutouts.repeat.blockedGrouped': 'Select the whole group to repeat it as one piece.',
-  'binDesigner.cutouts.repeat.blockedDescendant':
-    'Something inside this group already repeats. Remove that repeat to repeat the whole group as one piece.',
+  'binDesigner.cutouts.repeat.blockedDescendant': 'Something inside this group already repeats.',
+  'binDesigner.cutouts.repeat.blockedDescendantDetail':
+    'Remove that repeat to repeat the whole group as one piece.',
   'binDesigner.cutouts.repeat.groupNoRotate':
     'A group repeats as one piece, so every copy keeps the same angle.',
   'binDesigner.cutouts.repeat.blockedPath': 'Repeat is not available for pen paths.',
@@ -2950,6 +3320,33 @@ const en: Record<string, string> = {
   'binDesigner.cutouts.depthShortfall':
     'The bin has room for {achievable}mm of this {requested}mm cut. Lower the cut depth or lean, or move the cutout away from the edge.',
   'binDesigner.cutouts.throughDepthHint': 'Cuts through all {depth}mm of the plate.',
+  'binDesigner.cutouts.depthMode': 'Depth mode',
+  'binDesigner.cutouts.depthMode.fixed': 'Fixed',
+  'binDesigner.cutouts.depthMode.floor': 'To floor',
+  'binDesigner.cutouts.depthMode.through': 'Through',
+  'binDesigner.cutouts.floorMm': 'Floor',
+  'binDesigner.cutouts.floorMmDetail':
+    'Plastic left under the pocket, measured from the bottom of the bin. The pocket keeps this floor when the bin gets taller or shorter.',
+  'binDesigner.cutouts.cutsDepth': 'Cuts {depth}mm deep.',
+  'binDesigner.cutouts.throughHint': 'Opens out of the bottom of the bin.',
+  'binDesigner.cutouts.throughBlocked.group': 'Ungroup it to cut through.',
+  'binDesigner.cutouts.throughBlocked.tilt': 'Set lean to 0 to cut through.',
+  'binDesigner.cutouts.throughBlocked.taper': 'Cutting through is off beside a tapered wall.',
+  'binDesigner.cutouts.throughBlocked.feet': 'Cutting through is off with detachable feet.',
+  'binDesigner.cutouts.throughBlocked.nesting': 'Cutting through is off for a Nesting body.',
+  'binDesigner.cutouts.depthPrompt.title.one': 'How thick is this tool?',
+  'binDesigner.cutouts.depthPrompt.title.other': 'How thick are these {count} tools?',
+  'binDesigner.cutouts.depthPrompt.remaining': '{count} left',
+  'binDesigner.cutouts.depthPrompt.thickness': 'Thickness (mm)',
+  'binDesigner.cutouts.depthPrompt.proud': 'Sticks out (mm)',
+  'binDesigner.cutouts.depthPrompt.hint':
+    'Measure the thickest part. The pocket is cut so the tool sits flush.',
+  'binDesigner.cutouts.depthPrompt.tooDeep':
+    'This bin has room for {max}mm. Make it taller, or let the tool stick out more.',
+  'binDesigner.cutouts.depthPrompt.raise': 'Make the bin {height}u tall',
+  'binDesigner.cutouts.depthPrompt.sameForAll': 'Same thickness for all {count}',
+  'binDesigner.cutouts.depthPrompt.skip': 'Skip',
+  'binDesigner.cutouts.depthPrompt.apply': 'Set depth',
   'binDesigner.cutouts.knifePreset': 'Preset',
   'binDesigner.cutouts.knifePreset.chef8': 'Chef 8"',
   'binDesigner.cutouts.knifePreset.chefWood': 'Chef (wood)',
@@ -3039,8 +3436,21 @@ const en: Record<string, string> = {
   'binDesigner.cutouts.autoArrange': 'Auto-arrange',
   'binDesigner.cutouts.gap': 'Gap',
   'binDesigner.cutouts.staggered': 'Stagger rows',
+  'binDesigner.cutouts.turnToFit': 'Turn shapes to fit',
   'binDesigner.cutouts.clearAll': 'Clear all',
   'binDesigner.cutouts.fitTest.button': 'Print fit test',
+  'binDesigner.shadowBoard.button': 'Export shadow board',
+  'binDesigner.shadowBoard.hint':
+    'The bin outline and every opening at true size, to cut a matching board or insert',
+  'binDesigner.shadowBoard.format': 'File format',
+  'binDesigner.shadowBoard.format.svg': 'SVG',
+  'binDesigner.shadowBoard.format.dxf': 'DXF',
+  'binDesigner.shadowBoard.clearance': "Include each pocket's clearance",
+  'binDesigner.shadowBoard.download.svg': 'Download SVG',
+  'binDesigner.shadowBoard.download.dxf': 'Download DXF',
+  'binDesigner.shadowBoard.problem.empty': 'This bin has no openings to export.',
+  'binDesigner.shadowBoard.problem.meshMissing':
+    'An imported model is still loading. Try again in a moment.',
   'binDesigner.cutouts.fitTest.dialogTitle': 'Cutout fit test',
   'binDesigner.cutouts.fitTest.dialogDescription':
     'A thin slice of this bin’s top, with every cutout at its real size, position and spacing. Print it, try your parts, and adjust Clearance until they drop in.',
@@ -3067,6 +3477,25 @@ const en: Record<string, string> = {
     'Bigger than your print bed, so the card exports as {count} pieces in a ZIP.',
   'binDesigner.cutouts.fitTest.warnSeamThroughCutout':
     'The card is too big for your print bed and there is no clear gap to cut through, so a seam crosses a cutout. That cutout cannot be measured on this card.',
+  'binDesigner.cutouts.fitTest.mode': 'What to print',
+  'binDesigner.cutouts.fitTest.modeCard': 'Full card',
+  'binDesigner.cutouts.fitTest.modeOutline': 'Outline only',
+  'binDesigner.cutouts.fitTest.dialogDescriptionOutline':
+    'Just a thin ring around each cutout, its inside edge exactly where the cutout wall will be. It prints in minutes with almost no filament, so you can check each part’s shape and fit from above.',
+  'binDesigner.cutouts.fitTest.outlineHeight': 'Outline height',
+  'binDesigner.cutouts.fitTest.outlineHeightHint':
+    '0.2 mm prints as a single layer. A few layers peel off the plate in one piece.',
+  'binDesigner.cutouts.fitTest.outlineWall': 'Ring width',
+  'binDesigner.cutouts.fitTest.outlineWallHint':
+    'Measured outward from the cutout edge, so the inside of every ring stays the real cutout size.',
+  'binDesigner.cutouts.fitTest.outlineTip':
+    'Leave it on the build plate and set each part inside its ring. Rides up onto the ring? Raise Clearance on that cutout. A wide gap all round? Lower it.',
+  'binDesigner.cutouts.fitTest.stepUnavailableOutline':
+    'STEP cannot carry the outline. Use STL or 3MF.',
+  'binDesigner.cutouts.fitTest.warnSplitOutline':
+    'Bigger than your print bed, so the outline exports as {count} pieces in a ZIP.',
+  'binDesigner.cutouts.fitTest.warnSeamThroughOutline':
+    'The outline is too big for your print bed and there is no clear gap to cut through, so a seam crosses a cutout. That cutout cannot be checked on this print.',
   'binDesigner.cutouts.group': 'Group',
   'binDesigner.cutouts.ungroup': 'Ungroup',
   'binDesigner.cutouts.pathfinder.title': 'Pathfinder',
@@ -3105,6 +3534,7 @@ const en: Record<string, string> = {
   'binDesigner.shapeList.derived.mesh': 'Imprint {w}×{d}',
   'binDesigner.shapeList.derived.knifeSlot': 'Knife slot {w}×{d}mm',
   'binDesigner.shapeList.derived.text': 'Text “{label}”',
+  'binDesigner.shapeList.derived.finger': 'Finger access {w}×{d}',
 
   'binDesigner.cutouts.arrange.bringForward': 'Bring Forward',
   'binDesigner.cutouts.arrange.sendBackward': 'Send Backward',
@@ -3139,6 +3569,9 @@ const en: Record<string, string> = {
   'binDesigner.cutouts.stlImport.rotateAxis': 'Rotate {axis} (degrees)',
   'binDesigner.cutouts.stlImport.oversizeWarning':
     'This model is larger than the bin interior. It will be placed anyway. Enlarge the bin or use a smaller model for a full pocket.',
+  'binDesigner.cutouts.stlImport.budget': 'With this mesh: {used} of {limit} triangles',
+  'binDesigner.cutouts.stlImport.overBudget':
+    'This mesh would exceed the design’s triangle limit. Remove a mesh imprint first.',
   'binDesigner.cutouts.stlImport.place': 'Place in bin',
   'binDesigner.importBin.title': 'Import STL as bin',
   'binDesigner.importBin.widthUnits': 'Width (units)',
@@ -3153,7 +3586,8 @@ const en: Record<string, string> = {
   'binDesigner.importedMesh.group': 'Imported bin',
   'binDesigner.importedMesh.source': 'Imported from {file}',
   'binDesigner.importedMesh.footprintHelp':
-    'These set the grid footprint the layout planner reserves for this bin. The mesh itself is never resized.',
+    'These set the grid footprint the layout planner reserves for this bin.',
+  'binDesigner.importedMesh.footprintHelpDetail': 'The mesh itself is never resized.',
   'binDesigner.importedMesh.exportStl': 'Export STL',
   'binDesigner.importedMesh.export3mf': '3MF',
   'binDesigner.importedMesh.exportFailed': 'Export failed. Try again',
@@ -3171,6 +3605,7 @@ const en: Record<string, string> = {
   'binDesigner.cutouts.scanImport.sheetPlaceHint':
     'Place the tool inside the marker frame and photograph it straight down.',
   'binDesigner.cutouts.scanImport.scaleLabel': 'Real-world size (longest side, mm)',
+  'binDesigner.cutouts.scanImport.scaleLabelLongest': 'Real-world length of the longest tool (mm)',
   'binDesigner.cutouts.scanImport.scaleHelp':
     'Enter the measured length so the cutout prints to scale.',
   'binDesigner.cutouts.scanImport.resultSize': '≈ {width} × {depth} mm',
@@ -3190,6 +3625,94 @@ const en: Record<string, string> = {
   'binDesigner.cutouts.scanImport.emptyCta': 'Scan a real tool with your phone',
   'binDesigner.cutouts.scanImport.emptyHelp':
     'Photograph any tool to trace its exact outline automatically.',
+  'binDesigner.cutouts.traceView.title': 'Trace a photo',
+  'binDesigner.cutouts.traceView.open': 'Trace a photo on this computer',
+  'binDesigner.cutouts.traceView.openHelp':
+    'Use a photo you already have. It never leaves this computer.',
+  'binDesigner.cutouts.traceView.drop.title': 'Drop a photo of your tools here',
+  'binDesigner.cutouts.traceView.drop.choose': 'Choose a photo',
+  'binDesigner.cutouts.traceView.drop.tipSurface':
+    'Lay the tools on a plain surface, with a gap between each.',
+  'binDesigner.cutouts.traceView.drop.tipReference':
+    'A card, the calibration sheet or a baseplate in the photo sets the size for you.',
+  'binDesigner.cutouts.traceView.drop.tipManual':
+    'Nothing like that in frame? Measure something in the photo, or mark a sheet of paper.',
+  'binDesigner.cutouts.traceView.privacy': 'Your photo never leaves this computer.',
+  'binDesigner.cutouts.traceView.photo.change': 'Choose another photo',
+  'binDesigner.cutouts.traceView.needsScale': 'Set the scale to add these tools.',
+  'binDesigner.cutouts.traceView.addMany': 'Add {count} to bin',
+  'binDesigner.cutouts.traceView.canvasLabel': 'Photo to trace',
+  'binDesigner.cutouts.traceView.rulerLength': '{length} mm',
+  'binDesigner.cutouts.traceView.zoomIn': 'Zoom in',
+  'binDesigner.cutouts.traceView.zoomOut': 'Zoom out',
+  'binDesigner.cutouts.traceView.fit': 'Fit photo',
+  'binDesigner.cutouts.traceView.scale.heading': 'Scale',
+  'binDesigner.cutouts.traceView.scale.ruler': 'Measured to scale from your ruler ({length} mm).',
+  'binDesigner.cutouts.traceView.scale.paperA4': 'Measured to scale from the A4 sheet.',
+  'binDesigner.cutouts.traceView.scale.paperLetter': 'Measured to scale from the US Letter sheet.',
+  'binDesigner.cutouts.traceView.scale.none': 'No size reference found',
+  'binDesigner.cutouts.traceView.scale.noneHint':
+    'Draw a ruler across something you know the length of, or mark the corners of a sheet of paper the tools lie on.',
+  'binDesigner.cutouts.traceView.scale.drawRuler': 'Draw a ruler',
+  'binDesigner.cutouts.traceView.scale.markPaper': 'Mark paper corners',
+  'binDesigner.cutouts.traceView.scale.usePhoto': 'Use the photo’s reference',
+  'binDesigner.cutouts.traceView.scale.clear': 'Clear scale',
+  'binDesigner.cutouts.traceView.ruler.hint':
+    'Click both ends of something you know the length of. Drag an end to adjust it.',
+  'binDesigner.cutouts.traceView.ruler.length': 'Length (mm)',
+  'binDesigner.cutouts.traceView.apply': 'Set scale',
+  'binDesigner.cutouts.traceView.paper.size': 'Paper size',
+  'binDesigner.cutouts.traceView.paper.a4': 'A4',
+  'binDesigner.cutouts.traceView.paper.letter': 'US Letter',
+  'binDesigner.cutouts.traceView.paper.hint':
+    'Click the four corners of the sheet. Drag a corner to adjust it.',
+  'binDesigner.cutouts.traceView.paper.count': '{count} of 4 corners marked',
+  'binDesigner.cutouts.traceView.paper.invalid':
+    'Those corners don’t make a sheet. Drag each one onto a corner of the paper.',
+  'binDesigner.cutouts.traceView.paper.tooSteep':
+    'At this angle the sheet’s long side can’t be told from its short one. Shoot from more directly above, or draw a ruler.',
+  'binDesigner.cutouts.traceView.tools.heading': 'Tools',
+  'binDesigner.cutouts.traceView.tools.none':
+    'No tools found yet. Click a tool in the photo, or draw a region around them.',
+  'binDesigner.cutouts.traceView.tools.tapHint':
+    'Click a tool to redraw its outline, or click one that was missed.',
+  'binDesigner.cutouts.traceView.region.draw': 'Draw region',
+  'binDesigner.cutouts.traceView.region.clear': 'Clear region',
+  'binDesigner.cutouts.traceView.region.hint': 'Drag a box around the tools to look only there.',
+  'binDesigner.cutouts.traceView.sensitivity': 'Sensitivity',
+  'binDesigner.cutouts.traceView.sensitivityAuto': 'Auto',
+  'binDesigner.cutouts.traceView.sensitivityHint':
+    'Raise it to pick up faint tools, lower it to drop shadows and specks.',
+  'binDesigner.cutouts.outline.section': 'Outline',
+  'binDesigner.cutouts.outline.simplify': 'Simplify',
+  'binDesigner.cutouts.outline.curves': 'Smooth into curves',
+  'binDesigner.cutouts.outline.curvesDetail':
+    'Fits curves with handles in place of many short straight steps, so the outline is smooth and quick to edit.',
+  'binDesigner.cutouts.outline.straighten': 'Straighten edges',
+  'binDesigner.cutouts.outline.straightenDetail':
+    'Straight edges within a few degrees of the bin’s sides snap square to them.',
+  'binDesigner.cutouts.outline.straightenPhotoDetail':
+    'Straight edges within a few degrees of the photo’s sides snap square to them.',
+  'binDesigner.cutouts.outline.mirror': 'Mirror',
+  'binDesigner.cutouts.outline.mirrorDetail':
+    'Makes the outline symmetric about a line, keeping one half or averaging both.',
+  'binDesigner.cutouts.outline.axis': 'Mirror line',
+  'binDesigner.cutouts.outline.axisDetected': 'Detected',
+  'binDesigner.cutouts.outline.axisUpright': 'Upright',
+  'binDesigner.cutouts.outline.axisLevel': 'Level',
+  'binDesigner.cutouts.outline.keep': 'Keep',
+  'binDesigner.cutouts.outline.keep.left': 'Left',
+  'binDesigner.cutouts.outline.keep.right': 'Right',
+  'binDesigner.cutouts.outline.keep.top': 'Top',
+  'binDesigner.cutouts.outline.keep.bottom': 'Bottom',
+  'binDesigner.cutouts.outline.keep.average': 'Average',
+  'binDesigner.cutouts.outline.roundInside': 'Round inside corners',
+  'binDesigner.cutouts.outline.reset': 'Reset outline',
+  'binDesigner.cutouts.outline.failed':
+    'Those settings don’t leave a single pocket, so the outline stays as it was.',
+  'binDesigner.cutouts.traceView.cleanup.heading': 'Clean up outlines',
+  'binDesigner.cutouts.traceView.cleanup.hint':
+    'Applies to every tool. With several, mirror each one once added.',
   'binDesigner.cutouts.rulerTool': 'Ruler',
   'binDesigner.cutouts.dragToMeasure': 'Drag to measure distance (Shift+drag for quick measure)',
   'binDesigner.cutouts.clickToDrawPath': 'Click to place points, close path to finish',
@@ -3232,6 +3755,28 @@ const en: Record<string, string> = {
     "The lid needs the stacking lip, so it won't be generated until you turn the lip back on.",
   'binDesigner.cutoutEditor.depthShortfallWarning':
     '{count} cutout(s) will be cut shallower than requested',
+  'binDesigner.cutoutEditor.checks.title': 'Pocket checks',
+  'binDesigner.cutoutEditor.checks.titleDetail':
+    'Clearance and entry edges make each pocket a little wider where it is cut. These checks show where that leaves plastic too thin to print well. Select one to find its shapes; none of them stops an export.',
+  'binDesigner.cutoutEditor.checks.merge':
+    '{a} and {b} merge once clearance and entry edges are added',
+  'binDesigner.cutoutEditor.checks.mergeRepeat':
+    'Copies of {a} merge once clearance and entry edges are added',
+  'binDesigner.cutoutEditor.checks.thin': 'Only {mm} mm of plastic between {a} and {b}',
+  'binDesigner.cutoutEditor.checks.thinRepeat': 'Only {mm} mm of plastic between copies of {a}',
+  'binDesigner.cutoutEditor.checks.wall': 'Only {mm} mm of wall left beside {a}',
+  'binDesigner.cutoutEditor.checks.wallThrough':
+    '{a} breaks through the wall once clearance and its entry edge are added',
+  'binDesigner.cutoutEditor.checks.lip':
+    '{a} reaches {mm} mm under the stacking lip, where a tool can catch',
+  'binDesigner.cutoutEditor.checks.floor':
+    'Only {mm} mm of floor under {a}, which can flex or let light through',
+  'binDesigner.cutoutEditor.checks.floorFix': 'Leave {mm} mm',
+  'binDesigner.cutoutEditor.checks.island':
+    'An island in {a} is only {mm} mm across at the top once clearance and the entry edge are taken off',
+  'binDesigner.cutoutEditor.checks.islandFix': 'Remove thin islands',
+  'binDesigner.cutoutEditor.checks.more': 'Show {count} more',
+  'binDesigner.cutoutEditor.checks.fewer': 'Show fewer',
   'binDesigner.cutoutEditor.offBoardWarning.one': '1 cutout will be clipped',
   'binDesigner.cutoutEditor.offBoardWarning.other': '{count} cutouts will be clipped',
   'binDesigner.cutoutEditor.bringBackIn': 'Bring back in',
@@ -3283,6 +3828,7 @@ const en: Record<string, string> = {
   'binDesigner.walls.pattern.groupKumiko': 'Kumiko',
   'binDesigner.style.section.color': 'Color',
   'binDesigner.style.section.walls': 'Walls',
+  'binDesigner.style.section.wallSurface': 'Wall surface',
   'binDesigner.walls.pattern.scale': 'Pattern scale',
   'binDesigner.walls.pattern.scaleHint': 'Finer holes to the left, bolder to the right',
   'binDesigner.walls.pattern.strutWidth': 'Strut width',
@@ -3290,6 +3836,8 @@ const en: Record<string, string> = {
     'Solid material between the openings. 0.8 mm is two perimeters at a 0.4 mm nozzle; go thicker for a wall that gets knocked about.',
   'binDesigner.walls.pattern.allSlotted': 'All walls have divider slots',
   'binDesigner.walls.pattern.someSlotted': 'Walls with divider slots will keep solid walls',
+  'binDesigner.walls.pattern.collarNote':
+    'The pattern stops below the {mm} mm of extra wall height',
   'binDesigner.walls.pattern.sides': 'Patterned walls',
   'binDesigner.walls.pattern.sides.slotted': 'This wall has divider slots and stays solid',
   'binDesigner.walls.pattern.sides.none': 'Pick a wall, or pattern the divider walls below',
@@ -3374,17 +3922,30 @@ const en: Record<string, string> = {
     'One style for every caption on this bin: labels, wall text, and the lid.',
   'binDesigner.type.stemWarning':
     'At this size the strokes are thinner than a nozzle can print cleanly, so the letters will run together.',
+  'binDesigner.type.stemWarningShort': 'These strokes are too thin to print cleanly.',
   'binDesigner.type.stemMeasured': 'Measured {stem}mm at {size}mm type; this needs about {min}mm.',
   'binDesigner.type.stemFix.bold': 'Use the bold cut',
   'binDesigner.type.stemFix.tracking': 'Open the spacing',
   'binDesigner.type.stemFix.size': 'Increase the size',
   'binDesigner.walls.text.anchor': 'Wall text position',
+  'binDesigner.walls.text.anchorOutside': 'Outside wall text position',
+  'binDesigner.walls.text.anchorInside': 'Inside wall text position',
+  'binDesigner.walls.text.faceAria': '{side} wall text face',
+  'binDesigner.walls.text.face.outside': 'Outside',
+  'binDesigner.walls.text.face.inside': 'Inside',
+  'binDesigner.walls.text.face.solidNote': 'A solid bin has no inside face.',
+  'binDesigner.walls.text.face.scoopNote': "The finger scoop covers this wall's inside face.",
+  'binDesigner.floor.text.heading': 'Floor text',
+  'binDesigner.floor.text.hint':
+    'Sits on the largest clear part of the floor, away from dividers, scoops and raised floors.',
+  'binDesigner.floor.text.disabled': 'Needs a standard bin with a closed floor.',
+  'binDesigner.floor.text.anchor': 'Floor text position',
   'binDesigner.walls.text.heading': 'Wall text',
   'binDesigner.walls.text.placeholder': 'e.g. Cables',
   'binDesigner.walls.text.sideAria': '{side} wall text',
   'binDesigner.walls.text.disabledPolygon': 'Not available for custom-shape bins.',
   'binDesigner.walls.text.hint':
-    'Text is placed in the clear area of each wall, avoiding cutouts and handles. Wall patterns are cleared behind it.',
+    'Text is placed in the clear area of each wall, avoiding cutouts and handles, and on the inside also dividers, scoops and label tabs. Wall patterns are cleared behind it. Inside text reads from inside the bin.',
   'binDesigner.walls.labelSlots.heading': 'Label slots',
   'binDesigner.walls.labelSlots.hint':
     'A vertical slot in each cell of a chosen wall takes a 1u label plate, the same plate a click-in socket uses. The plate drops in from the top and shows through a window in the wall.',
@@ -3422,7 +3983,7 @@ const en: Record<string, string> = {
   'binDesigner.slideTray.fitSample.exportComplete': 'Fit test downloaded',
   'binDesigner.slideTray.fitSample.exportFailed': 'Could not export the fit test',
   'binDesigner.slideTray.title': 'Sliding tray',
-  'binDesigner.slideTray.summary': '{{width}}u, {{mount}}',
+  'binDesigner.slideTray.summary': '{width}u, {mount}',
   'binDesigner.slideTray.mount.interior': 'Inside bin',
   'binDesigner.slideTray.mount.rim': 'Over the rim',
   'binDesigner.slideTray.mountAria': 'Rail position',
@@ -3440,7 +4001,7 @@ const en: Record<string, string> = {
   'binDesigner.slideTray.clearanceHint':
     'Gap on each side between tray and rail. Print the fit test if the tray binds or rattles.',
   'binDesigner.slideTray.protrudes':
-    'The tray stands {{mm}}mm above the rim. Increase the rail drop to sink it inside.',
+    'The tray stands {mm}mm above the rim. Increase the rail drop to sink it inside.',
   'binDesigner.slideTray.unavailable.noCavity': 'A solid bin has no cavity for a tray to sit in.',
   'binDesigner.slideTray.unavailable.slotConflict':
     'Slotted bins carry divider slots on the walls the rail needs.',
@@ -3487,6 +4048,7 @@ const en: Record<string, string> = {
   'binDesigner.wallCutouts.widthUnit.mm': 'mm',
   'binDesigner.wallCutouts.densityHint':
     'Many compartments make wall cutouts look like a stack of slats: interior cutouts carry the opening through each divider.',
+  'binDesigner.wallCutouts.densityHintShort': 'With many compartments, try Interior walls below.',
   'binDesigner.handles': 'Handles',
   'binDesigner.handles.enable': 'Enable handles',
   'binDesigner.handles.sides': 'Sides',
@@ -3611,8 +4173,9 @@ const en: Record<string, string> = {
   'binDesigner.bento.emptyStateHint': 'Drag anywhere to draw your first compartment',
   'binDesigner.bento.backgroundNote': 'Empty cells print as 1×1 pockets',
   'binDesigner.bento.experimentalHint': 'Newly out of Labs: expect rough edges.',
-  'binDesigner.bento.smallScreenNote':
-    'The drawing workspace needs a wider screen. Set a uniform grid here instead, then merge cells into larger compartments.',
+  'binDesigner.bento.smallScreenNote': 'The drawing workspace needs a wider screen.',
+  'binDesigner.bento.smallScreenNoteDetail':
+    'Set a uniform grid here instead, then merge cells into larger compartments.',
   'binDesigner.interior.slotted.title': 'Removable Dividers',
   'binDesigner.interior.slotted.description': 'Slots for insertable dividers',
   'binDesigner.interior.solid.title': 'Custom Cutouts',
@@ -3647,21 +4210,23 @@ const en: Record<string, string> = {
   'binDesigner.gridUnit': 'Grid unit',
   'binDesigner.gridUnitTooltip': 'Size of one grid cell in mm (standard Gridfinity = 42mm)',
   'binDesigner.halfBinMode': 'Half-grid mode',
-  'binDesigner.halfBinModeEnable05Grid': 'Half-grid mode: enable 0.5 grid unit precision',
   'binDesigner.halfSockets': 'Half sockets',
   'binDesigner.footLattice': 'Foot lattice',
   'binDesigner.footLattice.axis.x': 'Width axis',
   'binDesigner.footLattice.axis.y': 'Depth axis',
   'binDesigner.footLattice.grid': 'On grid',
   'binDesigner.footLattice.half': 'Half offset',
-  'binDesigner.footLattice.hint':
-    'Where the feet fall. Use half offset on an axis where the bin sits half a unit off the grid: a foot must land inside one baseplate pocket, and a full foot centered on a pocket edge will not drop in.',
+  'binDesigner.footLattice.hint': 'Where the feet fall.',
+  'binDesigner.footLattice.hintDetail':
+    'Use half offset on an axis where the bin sits half a unit off the grid: a foot must land inside one baseplate pocket, and a full foot centered on a pocket edge will not drop in.',
   'binDesigner.footLattice.halfSocketsHint':
     'Half sockets already seat at either offset, so the lattice has no effect.',
-  'binDesigner.footLattice.customShapeHint':
-    'Custom-shape bins keep the on-grid lattice: a half offset would not line up with the shape you drew.',
-  'binDesigner.footLattice.fractionalHint':
-    'A fractional axis keeps the on-grid lattice: its half cell already handles both placements, and the half-unit edge setting decides which end it sits on.',
+  'binDesigner.footLattice.customShapeHint': 'Custom-shape bins keep the on-grid lattice.',
+  'binDesigner.footLattice.customShapeHintDetail':
+    'A half offset would not line up with the shape you drew.',
+  'binDesigner.footLattice.fractionalHint': 'A fractional axis keeps the on-grid lattice.',
+  'binDesigner.footLattice.fractionalHintDetail':
+    'Its half cell already handles both placements, and the half-unit edge setting decides which end it sits on.',
   'binDesigner.lightweight': 'Lightweight floor',
   'binDesigner.lightweightMode': 'Lightweight mode',
   // 'Inside', not 'Interior': the panel already has an Interior GROUP tab, and
@@ -3703,7 +4268,9 @@ const en: Record<string, string> = {
   'binDesigner.base.section.feet': 'Feet',
   'binDesigner.base.lowProfileNote':
     'This layout uses a low-profile base: feet are 1.1mm shorter and the floor sits 1.1mm lower. Change it in the baseplate settings.',
+  'binDesigner.base.lowProfileNoteShort': 'This layout uses a low-profile base.',
   'binDesigner.base.section.floor': 'Floor',
+  'binDesigner.base.section.floorPattern': 'Floor pattern',
   'binDesigner.base.stackingLip.hint': "Lets another bin's feet sit on top of this one",
   'binDesigner.base.lipTip': 'Lip peak',
   'binDesigner.base.lipTip.sharp': 'Sharp',
@@ -3718,6 +4285,17 @@ const en: Record<string, string> = {
     'Cuts a flat off the point so the top layer has something solid under it. Bins stack exactly as before.',
   'binDesigner.base.lipTip.flat.hint':
     'Planes the point off level, leaving a band wide enough for a full top perimeter. Takes more off the peak than the other two. Bins stack exactly as before.',
+  'binDesigner.base.lipNotches': 'Lip notches',
+  'binDesigner.base.lipNotchesDetail':
+    'A small ridge on the lip at each grid line. Smaller bins stacked on top lock to a cell instead of sliding, and same-size bins still seat as usual.',
+  'binDesigner.base.lipNotches.blockedLid':
+    'Not available with a lid. The lid has its own grid for the bin above.',
+  'binDesigner.base.lipNotches.blockedShape': 'Not available on a custom shape.',
+  'binDesigner.base.lipNotches.blockedOverhang': 'Not available with an overhang.',
+  'binDesigner.base.lipNotches.blockedLattice':
+    'Not available with a Half offset foot lattice, whose feet would land on the notches.',
+  'binDesigner.base.lipNotches.blockedSize': 'Needs a width and depth in whole or half units.',
+  'binDesigner.base.lipNotches.blockedSingleCell': 'Needs a bin wider or deeper than one unit.',
   'binDesigner.base.magnetHoles': 'Magnet holes',
   'binDesigner.base.magnetDiameter': 'Magnet diameter',
   'binDesigner.base.magnetDepth': 'Magnet depth',
@@ -3731,6 +4309,9 @@ const en: Record<string, string> = {
   'binDesigner.base.magnetChamferLightweight':
     'A lightweight base leaves too little wall around each hole for a lead-in.',
   'binDesigner.base.magnetChamferNesting': 'Nesting magnets sit in bosses too thin for a lead-in.',
+  'binDesigner.base.cornerHolesOnly': 'Corners only',
+  'binDesigner.base.cornerHolesOnlyDetail':
+    'Puts magnet and screw holes only at the outer corners of the bin. A large bin needs fewer magnets and lifts off the baseplate more easily.',
   'binDesigner.base.screwHoles': 'Screw holes',
   'binDesigner.base.screwDiameter': 'Screw diameter',
   'binDesigner.lightweight.useUnderside': 'Use underside relief',
@@ -3742,9 +4323,11 @@ const en: Record<string, string> = {
     'These holes are too large for this base: try a finer scale',
   'binDesigner.heightUnit': 'Height unit',
   'binDesigner.heightUnitTooltip': 'Size of one height unit in mm (standard Gridfinity = 7mm)',
+  'binDesigner.heightUnitsDetail':
+    'Gridfinity measures height in units: 1u is {mm} mm. Bins with the same number of units come out the same height.',
   'binDesigner.extraWallHeight': 'Extra wall height',
-  'binDesigner.extraWallHeightTooltip':
-    'Raise the outer walls and stacking lip above the bin height, leaving the interior as-is. Adds headroom so tall contents are enclosed and a stacked bin rests on the taller rim.',
+  'binDesigner.extraWallHeightDetail':
+    'Raise the outer walls and stacking lip above the bin height, leaving the interior as-is. Adds headroom so tall contents are enclosed and a stacked bin rests on the taller rim. Wall patterns only cover the wall below it: for a taller patterned wall, raise Height instead.',
   'binDesigner.load': 'Load',
   'binDesigner.placeInLayout.action': 'Place in layout',
   'binDesigner.placeInLayout.defaultName': 'Custom bin',
@@ -3807,7 +4390,7 @@ const en: Record<string, string> = {
   // Version history: named, restorable checkpoints for one design
   'binDesigner.versions.title': 'Versions',
   'binDesigner.versions.open': 'Version history',
-  'binDesigner.versions.count': '{{count}} of {{max}}',
+  'binDesigner.versions.count': '{count} of {max}',
   'binDesigner.versions.save': 'Save version',
   'binDesigner.versions.namePlaceholder': 'Name this version',
   'binDesigner.versions.nameHint': 'For example: 0.2 mm, a tight fit',
@@ -3816,7 +4399,7 @@ const en: Record<string, string> = {
   'binDesigner.versions.restore': 'Restore',
   'binDesigner.versions.restoreWarning':
     'Replaces your current design. Your current state is saved first.',
-  'binDesigner.versions.restored': 'Restored “{{name}}”. Current state saved as “{{backup}}”.',
+  'binDesigner.versions.restored': 'Restored “{name}”. Current state saved as “{backup}”.',
   'binDesigner.versions.preRestoreName': 'Before restore',
   'binDesigner.versions.automatic': 'Automatic',
   'binDesigner.versions.pinned': 'Pinned',
@@ -3824,11 +4407,11 @@ const en: Record<string, string> = {
   'binDesigner.versions.unpin': 'Unpin this version',
   'binDesigner.versions.rename': 'Rename',
   'binDesigner.versions.delete': 'Delete',
-  'binDesigner.versions.deleteWarning': 'Delete “{{name}}”? This cannot be undone.',
-  'binDesigner.versions.saved': 'Saved “{{name}}”.',
-  'binDesigner.versions.deleted': 'Deleted “{{name}}”.',
+  'binDesigner.versions.deleteWarning': 'Delete “{name}”? This cannot be undone.',
+  'binDesigner.versions.saved': 'Saved “{name}”.',
+  'binDesigner.versions.deleted': 'Deleted “{name}”.',
   'binDesigner.versions.evicted':
-    'Oldest version “{{name}}” was removed to make room. Pin a version to keep it.',
+    'Oldest version “{name}” was removed to make room. Pin a version to keep it.',
   'binDesigner.versions.emptyTitle': 'No versions yet',
   'binDesigner.versions.emptyBody':
     'Save one when the design reaches a state worth keeping, then come back to it any time.',
@@ -3836,18 +4419,18 @@ const en: Record<string, string> = {
 
   // Branching: an independent design seeded from a stored version
   'binDesigner.versions.branch': 'Branch from here',
-  'binDesigner.versions.branched': 'Created “{{name}}” from “{{version}}”.',
+  'binDesigner.versions.branched': 'Created “{name}” from “{version}”.',
   'binDesigner.designs.branchBadge': 'Branch',
-  'binDesigner.designs.branchedFrom': 'From “{{name}}”',
-  'binDesigner.designs.branchCount': '{{count}} branches',
+  'binDesigner.designs.branchedFrom': 'From “{name}”',
+  'binDesigner.designs.branchCount': '{count} branches',
   'binDesigner.designs.showBranches': 'Show branches',
   'binDesigner.designs.hideBranches': 'Hide branches',
   'binDesigner.designs.deleteWithBranches':
-    'This design has {{count}} branches. Deleting it keeps them, listed on their own.',
+    'This design has {count} branches. Deleting it keeps them, listed on their own.',
 
   // Variants: a design kept in step with another except for values it claims
   'binDesigner.variants.label': 'Variant',
-  'binDesigner.variants.lockedHere': 'These values come from {{name}}.',
+  'binDesigner.variants.lockedHere': 'These values come from {name}.',
   'binDesigner.variants.openParent': 'Open parent',
   'binDesigner.variants.takeParent': 'Take parent’s',
   'binDesigner.variants.field.width': 'Width',
@@ -3858,18 +4441,19 @@ const en: Record<string, string> = {
   'binDesigner.variants.field.clearance': 'Clearance',
   'binDesigner.variants.field.chamferWidth': 'Chamfer',
   'binDesigner.variants.create': 'Create variant',
-  'binDesigner.variants.created': 'Created “{{name}}” as a variant of “{{parent}}”.',
-  'binDesigner.variants.panelLocked':
-    'Everything else comes from {{name}}. Claim a value below to change it here, or detach to edit freely.',
+  'binDesigner.variants.created': 'Created “{name}” as a variant of “{parent}”.',
+  'binDesigner.variants.panelLocked': 'Everything else comes from {name}.',
+  'binDesigner.variants.panelLockedDetail':
+    'Claim a value below to change it here, or detach to edit freely.',
   'binDesigner.variants.detach': 'Detach from parent',
-  'binDesigner.variants.detached': '“{{name}}” no longer follows its parent.',
+  'binDesigner.variants.detached': '“{name}” no longer follows its parent.',
   'binDesigner.variants.claim': 'Claim',
   'binDesigner.variants.release': 'Use parent’s value',
-  'binDesigner.variants.inherited': 'From parent: {{value}}',
+  'binDesigner.variants.inherited': 'From parent: {value}',
   'binDesigner.variants.noneClaimed': 'This variant matches its parent exactly.',
   'binDesigner.variants.dimensions': 'Bin dimensions',
   'binDesigner.variants.cutouts': 'Cutouts',
-  'binDesigner.variants.orphanTitle': '{{count}} claimed values point at deleted cutouts',
+  'binDesigner.variants.orphanTitle': '{count} claimed values point at deleted cutouts',
   'binDesigner.variants.orphanBody':
     'They are kept in case the deletion is undone, and ignored until then.',
   'binDesigner.variants.orphanClear': 'Forget them',
@@ -3996,6 +4580,9 @@ const en: Record<string, string> = {
   'baseplate.inclPadding': 'incl. padding',
   'baseplate.inclShape': 'incl. drawer shape',
   'baseplate.inclPaddingShape': 'incl. padding + drawer shape',
+  'baseplate.drawerOverflow':
+    'Plate exceeds your measured {drawerWidth} × {drawerDepth} mm drawer by {width} × {depth} mm',
+  'baseplate.fitPaddingToDrawer': 'Fit padding to drawer',
   'baseplate.editDimensionsWidth': 'Baseplate width in mm',
   'baseplate.editDimensionsDepth': 'Baseplate depth in mm',
   'baseplate.reset': 'Reset to defaults',
@@ -4075,13 +4662,16 @@ const en: Record<string, string> = {
   'baseplate.magnetChamferLightweight':
     'A lightweight plate leaves too little wall around each hole for a lead-in.',
   'baseplate.solidFloor': 'Solid floor',
+  'baseplate.ecoPlate': 'Eco plate',
+  'baseplate.ecoPlateHint':
+    'Cuts the straight joints between corner posts down to a thin bar, so a plate uses about a third less filament (less with wide padding). Bins are held by the corner posts only.',
   'baseplate.solidFloorThickness': 'Floor thickness',
   'baseplate.solidFloorHeightNote':
     'Added below the standard grid. Total height of the plate increases by this amount to accommodate.',
   'baseplate.screwHoles.label': 'Screw down',
   'baseplate.screwHoles.summary': 'ø{diameter}mm, {count} per piece',
   'baseplate.screwHoles.info':
-    'Vertical holes to fasten the plate to a drawer bottom, bench or wall. They sit in the solid drawer-fit padding where it is wide enough, and in the pocket floor otherwise, which makes the plate slightly taller.',
+    'Vertical holes to fasten the plate to a drawer bottom, bench or wall. They sit in the solid drawer-fit padding where it is wide enough, or where four pockets meet when the head fits there. Otherwise they go in the pocket floor, which makes the plate slightly taller.',
   'baseplate.screwHoles.diameter.label': 'Hole diameter',
   'baseplate.screwHoles.diameter.info':
     'Clearance for the screw shaft, not a pilot hole: 3.4mm passes an M3. A hole that bites into the threads holds the plate off the surface instead of pulling it down.',
@@ -4092,13 +4682,38 @@ const en: Record<string, string> = {
   'baseplate.screwHoles.headStyle.counterbore': 'Counterbore',
   'baseplate.screwHoles.headDiameter.label': 'Head diameter',
   'baseplate.screwHoles.headDiameter.info':
-    'Width of the recess at the surface: 8mm suits an M3 flat head, 5.5mm a socket head cap.',
+    'Width of the recess at the surface: 6mm for an M3 flat head, 8mm for an M4 flat head, 5.5mm for an M3 socket head cap. A countersink up to 6mm fits where four pockets meet, so the plate keeps its standard height.',
   'baseplate.screwHoles.counterboreDepth.label': 'Counterbore depth',
   'baseplate.screwHoles.counterboreDepth.info':
     'Depth of the flat pocket. Match it to the height of your screw head so the head ends up level with the surface.',
   'baseplate.screwHoles.perPiece.label': 'Screws per piece',
   'baseplate.screwHoles.perPiece.info':
     'Holes placed in every split piece, so no printed piece is left unfastened. Four fill the corners; higher counts add the edge midpoints.',
+  'baseplate.screwHoles.edgeInset.label': 'Edge inset',
+  'baseplate.screwHoles.edgeInset.info':
+    'Grid units along each piece edge that get no screws. Set 1 to keep screws clear of a drawer lip. Above 0, no screw goes in the padding, so a screw can move to the pocket floor and make the plate slightly taller. A piece too small for the inset gets no screws.',
+  'baseplate.screwHoles.cellCorner.label': 'Corner in cell',
+  'baseplate.screwHoles.cellCorner.info':
+    'Which corner of its cell a pocket-floor screw uses. Inner puts the screw in the opposite corner of the same cell, away from the piece edge.',
+  'baseplate.screwHoles.cellCorner.outer': 'Outer',
+  'baseplate.screwHoles.cellCorner.inner': 'Inner',
+  'baseplate.mountMagnets.label': 'Underside magnets',
+  'baseplate.mountMagnets.summary': 'ø{diameter} × {depth}mm, {count} per piece',
+  'baseplate.mountMagnets.info':
+    'Magnet holes in the underside, where four pockets meet, so the plate holds to a steel drawer or tool chest without getting any taller. Crossings on a split seam, on the plate edge or holding a screw are skipped.',
+  'baseplate.mountMagnets.diameter.label': 'Magnet diameter',
+  'baseplate.mountMagnets.diameter.info':
+    "Hole diameter: the magnet's diameter plus clearance for your printer, usually 0.2 to 0.5mm.",
+  'baseplate.mountMagnets.depth.label': 'Magnet depth',
+  'baseplate.mountMagnets.depth.info':
+    'Measured up from the underside, so a magnet of this height sits flush with the bottom.',
+  'baseplate.mountMagnets.tooDeep':
+    'Too deep for this plate: at ø{diameter}mm, at most {max}mm fits between the pockets. Holes that do not fit are skipped.',
+  'baseplate.mountMagnets.tooWide':
+    'ø{diameter}mm does not fit between the pockets of this plate, so no holes are cut.',
+  'baseplate.mountMagnets.perPiece.label': 'Magnets per piece',
+  'baseplate.mountMagnets.perPiece.info':
+    'Spread evenly over each printed piece. A piece has one spot per inner grid crossing, so a high count fills them all.',
   'baseplate.gridUnitTooltip': 'Width of one grid square (standard: 42mm)',
   'baseplate.magnetAnchor': 'Magnet anchor',
   'baseplate.magnetAnchorTooltip':
@@ -4261,6 +4876,8 @@ const en: Record<string, string> = {
   'baseplate.library.moreActions': 'More actions for {name}',
   'baseplate.library.thumbnailPlaceholder': 'No preview',
   'baseplate.library.active': 'Active',
+  'baseplate.library.usedBy': 'Used by {names}',
+  'baseplate.library.unused': 'Not used by any layout',
   'baseplate.library.currentlyActive': 'Currently active baseplate',
   'baseplate.library.empty': 'No saved baseplates yet',
   'baseplate.library.emptyHint': 'Open the Baseplate tool to create one',
@@ -4346,6 +4963,7 @@ const en: Record<string, string> = {
 
   // Layout (Collaboration)
   'layout.collaborativeEditingIsNotActive': 'Collaborative editing is not active',
+  'layout.drawerLinkName': 'Drawer {width} × {depth} mm',
 
   'common.dismiss': 'Dismiss',
 
@@ -4361,6 +4979,21 @@ const en: Record<string, string> = {
   'commandPalette.category.view': 'View',
   'commandPalette.category.preview': '3D Preview',
   'commandPalette.category.bins': 'Bins',
+  'places.find.indexing': 'Searching your layouts…',
+  'places.find.label': 'Find a bin',
+  'places.find.placeholder': 'Find a bin by what it holds',
+  'places.find.noMatch': 'No bins match “{query}”',
+  'places.kind.change': 'Change kind',
+  'places.kind.place': 'Place',
+  'places.kind.area': 'Area',
+  'places.kind.unit': 'Storage unit',
+  'places.kind.makePlace': 'Make it a place',
+  'places.kind.makeArea': 'Make it an area',
+  'places.kind.makeUnit': 'Make it a storage unit',
+  'places.newPlace': 'New place',
+  'places.myPlace': 'My place',
+  'places.path': 'Where this layout is',
+  'places.namePlaceholder': 'Place name, like Home or Shop',
   'commandPalette.category.tools': 'Tools',
   'commandPalette.category.export': 'Export',
 
@@ -4770,7 +5403,7 @@ const en: Record<string, string> = {
   'community.gallery.depthMinLabel': 'Minimum depth',
   'community.gallery.depthMaxLabel': 'Maximum depth',
   'community.gallery.dimensionAny': 'Any',
-  'community.gallery.dimensionOnlyValue': 'Every design is {{value}} on this axis',
+  'community.gallery.dimensionOnlyValue': 'Every design is {value} on this axis',
   'community.shelves.featured': 'Featured',
   'community.shelves.proven': 'People have printed these',
   'community.shelves.newThisWeek': 'New this week',
@@ -5184,8 +5817,12 @@ const en: Record<string, string> = {
   'designLinking.toast.cascadedResize': 'Updated design + {count} linked bin(s)',
   'designLinking.toast.cascadedResizeSomeLocked':
     'Updated design + {count} linked bin(s) — {locked} size-locked bin(s) kept their size',
+  'designLinking.toast.cascadedResizeSomeRefused':
+    'Updated design + {count} linked bin(s); {refused} kept their old size (no room)',
   'designLinking.toast.autoSyncedSomeLocked':
     'Auto-synced {count} bin(s) — {locked} size-locked bin(s) kept their size',
+  'designLinking.toast.autoSyncedSomeRefused':
+    'Auto-synced {count} bin(s); {refused} kept their old size (no room)',
   'designLinking.toast.syncSkippedLocked': '{count} size-locked bin(s) kept their size',
 
   // Blocked resize dialog
@@ -5234,6 +5871,8 @@ const en: Record<string, string> = {
   'designLinking.bento.toast.created': 'Bento created with {count} compartments.',
   'designLinking.bento.toast.replaceFailed':
     'Bento created, but it would not fit where those bins were, so they were left in place.',
+  'designLinking.bento.toast.tooManyItems':
+    'Bento created, but those bins hold more than {max} items between them, so they were left in place.',
   'designLinking.bento.toast.saveFailed': 'Could not save the bento.',
 
   // Designer-updated dialog (shown when bin resize pushes to open designer)
@@ -5269,6 +5908,8 @@ const en: Record<string, string> = {
   'drawerDims.heightLabel': 'Measured height (mm)',
   'drawerDims.clear': 'Clear measurement',
   'drawerDims.fit': 'Grid {width} × {depth} mm · {freeWidth} × {freeDepth} mm free',
+  'drawerDims.gridSize': 'Grid {width} × {depth} mm',
+  'drawerDims.addMeasured': "Add your drawer's measured size",
   'drawerDims.overflow': 'Grid exceeds your measured drawer by {width} × {depth} mm',
   'drawerDims.suggestionTitle': '{width} × {depth} units fits your drawer',
   'drawerDims.suggestionDetail': 'Leaves {freeWidth} × {freeDepth} mm free.',
@@ -5438,7 +6079,7 @@ const en: Record<string, string> = {
 
   // Bin move blocked toasts (useBinInspector)
   'toast.binBlocked.collision': 'Another bin occupies this position',
-  'toast.binBlocked.clearance': 'Blocked by a taller bin below',
+  'toast.binBlocked.clearance': 'Would rest on clearance reserved above another bin',
   'toast.binBlocked.exceedsHeight': 'Bin would exceed drawer height',
   'toast.binBlocked.default': 'Cannot move bin here',
 
@@ -5691,6 +6332,60 @@ const en: Record<string, string> = {
   'spacemouse.status.unsupported': 'Needs a Chromium browser',
   'spacemouse.status.error': 'Connection failed',
   'spacemouse.driverManaged': 'Speed and axis direction are set in the 3Dconnexion control panel.',
+
+  // Export destination (settings and the toasts after each export)
+  'settings.exportDestination': 'Export destination',
+  'exportDestination.hint': 'Send exported files straight to your print library or NAS.',
+  'exportDestination.folder.title': 'Save to a folder',
+  'exportDestination.folder.hint': 'Exports go into a folder you pick, not your Downloads.',
+  'exportDestination.folder.unsupported': 'Saving to a folder needs Chrome or Edge over HTTPS.',
+  'exportDestination.folder.choose': 'Choose folder',
+  'exportDestination.folder.change': 'Change',
+  'exportDestination.folder.forget': 'Forget',
+  'exportDestination.folder.needsPermission':
+    'The browser needs your OK again before it saves here.',
+  'exportDestination.folder.allowAgain': 'Allow again',
+  'exportDestination.url.title': 'Send to a URL',
+  'exportDestination.url.hint': 'Each export still downloads, and a copy goes to this address.',
+  'exportDestination.url.address': 'Address',
+  'exportDestination.url.invalid': 'Enter a full address, like https://nas.local/upload',
+  'exportDestination.url.badScheme': 'The address has to start with http:// or https://',
+  'exportDestination.url.mixed':
+    'This page uses HTTPS, so the browser will likely block an http:// address.',
+  'exportDestination.url.headerName': 'Header (optional)',
+  'exportDestination.url.headerValue': 'Header value',
+  'exportDestination.url.headerHint':
+    'Sent with every upload. The value is stored in this browser only.',
+  'exportDestination.url.badHeader': 'Header names use only letters, numbers and dashes.',
+  'exportDestination.url.test': 'Send test file',
+  'exportDestination.url.testSent': 'Test file sent to {host}.',
+  'exportDestination.saved': 'Saved to {folder}/{file}',
+  'exportDestination.savedMany': 'Saved {count} files to {folder}',
+  'exportDestination.folderDenied': 'No permission to save in {folder}, so it downloaded instead.',
+  'exportDestination.folderFailed': "Couldn't save to {folder}, so it downloaded instead.",
+  'exportDestination.sent': 'Sent to {host}',
+  'exportDestination.sentMany': 'Sent {count} files to {host}',
+  'exportDestination.fail.auth':
+    'Upload to {host} failed (HTTP {status}). Check the header in Settings.',
+  'exportDestination.fail.http': 'Upload to {host} failed (HTTP {status}).',
+  'exportDestination.fail.cors':
+    'Upload to {host} was blocked or cut off. The receiver has to allow this site (CORS).',
+  'exportDestination.fail.mixed':
+    'Upload to {host} was blocked: an HTTPS page can only send to an https:// address.',
+  'exportDestination.fail.network':
+    "Couldn't reach {host}. Check the address and that the receiver is running.",
+  'exportDestination.fail.invalid': 'Not sent: the export address in Settings is not valid.',
+  'exportDestination.folder.denied':
+    'The browser blocked saving to this folder. Choose it again to allow it.',
+  'exportDestination.folder.storeFailed': "Couldn't remember that folder. Try choosing it again.",
+  'exportDestination.url.badHeaderValue':
+    "The header value has a character browsers can't send, such as a curly quote.",
+  'exportDestination.fellBack': "Couldn't save {file} where you chose, so it downloaded instead.",
+  'exportDestination.failed': "Couldn't save {file}. Try the export again.",
+  'exportDestination.fail.timeout':
+    'Upload to {host} timed out. It may still have reached the receiver.',
+  'exportDestination.fail.redirect':
+    'Upload to {host} was redirected. Use the final address in Settings.',
 };
 
 export default en;

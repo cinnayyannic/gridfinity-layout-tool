@@ -11,6 +11,7 @@ import { CutoutCanvas3D } from './renderer';
 import { CutoutShapeToolbar } from './CutoutShapeToolbar';
 import { StlImportDialog } from './stlImport';
 import { ScanWithPhoneDialog } from './scanImport';
+import { ToolThicknessPrompt } from './ToolThicknessPrompt';
 import { CutoutPropertyPanel } from './CutoutPropertyPanel';
 import { AlignmentToolbar } from './AlignmentToolbar';
 import { CutoutContextMenu } from './CutoutContextMenu';
@@ -42,10 +43,12 @@ export function CutoutEditor() {
     fitCue,
     setFitCue,
     handleFlattenArray,
+    handleAddFingerAccess,
     mode,
     setMode,
     selection,
     selectCutout,
+    selectIds,
     preview,
     drawingPreview,
     pathDrawingPreview,
@@ -101,10 +104,13 @@ export function CutoutEditor() {
       <StlImportDialog
         pending={stlImport.pending}
         importing={stlImport.importing}
+        placing={stlImport.placing}
         onRotate={stlImport.setAxisRotation}
         onPlace={stlImport.place}
         onCancel={stlImport.cancel}
       />
+
+      <ToolThicknessPrompt onFocusTools={(ids) => selectIds(ids, false)} />
 
       {/* Fill level: shared with the workspace inspector so the two agree */}
       <div className="rounded border border-stroke-subtle bg-surface-elevated p-3">
@@ -193,6 +199,7 @@ export function CutoutEditor() {
           disabled={isInteracting}
           onFitCue={setFitCue}
           onFlattenArray={handleFlattenArray}
+          onAddFingerAccess={handleAddFingerAccess}
         />
       )}
 

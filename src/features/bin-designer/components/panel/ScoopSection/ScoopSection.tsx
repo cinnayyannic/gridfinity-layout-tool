@@ -12,7 +12,8 @@ import type { SegmentedControlOption } from '@/design-system';
 import type { ScoopStyle, ScoopSide } from '@/shared/types/bin';
 import { SCOOP_SIDES } from '@/shared/utils/scoopCalculations';
 import { FeatureToggle } from '../FeatureToggle';
-import { SideSelector } from '../shared';
+import { FeatureTip } from '../../FeatureTip';
+import { FieldLabel, SideSelector } from '../shared';
 import { DESIGNER_CONSTRAINTS } from '../../../constants';
 import { useScoopSection } from './useScoopSection';
 
@@ -45,12 +46,11 @@ export function ScoopSection() {
       onChange={handlers.toggleScoop}
       disabledReason={meta.disabledReason}
       valueSummary={meta.summary}
+      badge={<FeatureTip tip="scoops" feature={t('binDesigner.fingerScoop')} />}
     >
       {/* Which wall the ramp rises to */}
       <div className="mb-3">
-        <span className="mb-1 block text-xs text-content-tertiary">
-          {t('binDesigner.scoopSide')}
-        </span>
+        <FieldLabel>{t('binDesigner.scoopSide')}</FieldLabel>
         <SideSelector
           ariaLabel={t('binDesigner.scoop.sideAria')}
           sides={SCOOP_SIDES.map((side) => ({
@@ -69,9 +69,7 @@ export function ScoopSection() {
 
       {/* Profile style: curved fillet vs straight chamfer */}
       <div className="mb-3">
-        <span className="mb-1 block text-xs text-content-tertiary">
-          {t('binDesigner.scoopStyle')}
-        </span>
+        <FieldLabel>{t('binDesigner.scoopStyle')}</FieldLabel>
         <SegmentedControl
           options={styleOptions}
           value={state.style}
@@ -101,9 +99,7 @@ export function ScoopSection() {
         {state.isAutoRadius ? (
           <>
             <p className="mb-2 text-label text-content-tertiary">{state.autoDisplayText}</p>
-            <span className="mb-1 block text-xs text-content-tertiary">
-              {t('binDesigner.scoopMaxHeight')}
-            </span>
+            <FieldLabel>{t('binDesigner.scoopMaxHeight')}</FieldLabel>
             <Stepper
               value={state.autoMaxHeight}
               onChange={handlers.setAutoMaxHeight}
@@ -123,9 +119,7 @@ export function ScoopSection() {
         ) : (
           <div className="flex flex-col gap-2">
             <div>
-              <span className="mb-1 block text-xs text-content-tertiary">
-                {t('binDesigner.scoopHeight')}
-              </span>
+              <FieldLabel>{t('binDesigner.scoopHeight')}</FieldLabel>
               <Stepper
                 value={state.manualHeight}
                 onChange={handlers.setHeight}
@@ -143,9 +137,7 @@ export function ScoopSection() {
               />
             </div>
             <div>
-              <span className="mb-1 block text-xs text-content-tertiary">
-                {t('binDesigner.scoopRun')}
-              </span>
+              <FieldLabel>{t('binDesigner.scoopRun')}</FieldLabel>
               <Stepper
                 value={state.manualRun}
                 onChange={handlers.setRun}

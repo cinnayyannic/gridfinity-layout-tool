@@ -6,12 +6,13 @@
  * trio plus the effective readout is a block of its own, and folding it back
  * in pushed that file well past the 500-line ceiling.
  */
-import { Button, Checkbox } from '@/design-system';
+import { Button } from '@/design-system';
+import { FeatureToggle } from '../FeatureToggle';
 import { LID_RAIL_SIDES, lidGripHeightAdjustable } from '@/features/bin-designer/types';
 import type { LidGripSides, LidRailSide } from '@/features/bin-designer/types';
 import type { useTranslation } from '@/i18n';
 import { SnappingSlider } from '../../controls/SnappingSlider';
-import { Hint, Readout, SegmentGrid, StepperField } from '../shared';
+import { FieldLabel, Hint, Readout, SegmentGrid, SideSelector, StepperField } from '../shared';
 import type { useLidSection } from '../LidSection/useLidSection';
 
 type Translator = ReturnType<typeof useTranslation>;
@@ -32,31 +33,16 @@ function GripSides({
 }) {
   return (
     <div>
-      <span className="mb-1 block text-label text-content-tertiary">
-        {t('binDesigner.lid.gripSides')}
-      </span>
-      <div className="flex gap-1">
-        {LID_RAIL_SIDES.map((side) => {
-          const isActive = sides[side];
-          return (
-            <Button
-              key={side}
-              type="button"
-              variant="ghost"
-              role="switch"
-              aria-checked={isActive}
-              onClick={() => onToggle(side)}
-              className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
-                isActive
-                  ? 'bg-accent text-on-accent hover:bg-accent hover:text-on-accent'
-                  : 'border border-stroke-subtle bg-surface-elevated text-content-secondary hover:bg-surface-hover'
-              }`}
-            >
-              {t(`binDesigner.lid.side.${side}`)}
-            </Button>
-          );
-        })}
-      </div>
+      <FieldLabel>{t('binDesigner.lid.gripSides')}</FieldLabel>
+      <SideSelector
+        ariaLabel={t('binDesigner.lid.gripSides')}
+        onToggle={onToggle}
+        sides={LID_RAIL_SIDES.map((side) => ({
+          side,
+          label: t(`binDesigner.lid.side.${side}`),
+          active: sides[side],
+        }))}
+      />
     </div>
   );
 }
@@ -85,9 +71,7 @@ export function LidGripControls({
   const heightAdjustable = lidGripHeightAdjustable(grip.mode);
   return (
     <div className="space-y-2">
-      <span className="mb-1 block text-label text-content-tertiary">
-        {t('binDesigner.lid.gripMode')}
-      </span>
+      <FieldLabel>{t('binDesigner.lid.gripMode')}</FieldLabel>
       <SegmentGrid
         aria-label={t('binDesigner.lid.gripMode')}
         value={grip.mode}
@@ -98,7 +82,11 @@ export function LidGripControls({
           disabled: !state.gripModeAllowed(mode),
         }))}
       />
-      {modeSelected && !modeAllowed && <Hint>{t('binDesigner.lid.gripModeStackConflict')}</Hint>}
+      {modeSelected && !modeAllowed && (
+        <Hint info={t('binDesigner.lid.gripModeStackConflict')}>
+          {t('binDesigner.lid.gripModeStackConflictShort')}
+        </Hint>
+      )}
 
       {modeSelected && modeAllowed && (
         <>
@@ -162,26 +150,24 @@ export function LidGripControls({
           {/* Only the skirt bound gets its own line: a chamfer cut short by the
               depth clamp is already explained by the hint above it. */}
           {state.gripActive && gripHeight.limitedBy === 'skirt' && (
-            <Hint>
-              {t('binDesigner.lid.gripHeightClamped', {
+            <Hint
+              info={t('binDesigner.lid.gripHeightClamped', {
+                skirt: gripHeight.skirtMm.toFixed(1),
+              })}
+            >
+              {t('binDesigner.lid.gripHeightClampedShort', {
                 skirt: gripHeight.skirtMm.toFixed(1),
               })}
             </Hint>
           )}
 
-          <div>
-            {/* `items-start` overrides the component's centring: this label is long
-                enough to wrap, and centring would put the box beside the middle
-                line. No nudge needed — text-xs and the box are both 16px tall. */}
-            <Checkbox
-              className="items-start"
-              checked={grip.binDip}
-              onChange={handlers.toggleGripBinDip}
-              label={t('binDesigner.lid.gripBinDip')}
-            />
-            {/* Outside the label: `Hint` is a <p>, which cannot nest in a <span>. */}
-            <Hint>{t('binDesigner.lid.gripBinDipWarning')}</Hint>
-          </div>
+          <FeatureToggle
+            label={t('binDesigner.lid.gripBinDip')}
+            checked={grip.binDip}
+            onChange={handlers.toggleGripBinDip}
+            info={t('binDesigner.lid.gripBinDipWarning')}
+          />
+          {grip.binDip && <Hint>{t('binDesigner.lid.gripBinDipStacking')}</Hint>}
         </>
       )}
     </div>

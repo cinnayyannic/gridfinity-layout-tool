@@ -6,7 +6,9 @@ import {
   resolveCutoutCornerRadii,
   resolveCutoutDrop,
   resolveCutoutSpan,
+  cutoutSide,
   safeCutoutCornerRadii,
+  shoulderBlend,
 } from './wallCutoutPosition';
 
 describe('computeCutoutCenter', () => {
@@ -169,6 +171,24 @@ describe('resolveCutoutCornerRadii', () => {
     );
     expect(resolveCutoutCornerRadii({ cornerRadiusTop: -5 }, {}, CUT).top).toBe(0);
   });
+
+  it('gives a scoop no bottom radius, stored or automatic', () => {
+    const wall = { shape: 'scoop' as const, cornerRadiusTop: 3 };
+    expect(resolveCutoutCornerRadii(wall, { cornerRadiusBottom: 4 }, CUT)).toEqual({
+      top: 3,
+      bottom: 0,
+    });
+    expect(resolveCutoutCornerRadii(wall, {}, CUT).bottom).toBe(0);
+  });
+
+  it('lets a lipless scoop round its shoulder as deep as the cut', () => {
+    // Counting the automatic bottom fillet against the shoulder would cut
+    // this round-over short.
+    const depth = 10;
+    const wall = { shape: 'scoop' as const, cornerRadiusTop: 8 };
+    const radii = resolveCutoutCornerRadii(wall, {}, CUT);
+    expect(safeCutoutCornerRadii(radii, CUT, depth, 0).topLeft).toBe(8);
+  });
 });
 
 describe('safeCutoutCornerRadii', () => {
@@ -212,5 +232,69 @@ describe('safeCutoutCornerRadii', () => {
     // declines to widen the gap by, or the two disagree about the opening.
     const safe = safeCutoutCornerRadii({ top: 0.05, bottom: 0.05 }, CUT, DEPTH, LIP);
     expect(safe).toEqual({ topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0 });
+  });
+});
+
+describe('shoulderBlend', () => {
+  const RIM = 40;
+  const SIDE_AT_RIM = 20;
+  const R = 5;
+
+  it('is a quarter arc on a straight side', () => {
+    const b = shoulderBlend(SIDE_AT_RIM, RIM, 0, R);
+    expect(b.rim).toEqual([SIDE_AT_RIM + R, RIM]);
+    expect(b.side).toEqual([SIDE_AT_RIM, RIM - R]);
+    expect(b.centre).toEqual([SIDE_AT_RIM + R, RIM - R]);
+    expect(b.sweep).toBeCloseTo(Math.PI / 2, 12);
+  });
+
+  it('lands tangent to a leaning side, not vertically onto it', () => {
+    const lean = 0.25;
+    const b = shoulderBlend(SIDE_AT_RIM, RIM, lean, R);
+    const [cx, cy] = b.centre;
+    const len = Math.hypot(lean, 1);
+    const down = [-lean / len, -1 / len];
+    const sideXAt = (y: number): number => SIDE_AT_RIM - lean * (RIM - y);
+
+    expect(cy).toBeCloseTo(RIM - R, 12);
+    expect(b.rim[0]).toBeCloseTo(cx, 12);
+    expect(b.side[0]).toBeCloseTo(sideXAt(b.side[1]), 12);
+    expect(Math.hypot(b.side[0] - cx, b.side[1] - cy)).toBeCloseTo(R, 12);
+    expect((b.side[0] - cx) * down[0] + (b.side[1] - cy) * down[1]).toBeCloseTo(0, 12);
+    const crossTrack = (cx - SIDE_AT_RIM) * down[1] - (cy - RIM) * down[0];
+    expect(Math.abs(crossTrack)).toBeCloseTo(R, 12);
+
+    expect(Math.hypot(b.mid[0] - cx, b.mid[1] - cy)).toBeCloseTo(R, 12);
+    expect(b.sweep).toBeCloseTo(Math.PI / 2 - Math.atan(lean), 12);
+  });
+
+  it('reaches less than its radius on a leaning side', () => {
+    const b = shoulderBlend(SIDE_AT_RIM, RIM, 0.25, R);
+    expect(b.rim[0] - SIDE_AT_RIM).toBeLessThan(R);
+    expect(b.rim[0] - SIDE_AT_RIM).toBeGreaterThan(0);
+    expect(RIM - b.side[1]).toBeLessThan(R);
+  });
+});
+
+describe('cutoutSide', () => {
+  const CUT = 40;
+  const DROP = 30;
+  const CLEARANCE = 2;
+
+  it('keeps a u-shape vertical at half the span', () => {
+    expect(cutoutSide('u-shape', CUT, DROP, CLEARANCE)).toEqual({
+      bottomHalfWidth: CUT / 2,
+      lean: 0,
+      halfWidthAtRim: CUT / 2,
+    });
+  });
+
+  it("runs a funnel from the profile's top corner to 60% of the span at the floor", () => {
+    const side = cutoutSide('funnel', CUT, DROP, CLEARANCE);
+    const halfWidthAt = (heightAboveRim: number): number =>
+      side.halfWidthAtRim + side.lean * heightAboveRim;
+    expect(halfWidthAt(CLEARANCE)).toBeCloseTo(CUT / 2, 12);
+    expect(halfWidthAt(-DROP)).toBeCloseTo(CUT * 0.3, 12);
+    expect(side.bottomHalfWidth).toBeCloseTo(CUT * 0.3, 12);
   });
 });

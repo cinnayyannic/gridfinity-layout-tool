@@ -21,6 +21,8 @@ import type {
   TrayBottomConfig,
   WallPatternType,
 } from '@/features/bin-designer/types';
+import { maxBinRimFilletRadius, rimFilletAvailable } from '@/shared/utils/rimFillet';
+import { lipNotchBlocker } from '@/shared/utils/lipNotchPlan';
 import { isPartialMask } from '@/shared/utils/cellMask';
 import { isFractional } from '@/core/constants';
 import {
@@ -41,35 +43,18 @@ import {
   LID_MAGNET_DIMENSION_STEP_MM,
 } from '@/features/bin-designer/types';
 import { assessFloorPatternFit } from '@/features/bin-designer/utils/floorPatternFit';
-import { DESIGNER_CONSTRAINTS, minHeightUnits } from '@/features/bin-designer/constants';
+import { DESIGNER_CONSTRAINTS } from '@/features/bin-designer/constants';
 import {
   DEFAULT_FOOT_LATTICE,
   DEFAULT_LIGHTWEIGHT_MODE,
   resolveLipTip,
-  isEffectiveTile,
   isSocketlessBase,
 } from '@/features/bin-designer/types/base';
-import { bodyTypeParams, deriveBodyType } from './bodyType';
-import type { BodyType } from './bodyType';
-import { useMagnetPressFit } from './useMagnetPressFit';
-
-/** Drop the `tile` key entirely — absent is the off state, never `false`. */
-function omitTile(base: BinParams['base']): BinParams['base'] {
-  const { tile: _tile, ...rest } = base;
-  return rest;
-}
-
-/** Strip a `lightweightMode` that just restates the default. */
-function omitDefaultLightweightMode(base: BinParams['base']): BinParams['base'] {
-  const { lightweightMode: _mode, ...rest } = base;
-  return rest;
-}
-
-/** Strip a `lipTip` that just restates the default. */
-function omitDefaultLipTip(base: BinParams['base']): BinParams['base'] {
-  const { lipTip: _tip, ...rest } = base;
-  return rest;
-}
+import { deriveBodyType } from './bodyType';
+import { useBodyTypeSwitch } from './useBodyTypeSwitch';
+import { finalizeBaseParams } from './finalizeBaseParams';
+import { useHoleOptions } from './useHoleOptions';
+import { resolveSlant } from '@/shared/utils/slantPlan';
 
 /**
  * Strip the detachable-feet fields entirely.
@@ -90,6 +75,13 @@ function isFloorPatternType(pattern: WallPatternType): pattern is FloorPatternTy
   return (FLOOR_PATTERN_TYPES as readonly WallPatternType[]).includes(pattern);
 }
 
+/** The rest of each foot-lattice note, shown behind its info dot. */
+const FOOT_LATTICE_DETAIL: Partial<Record<string, string>> = {
+  'binDesigner.footLattice.hint': 'binDesigner.footLattice.hintDetail',
+  'binDesigner.footLattice.customShapeHint': 'binDesigner.footLattice.customShapeHintDetail',
+  'binDesigner.footLattice.fractionalHint': 'binDesigner.footLattice.fractionalHintDetail',
+};
+
 export function useBaseSection() {
   const t = useTranslation();
   const { params, updateBase, updateFloorPattern, setParams } = useDesignerStore(
@@ -100,6 +92,7 @@ export function useBaseSection() {
       setParams: s.setParams,
     }))
   );
+  const setBodyType = useBodyTypeSwitch();
 
   const base = params.base;
   const hasMagnet = hasMountingMagnets(base);
@@ -107,7 +100,7 @@ export function useBaseSection() {
   const hasScrew = isScrewStyle(base.style);
   const trayBottom = resolveTrayBottomConfig(base.trayBottom, params.lid.retentionMagnet);
   const hasHalfSockets = base.halfSockets;
-  const pressFit = useMagnetPressFit(base, nestingBase, updateBase);
+  const holes = useHoleOptions(base, nestingBase, updateBase);
   // The foot lattice is inert in two cases, and the picker shows what the part
   // will actually be built with rather than the stored choice. The stored value
   // is left alone so it comes back when the blocker does.
@@ -139,6 +132,8 @@ export function useBaseSection() {
   // lattice below, so there is never a stored customisation behind this that is
   // in force.
   const footLatticeInert = footLatticeLockedX && footLatticeLockedY;
+  const footLatticeNoteKey = footLatticeLockReason ?? 'binDesigner.footLattice.hint';
+  const footLatticeDetailKey = FOOT_LATTICE_DETAIL[footLatticeNoteKey];
   const footLatticeX = footLatticeLockedX
     ? DEFAULT_FOOT_LATTICE
     : (base.footLatticeX ?? DEFAULT_FOOT_LATTICE);
@@ -251,59 +246,9 @@ export function useBaseSection() {
     ? undefined
     : familyReason(lightweightStatus, floorPatternStatusForApplies);
 
-  // Every base toggle commits through here. Only an effective spacer may stand
-  // 1u tall, and several toggles can END one: leaving spacer mode, or
-  // enabling the flat base, which auto-disables the spacer via CONSTRAINT_RULES.
-  // Any of those would otherwise strand the bin under the ordinary floor, below
-  // what the height stepper will even let the user climb back out of.
-  //
-  // The floor is read off the RESOLVED params, never the requested change: the
-  // engine's post-check returns the params untouched when an enable turns out
-  // to be blocked, and it computes that verdict against the patched params
-  // rather than the `available` status each callback guarded on.
   const commit = useCallback(
     (resolved: BinParams) => {
-      if (isEffectiveTile(resolved.base)) {
-        // A base-only bin's height is inert (the wall is 0 and `assembledHeight`
-        // supplies the real height from the slab), so it is pinned rather than
-        // merely floored: two base-only bins
-        // that differ only in a number nothing reads must not fingerprint
-        // differently and defeat the community duplicate guard. The collar is
-        // inert for the same reason — generation forces it to 0 there — so
-        // it is dropped rather than left to drift the fingerprint.
-        // Explicitly `undefined`, not omitted: `setParams` merges via
-        // `Object.assign`, so leaving the key out would keep the stale value.
-        // JSON serialisation drops an undefined-valued key, so the stored design
-        // and its fingerprint come out the same as one that never had a collar.
-        setParams({ ...resolved, height: 1, extraWallHeightMm: undefined });
-        return;
-      }
-      // Off must end up ABSENT, not `false`. `resolveConstraints` writes
-      // `tile: false` whenever a rule auto-disables base-only mode (switching to a
-      // flat or lid base, enabling the spacer), and EVERY base toggle commits
-      // through here — so stripping only on the tile card's own path would
-      // still leave the key behind on the others and fingerprint an ordinary bin
-      // differently from an identical one that never tried the mode.
-      const withoutTile =
-        'tile' in resolved.base ? { ...resolved, base: omitTile(resolved.base) } : resolved;
-      // The relief mode gets the same treatment, for the same reason: 'interior'
-      // is what an absent field already means, so writing it would fingerprint a
-      // bin differently from an identical one whose owner never opened the
-      // control. Stripped here rather than in `setLightweightMode` so no future
-      // path can reintroduce it.
-      const withoutMode =
-        withoutTile.base.lightweightMode === 'interior'
-          ? { ...withoutTile, base: omitDefaultLightweightMode(withoutTile.base) }
-          : withoutTile;
-      // And the lip's peak finish, for the third time and the same reason:
-      // 'sharp' is what an absent field already means, so a bin that visited the
-      // control and came back must fingerprint as one that never did.
-      const next =
-        withoutMode.base.lipTip === 'sharp'
-          ? { ...withoutMode, base: omitDefaultLipTip(withoutMode.base) }
-          : withoutMode;
-      const minHeight = minHeightUnits(next.base, next.heightUnitMm);
-      setParams(next.height < minHeight ? { ...next, height: minHeight } : next);
+      setParams(finalizeBaseParams(resolved));
     },
     [setParams]
   );
@@ -352,6 +297,23 @@ export function useBaseSection() {
       commit({ ...params, base: { ...params.base, lipTip: tip } });
     },
     [params, commit]
+  );
+
+  // Off is stored as absent, so switching it back off restores the design's
+  // community fingerprint rather than leaving a `false` behind.
+  const toggleLipNotches = useCallback(() => {
+    const { lipNotches, ...rest } = params.base;
+    commit({ ...params, base: lipNotches === true ? rest : { ...rest, lipNotches: true } });
+  }, [params, commit]);
+
+  const toggleRimFillet = useCallback(() => {
+    updateBase({ rimFillet: !base.rimFillet });
+  }, [base.rimFillet, updateBase]);
+  const setRimFilletRadius = useCallback(
+    (radius: number) => {
+      updateBase({ rimFilletRadius: radius });
+    },
+    [updateBase]
   );
 
   const toggleLightweight = useCallback(() => {
@@ -405,19 +367,6 @@ export function useBaseSection() {
     });
     commit(resolved);
   }, [params, commit]);
-
-  /**
-   * Switch the base's archetype.
-   *
-   * `commit` still runs: `bodyTypeParams` produces the resolved params, but the
-   * height floor and the `tile: false` strip are this hook's job on every path.
-   */
-  const setBodyType = useCallback(
-    (next: BodyType) => {
-      commit(bodyTypeParams(params, next));
-    },
-    [params, commit]
-  );
 
   const toggleHalfSockets = useCallback(() => {
     if (!hasHalfSockets && !halfSocketsStatus.available) return;
@@ -587,15 +536,16 @@ export function useBaseSection() {
   return {
     state: {
       base,
+      slanted: resolveSlant(params) !== null,
       hasDetachableFeet,
       pinDiameter: base.feetPinDiameter ?? DEFAULT_DETACHABLE_PIN_DIAMETER_MM,
       detachableFootCount: detachablePlan?.placements.length ?? 0,
       detachableUnplaceable,
       detachableSavingPercent,
       hasMagnet,
-      magnetCrushRibs: pressFit.crushRibs,
-      magnetChamfer: pressFit.chamfer,
-      magnetChamferUnavailable: pressFit.chamferUnavailable,
+      magnetCrushRibs: holes.crushRibs,
+      magnetChamfer: holes.chamfer,
+      magnetChamferUnavailable: holes.chamferUnavailable,
       magnetDiameter: nestingBase ? trayBottom.retentionMagnet.diameter : base.magnetDiameter,
       magnetDepth: nestingBase ? trayBottom.retentionMagnet.depth : base.magnetDepth,
       magnetDiameterMin: nestingBase
@@ -621,6 +571,9 @@ export function useBaseSection() {
       magnetEdgeMax: LID_MAGNET_EDGE_COUNT_MAX,
       magnetEdgeStep: LID_MAGNET_EDGE_COUNT_STEP,
       hasScrew,
+      // A Nesting body places its retention magnets itself.
+      showCornerHoles: (hasMagnet || hasScrew) && !nestingBase,
+      cornerHolesOnly: holes.cornerHolesOnly,
       bodyType,
       trayBottom,
       hasHalfSockets,
@@ -633,6 +586,11 @@ export function useBaseSection() {
       lowProfile: base.lowProfile === true,
       lightweightMode: base.lightweightMode ?? DEFAULT_LIGHTWEIGHT_MODE,
       lipTip: resolveLipTip(base),
+      lipNotches: base.lipNotches === true,
+      lipNotchBlocker: lipNotchBlocker(params),
+      rimFilletAvailable: rimFilletAvailable(params) && !base.tile,
+      rimFilletRadius: Math.min(base.rimFilletRadius ?? 0.4, maxBinRimFilletRadius(params)),
+      rimFilletMax: maxBinRimFilletRadius(params),
       undersideReliefUnblocks,
       // Which families of controls this body actually has. A hidden one is
       // never hiding a live setting: the engine clears what it disables.
@@ -653,9 +611,10 @@ export function useBaseSection() {
       // there is nothing local to hang it off, so this note is the whole
       // explanation the user gets and must not be limited to the half-socket
       // case.
-      footLatticeInertReason:
-        hasFeet && footLatticeInert
-          ? t(footLatticeLockReason ?? 'binDesigner.footLattice.hint')
+      footLatticeInertReason: hasFeet && footLatticeInert ? t(footLatticeNoteKey) : undefined,
+      footLatticeInertDetail:
+        hasFeet && footLatticeInert && footLatticeDetailKey !== undefined
+          ? t(footLatticeDetailKey)
           : undefined,
       floorPatternEnabled: floorPattern.enabled,
       floorPatternType: floorPattern.pattern,
@@ -676,8 +635,12 @@ export function useBaseSection() {
           : undefined,
       toggleMagnet,
       toggleScrew,
+      setCornerHolesOnly: holes.setCornerHolesOnly,
       toggleStackingLip,
       setLipTip,
+      toggleLipNotches,
+      toggleRimFillet,
+      setRimFilletRadius,
       toggleLightweight,
       setLightweightMode,
       toggleHalfSockets,
@@ -687,7 +650,9 @@ export function useBaseSection() {
       // seats a half-offset bin, detachable or not, so labelling it inert would
       // hide the one control that fixes a bin perching on the pocket ridges.
       // Half sockets and lightweight really are ignored and stay locked.
-      footLatticeLockReason: t(footLatticeLockReason ?? 'binDesigner.footLattice.hint'),
+      footLatticeLockReason: t(footLatticeNoteKey),
+      footLatticeLockDetail:
+        footLatticeDetailKey === undefined ? undefined : t(footLatticeDetailKey),
       setBodyType,
       enableUndersideRelief,
       setTrayAttachment,
@@ -696,8 +661,8 @@ export function useBaseSection() {
       setMagnetDiameter,
       setMagnetHeight,
       setMagnetEdgeCount,
-      setMagnetCrushRibs: pressFit.setCrushRibs,
-      setMagnetChamfer: pressFit.setChamfer,
+      setMagnetCrushRibs: holes.setCrushRibs,
+      setMagnetChamfer: holes.setChamfer,
       setScrewDiameter,
       toggleFloorPattern,
       setFloorPatternType,

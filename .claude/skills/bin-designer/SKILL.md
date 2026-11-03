@@ -21,6 +21,7 @@ Read `src/features/bin-designer/README.md` first — it covers the store/worker/
 3. **Divider walls are derived, never stored** — `deriveWallSegments` computes them from ID boundaries. Cells sharing an ID must form a filled rectangle (`isRectangularSelection` / `validateCompartmentGrid`); the server does NOT enforce this, so a hand-crafted share can violate it.
 4. **Every client constraint has a hand-maintained server mirror.** `constants/gridfinity.ts` `DESIGNER_CONSTRAINTS` ↔ `api/lib/designerValidationConstants.ts` `CONSTRAINTS`; type unions in `types/index.ts` ↔ `VALID_BIN_STYLES` / `VALID_LABEL_TAB_SUPPORTS` in `api/lib/designerValidation.ts`; top-level param keys ↔ `ALLOWED_PARAM_KEYS` there. Divergence means 400s on sync or params silently stripped from shares. `sanitizeTags` (server) must stay behaviorally identical to `normalizeTags` (`utils/tags.ts`).
 5. **Wall-feature units are mixed by design.** `WallCutout` width/depth are percentages (0–100 of wall span / wall height); `widthMm: null` means "use the % field". Handle width is % of span but handle height is mm. See the JSDoc on each field in `types/index.ts` — mixing these passes typecheck and produces silently wrong geometry.
+6. **`lid.extraHeightMm` is derived while `lid.heightUnits` is set** (`utils/lidHeightUnits.ts`): the store's composed `set` re-derives it after every write, and `migrateParams` on load. A direct `useDesignerStore.setState` skips that `set`, so pass its params through `withSyncedLidHeight`.
 
 ## Recipes
 
@@ -64,6 +65,33 @@ via the dispatcher's `help-jump:any` broadcast, pulses the marker); blocked
 features surface it through `DependencyHint`. Rail dots come from
 `categoryModified` (params keyed to categories; unlisted keys read as Shape)
 and the Print icon's warning dot from `needsSplit`.
+
+### Panel idioms
+
+Each kind of control has one primitive: an on/off setting is a
+`FeatureToggle`, a choice of wall a `SideSelector` (`mode: 'single'` for one
+wall), a mode that opens its own controls a `ModeTiles` group, and a fold a
+`MoreDisclosure` (pass `open`/`onOpenChange` when a jump must open it).
+`panelIdioms.test.ts` holds the toggles, wall pickers and folds to theirs; the
+rest is review. Captions are `FieldLabel`; group headings are `SubHeader`,
+unique within a page.
+
+Inline prose is one line, at most 90 characters (`panelCopyLength.test.ts`).
+An evergreen explanation goes behind an info dot (`info` on `Hint`,
+`FieldLabel`, `SubHeader` or `FeatureToggle`) under a key ending in `Detail`.
+A blocked reason or warning stays inline, or the state it reports disappears.
+A picker must skip `onChange` when the chosen value is picked again: the store
+write still pushes an undo entry and clears redo.
+
+### Feature tip clips
+
+A play dot (`FeatureTip`) plays a clip listed in `data/featureTips/index.ts`;
+`featureTips.test.ts` fails on a missing or orphaned file. Re-shoot a clip when
+the UI or geometry it shows changes: with the dev server up,
+`BASE_URL=<dev url> pnpm run capture:feature-tips <id>` (needs `ffmpeg` on the
+path and Playwright's Chromium). Shots, colours and the
+55 degree camera live in `scripts/feature-tips/`. Review the clips in motion
+against the launch sizzle before the PR.
 
 ## Verification
 
@@ -129,6 +157,62 @@ always the Pathfinder path.
 For divider-override structure: pairs are canonical (`compartmentA < compartmentB`), unique, adjacent — enforced in both `utils/compartments.ts` (`validateDividerOverride[s]`) and `api/lib/designerCompartmentValidation.ts`. Structural validity does not guarantee the tilt renders (geometric checks happen at drag-commit and generation). `getEligibleDividers` row order is deliberately stable so panel rows don't shuffle — don't replace its sort with grid-scan order.
 
 Designer shares have their own limits (`MAX_PAYLOAD_BYTES` 100KB in `api/lib/designerValidationConstants.ts`), smaller than the layout-share limits in `api/lib/validation.ts` — see the share-api-collab skill. Cloud-sync envelope rules live in `src/features/bin-designer/sync/designAdapter.ts`. For the placed-bin side panel (bin-inspector), read `src/features/bin-inspector/README.md`; custom-property keys must avoid `RESERVED_PROPERTY_KEYS` in `src/core/constants.ts`.
+
+## Cutout depth modes
+
+On the shapes whose depth the user sets (`DEPTH_MODE_SHAPES`; not mesh,
+knifeSlot or text), `Cutout.depthMode` (`floor` or `through`, absent means
+fixed) makes `cutDepth` derived: `resolveCutoutDepth` (`src/shared/utils/cutoutDepth.ts`) recomputes it
+from the fill and the base, so every reader of `cutDepth` stays mode-blind. Four
+places re-derive: the store's composed `set` (`syncCutoutDepths`),
+`migrateParams`, `applyOverrides` and the worker's `createInitialContext`. A new
+path that builds params outside them needs `withResolvedCutoutDepths`. A
+`cutDepth` written without `depthMode` means fixed (`mergeCutoutUpdate`);
+otherwise the next sync overwrites the number the user typed.
+
+`floorMm` is measured from the bin's underside. A standard socket counts toward
+it, so `floor` mode never cuts into one; flat, tray, lightweight and
+detachable-foot bases count nothing. A through cut is ONE tool, built on a surface
+raised by `belowMm` and lowered after its clip, and handed to both the body cut
+and `deferredCutTargets` (the socket carve): a second prism under the pocket
+would share its walls, and coplanar faces between tools are where booleans go
+non-manifold. `throughBlockedReason` gates groups, lean, tapered walls and
+detachable feet.
+
+## Shadow board export
+
+`panel/CutoutsSection/shadowBoard/` writes the top as SVG or DXF and must cut
+the way the worker cuts: mesh imprints outside group booleans, pockets clipped
+to the interior, non-tunnel open sides out to the footprint, path clearance via
+`pathCutoutCut`. Sample with the shared `cutoutOutlineRing`, never the editor's
+`getCutoutOutline`, which inflates arcs for its fit checks.
+
+## Islands in path cutouts
+
+`Cutout.holes` holds island rings in the same absolute frame as `path`. Anything
+that moves, scales or mirrors a path must do the same to its holes through
+`mapPathRings` (`utils/pathTransforms.ts`); writing `path` alone leaves the
+islands behind. The worker cuts each island out of the tool full height
+(`withIslands`), shrunk by the clearance with the reach-limited offset's
+`inward` mode, so a thin island thins rather than turns inside out.
+Vertex editing works on rings: `ringsOf` in `handlers/pathEditHandler.ts`
+numbers the outline 0 and island k as k + 1, and every drag target and hover
+carries its ring. `VertexMagnifier3D` takes over the render loop only while a
+point is dragged.
+
+## Photo tracing
+
+`components/TraceView/` traces a photo on the desktop with the phone's passes
+from `@/shared/scanReview` and hands the Scan dialog the same millimetre SVG a
+phone uploads, so both land through one import path. It is a full-screen view,
+not a panel, so the panel idioms do not apply under it. A drawn ruler or marked
+paper (`manualReference.ts`) sizes a photo with no reference; see the
+scan-capture README.
+
+A path cutout's Outline section (`components/OutlineCleanup/`) runs the
+steps in `@/shared/outlineCleanup` from the path as it stood when the section
+opened, so settings never compound, and on the outline as drawn:
+`cleanupFrame.ts` turns a rotated path out and back.
 
 ## Compartment geometry and the size lock
 

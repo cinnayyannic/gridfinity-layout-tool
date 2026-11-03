@@ -1,17 +1,27 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   loadRegistry,
   upsertRegistryEntry,
   removeRegistryEntry,
   rebuildRegistry,
+  renameRegistryEntry,
+  registryAssemblyEntry,
   registryAssemblyFields,
+  registryItemEntry,
   registryEdgeFields,
   registryHeightFields,
   registryOverhangFields,
+  registrySlantFields,
+  refreshRegistrySlant,
+  refreshRegistrySlants,
+  registryParamsEntry,
+  subscribeToRegistry,
   type CustomBinRef,
 } from './customBinRegistry';
 import { designId } from '@/core/types';
+import { isOk } from '@/core/result';
+import type { BinParams } from '../types';
 import type { ItemEnvelope } from '@/shared/types/item';
 import type { AssemblyStructure } from '@/shared/types/assembly';
 import { GRIDFINITY_SPEC } from '@/shared/printSettings/gridfinityGeometry';
@@ -179,6 +189,29 @@ describe('customBinRegistry', () => {
     });
   });
 
+  describe('renameRegistryEntry', () => {
+    it('changes the name and keeps every other field as stored', () => {
+      const stored: CustomBinRef = {
+        ...makeRef('w', 'Before'),
+        kind: 'assembly',
+        assembledRiseMm: 26.75,
+        hasLip: false,
+        socketless: false,
+        overhangMm: { left: 20, right: 0, front: 0, back: 0 },
+      };
+      upsertRegistryEntry(stored);
+      upsertRegistryEntry(makeRef('other', 'Other'));
+      renameRegistryEntry('w', 'After');
+      expect(loadRegistry()).toEqual([{ ...stored, name: 'After' }, makeRef('other', 'Other')]);
+    });
+
+    it('does not create an entry for an unknown id', () => {
+      upsertRegistryEntry(makeRef('bin-1'));
+      renameRegistryEntry('unknown', 'Renamed');
+      expect(loadRegistry()).toEqual([makeRef('bin-1')]);
+    });
+  });
+
   describe('rebuildRegistry', () => {
     it('replaces entire registry', () => {
       upsertRegistryEntry(makeRef('old-1'));
@@ -240,6 +273,24 @@ describe('customBinRegistry', () => {
       expect(stored?.name).toBe('Renamed');
       expect(stored?.assembledRiseMm).toBe(64.3);
       expect(stored?.socketless).toBe(false);
+    });
+
+    // The designer header renames any kind with a bin-shaped entry that has no
+    // `kind`; dropping it would make a Workshop design read as a parametric bin.
+    it('keeps the design kind when an update omits it', () => {
+      upsertRegistryEntry({ ...makeRef('d1'), kind: 'assembly' });
+      upsertRegistryEntry({ ...makeRef('d1', 'Renamed') });
+
+      const stored = loadRegistry()[0];
+      expect(stored?.name).toBe('Renamed');
+      expect(stored?.kind).toBe('assembly');
+    });
+
+    it('takes a fresh kind when the writer supplies one', () => {
+      upsertRegistryEntry({ ...makeRef('d1'), kind: 'toolRack' });
+      upsertRegistryEntry({ ...makeRef('d1'), kind: 'assembly' });
+
+      expect(loadRegistry()[0]?.kind).toBe('assembly');
     });
 
     it('takes a fresh rise when the writer supplies one', () => {
@@ -349,6 +400,99 @@ describe('customBinRegistry', () => {
     });
   });
 
+  describe('registryAssemblyEntry', () => {
+    const envelope = { width: 4, depth: 2, gridUnitMm: 42, heightUnitMm: 7 } as ItemEnvelope;
+    const structure = {
+      kind: 'assembly',
+      schemaVersion: 1,
+      base: { floorThickness: 2 },
+      mirrorAxis: 'x',
+      parts: [],
+    } as AssemblyStructure;
+    const saved = {
+      id: designId('w'),
+      name: 'Workshop build',
+      thumbnail: null,
+      exportFileNameConfig: null,
+      createdAt: '2026-05-19T00:00:00.000Z',
+      updatedAt: '2026-05-20T00:00:00.000Z',
+    };
+
+    it('builds a full entry for an assembly', () => {
+      const entry = registryAssemblyEntry({ ...saved, kind: 'assembly', envelope, structure });
+      expect(entry).toMatchObject({
+        id: 'w',
+        name: 'Workshop build',
+        width: 4,
+        depth: 2,
+        kind: 'assembly',
+        hasLip: false,
+        updatedAt: '2026-05-20T00:00:00.000Z',
+      });
+      expect(entry?.assembledRiseMm).toBeCloseTo(GRIDFINITY_SPEC.SOCKET_HEIGHT + 2, 5);
+    });
+
+    it('is null for a parametric bin', () => {
+      expect(registryAssemblyEntry({ ...saved, params: DEFAULT_BIN_PARAMS })).toBeNull();
+    });
+  });
+
+  describe('registryItemEntry', () => {
+    const envelope = { width: 2, depth: 1.5, gridUnitMm: 42, heightUnitMm: 7 } as ItemEnvelope;
+    const saved = {
+      id: designId('m'),
+      name: 'Parts bin',
+      thumbnail: null,
+      exportFileNameConfig: null,
+      createdAt: '2026-05-19T00:00:00.000Z',
+      updatedAt: '2026-05-20T00:00:00.000Z',
+    };
+
+    it('builds the entry an import writes for an imported mesh', () => {
+      const entry = registryItemEntry({
+        ...saved,
+        kind: 'importedMesh',
+        envelope,
+        structure: {
+          kind: 'importedMesh',
+          heightUnits: 4,
+          asset: {
+            name: 'parts_bin',
+            hash: 'e'.repeat(64),
+            triangleCount: 4,
+            sizeMm: { x: 83, y: 62, z: 28 },
+            bytes: 900,
+          },
+        },
+      });
+
+      expect(entry).toEqual({
+        id: 'm',
+        name: 'Parts bin',
+        width: 2,
+        depth: 1.5,
+        height: 4,
+        kind: 'importedMesh',
+        ...registryEdgeFields({}),
+        updatedAt: '2026-05-20T00:00:00.000Z',
+      });
+    });
+
+    it('builds the assembly entry for an assembly, and none for a bin', () => {
+      const structure = {
+        kind: 'assembly',
+        schemaVersion: 1,
+        base: { floorThickness: 2 },
+        mirrorAxis: 'x',
+        parts: [],
+      } as AssemblyStructure;
+      const assembly = { ...saved, kind: 'assembly' as const, envelope, structure };
+
+      expect(registryItemEntry(assembly)).toEqual(registryAssemblyEntry(assembly));
+      expect(registryItemEntry({ ...saved, params: DEFAULT_BIN_PARAMS })).toBeNull();
+    });
+  });
+
   describe('design overhang', () => {
     const OVER = { left: 61.5, right: 42, front: 0, back: 0 };
 
@@ -423,6 +567,143 @@ describe('customBinRegistry', () => {
       // A partly-valid record keeps its usable sides; a useless one is dropped.
       if (back) expect(back.left).toBe(0);
       else expect(back).toBeUndefined();
+    });
+  });
+  describe('design slant', () => {
+    const SLANT = { angleDeg: 40, side: 'back' as const, endSupport: true };
+
+    it("projects the design's slant and extra wall", () => {
+      const fields = registrySlantFields({
+        ...DEFAULT_BIN_PARAMS,
+        slant: SLANT,
+        extraWallHeightMm: 6,
+      });
+      expect(fields).toEqual({ slant: { config: SLANT, extraWallMm: 6 } });
+    });
+
+    it("records the design's units only when they are not the defaults", () => {
+      const fields = registrySlantFields({ ...DEFAULT_BIN_PARAMS, heightUnitMm: 10 });
+      expect(fields).toEqual({ slant: { heightUnitMm: 10 } });
+    });
+
+    it('records a design that keeps any slant off', () => {
+      const fields = registrySlantFields({
+        ...DEFAULT_BIN_PARAMS,
+        overhang: { left: 10, right: 0, front: 0, back: 0, enabled: true },
+      });
+      expect(fields).toEqual({ slant: { blocked: true } });
+    });
+
+    it('writes an explicit undefined for an upright design with nothing to record', () => {
+      const fields = registrySlantFields(DEFAULT_BIN_PARAMS);
+      expect('slant' in fields).toBe(true);
+      expect(fields.slant).toBeUndefined();
+    });
+
+    it('keeps the facts when an update omits them, and clears them on a re-save', () => {
+      upsertRegistryEntry({ ...makeRef('d1'), slant: { config: SLANT } });
+      upsertRegistryEntry({ ...makeRef('d1', 'Renamed') });
+      expect(loadRegistry()[0]?.slant).toEqual({ config: SLANT });
+
+      upsertRegistryEntry({ ...makeRef('d1'), ...registrySlantFields(DEFAULT_BIN_PARAMS) });
+      expect(loadRegistry()[0]?.slant).toBeUndefined();
+    });
+
+    it('refreshes the slant facts of a known entry, and leaves unknown designs out', () => {
+      upsertRegistryEntry({ ...makeRef('d1'), slant: { blocked: true } });
+      refreshRegistrySlant('d1', { ...DEFAULT_BIN_PARAMS, slant: SLANT });
+      expect(loadRegistry()[0]?.slant).toEqual({ config: SLANT });
+      refreshRegistrySlant('d1', DEFAULT_BIN_PARAMS);
+      expect(loadRegistry()[0]?.slant).toBeUndefined();
+      refreshRegistrySlant('unknown', { ...DEFAULT_BIN_PARAMS, slant: SLANT });
+      expect(loadRegistry()).toHaveLength(1);
+    });
+
+    it('builds a parametric entry from the stored design, slant facts included', () => {
+      const params = { ...DEFAULT_BIN_PARAMS, width: 3, slant: SLANT };
+      const design = {
+        id: designId('d1'),
+        name: 'Pens',
+        params,
+        thumbnail: null,
+        exportFileNameConfig: null,
+        createdAt: '2026-10-18T00:00:00.000Z',
+        updatedAt: '2026-10-19T00:00:00.000Z',
+      };
+      expect(registryParamsEntry(design)).toMatchObject({
+        id: 'd1',
+        name: 'Pens',
+        width: 3,
+        slant: { config: SLANT },
+        updatedAt: '2026-10-19T00:00:00.000Z',
+      });
+      const { params: _params, ...withoutParams } = design;
+      expect(registryParamsEntry(withoutParams)).toBeNull();
+    });
+
+    it('refreshes many entries in one write, and writes nothing when they already match', () => {
+      upsertRegistryEntry(makeRef('d1'));
+      upsertRegistryEntry(makeRef('d2'));
+      upsertRegistryEntry({ ...makeRef('d3'), ...registrySlantFields(DEFAULT_BIN_PARAMS) });
+      const notified = vi.fn();
+      const unsubscribe = subscribeToRegistry(notified);
+      const leaning = { ...DEFAULT_BIN_PARAMS, slant: SLANT };
+      const designs = [
+        { id: 'd1', params: leaning },
+        { id: 'd2', params: { ...DEFAULT_BIN_PARAMS, extraWallHeightMm: 4 } },
+        { id: 'unknown', params: leaning },
+      ];
+
+      refreshRegistrySlants(designs);
+      expect(notified).toHaveBeenCalledTimes(1);
+      expect(loadRegistry().map((r) => [r.id, r.slant])).toEqual([
+        ['d1', { config: SLANT }],
+        ['d2', { extraWallMm: 4 }],
+        ['d3', undefined],
+      ]);
+
+      refreshRegistrySlants(designs);
+      expect(notified).toHaveBeenCalledTimes(1);
+      unsubscribe();
+    });
+
+    // A sync pull hands over the design's params alone, possibly stored before
+    // newer fields existed; the support is sized from all of these.
+    it('refreshes everything that sizes the support, from params of any age', () => {
+      upsertRegistryEntry({ ...makeRef('d1'), socketless: false, fractionalEdgeX: 'end' });
+      const { slide: _slide, ...legacy } = {
+        ...DEFAULT_BIN_PARAMS,
+        width: 1.5,
+        depth: 1,
+        height: 12,
+        fractionalEdgeX: 'start' as const,
+        base: { ...DEFAULT_BIN_PARAMS.base, style: 'flat' as const },
+        slant: SLANT,
+      };
+      expect(isOk(refreshRegistrySlant('d1', legacy as BinParams))).toBe(true);
+      expect(loadRegistry()[0]).toMatchObject({
+        name: 'Test Bin',
+        width: 1.5,
+        depth: 1,
+        height: 12,
+        fractionalEdgeX: 'start',
+        socketless: true,
+        slant: { config: SLANT },
+        updatedAt: makeRef('d1').updatedAt,
+      });
+    });
+
+    it('keeps the usable part of a stored record and drops the rest', () => {
+      localStorage.setItem(
+        'gridfinity-custom-bins-v1',
+        JSON.stringify([
+          { ...makeRef('d1'), slant: { config: { angleDeg: 80, side: 'left' }, extraWallMm: -2 } },
+          { ...makeRef('d2'), slant: { config: 'tilted', blocked: 'yes' } },
+        ])
+      );
+      const [first, second] = loadRegistry();
+      expect(first?.slant).toEqual({ config: { angleDeg: 60, side: 'left' } });
+      expect(second?.slant).toBeUndefined();
     });
   });
 });

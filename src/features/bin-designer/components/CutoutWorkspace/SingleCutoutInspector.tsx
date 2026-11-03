@@ -12,6 +12,11 @@ import { clampRotationToBounds } from '../panel/CutoutsSection/geometry';
 import { resizeAroundCenter } from '../panel/CutoutsSection/cutoutHelpers';
 import { cutoutDepthShortfall } from '../panel/CutoutsSection/cutoutDepthShortfall';
 import { CutoutScoopControls } from './CutoutScoopControls';
+import { FingerAccessControls } from './FingerAccessControls';
+import { CutoutSplitControls, type SplitTool } from './CutoutSplitControls';
+import { fingerBottom } from '@/shared/utils/fingerAccess';
+import { CutoutDepthControl } from '../panel/CutoutsSection/CutoutDepthControl';
+import { isThroughCut } from '@/shared/utils/cutoutDepth';
 import { CutoutShapeControls } from '../panel/CutoutsSection/CutoutShapeControls';
 import { CutoutFitControls } from '../panel/CutoutsSection/CutoutFitControls';
 import { CutoutShapeBadge } from '../panel/CutoutsSection/CutoutShapeBadge';
@@ -27,6 +32,7 @@ import { CutoutColorControls } from './CutoutColorControls';
 import { CutoutKnifeControls } from './CutoutKnifeControls';
 import { CutoutOpenSidesControls } from './CutoutOpenSidesControls';
 import { CutoutEngraveLabelControls } from './CutoutEngraveLabelControls';
+import { CutoutOutlineSection } from '../OutlineCleanup/CutoutOutlineSection';
 import { arrayInstanceCount } from '@/shared/utils/cutoutArray';
 import { Collapsible, SliderInput, NumberField } from '@/design-system';
 
@@ -67,6 +73,10 @@ interface SingleCutoutInspectorProps {
   readonly onUpdate: (id: string, updates: Partial<Cutout>) => void;
   readonly onFitCue?: (cue: FitCue) => void;
   readonly onFlattenArray?: (id: string) => void;
+  /** Places a finger cut beside the pocket with this id. */
+  readonly onAddFingerAccess?: (id: string) => void;
+  /** Absent where pockets cannot be split, as on a lid. */
+  readonly splitTool?: SplitTool;
   readonly disabled: boolean;
 }
 
@@ -80,11 +90,15 @@ export function SingleCutoutInspector({
   onUpdate,
   onFitCue,
   onFlattenArray,
+  onAddFingerAccess,
+  splitTool,
   disabled,
 }: SingleCutoutInspectorProps) {
   const t = useTranslation();
   const ungroupCutouts = useDesignerStore((s) => s.ungroupCutouts);
   const setCutoutArray = useDesignerStore((s) => s.setCutoutArray);
+  // A through cut has no floor, so the generator drops its floor fillet.
+  const throughCut = useDesignerStore((s) => isThroughCut(cutout, s.params));
   // maxCutDepth is the remaining fill on a bin host; a through-cut host has no
   // depth to fall short of.
   // The fields display preview-merged values, so anything computed FROM them
@@ -200,14 +214,13 @@ export function SingleCutoutInspector({
                   })}
                 </p>
               ) : (
-                <NumberField
-                  label={t('binDesigner.cutouts.cutDepth')}
-                  value={cutout.cutDepth}
-                  onChange={(cutDepth) => onUpdate(cutout.id, { cutDepth })}
-                  min={0.5}
-                  max={maxCutDepth}
-                  step={0.5}
-                  unit="mm"
+                <CutoutDepthControl
+                  cutouts={[live]}
+                  maxCutDepth={maxCutDepth}
+                  onUpdate={(updates) => {
+                    const patch = updates.get(cutout.id);
+                    if (patch) onUpdate(cutout.id, patch);
+                  }}
                   disabled={disabled}
                 />
               ))}
@@ -269,13 +282,34 @@ export function SingleCutoutInspector({
                   )}
                 </div>
               )}
-              {cutout.shape !== 'mesh' && !throughOnly && (
-                <CutoutScoopControls
-                  key={cutout.id}
+              {cutout.shape !== 'mesh' &&
+                !throughOnly &&
+                !throughCut &&
+                fingerBottom(cutout) !== 'curved' && (
+                  <CutoutScoopControls
+                    key={cutout.id}
+                    cutout={cutout}
+                    preview={preview.get(cutout.id)}
+                    disabled={disabled}
+                    onUpdate={(patch) => onUpdate(cutout.id, patch)}
+                  />
+                )}
+              {!throughOnly && (
+                <FingerAccessControls
                   cutout={cutout}
-                  preview={preview.get(cutout.id)}
-                  disabled={disabled}
                   onUpdate={(patch) => onUpdate(cutout.id, patch)}
+                  onAdd={onAddFingerAccess ? () => onAddFingerAccess(cutout.id) : undefined}
+                  disabled={disabled}
+                />
+              )}
+              {splitTool && (
+                <CutoutSplitControls
+                  cutout={live}
+                  maxCutDepth={maxCutDepth}
+                  drawing={splitTool.drawingId === cutout.id}
+                  onDraw={() => splitTool.onDraw(cutout.id)}
+                  onChange={(split) => splitTool.onChange(cutout.id, split)}
+                  disabled={disabled}
                 />
               )}
               {/* A lid's plate cuts clean through, so it has no wall to open. */}
@@ -288,6 +322,17 @@ export function SingleCutoutInspector({
               )}
             </div>
           </Collapsible>
+        </div>
+      )}
+
+      {cutout.shape === 'path' && (
+        <div className="-mx-4 border-b border-stroke-subtle px-4 pt-2 pb-3">
+          <CutoutOutlineSection
+            key={cutout.id}
+            cutout={cutout}
+            disabled={disabled}
+            onUpdate={onUpdate}
+          />
         </div>
       )}
 

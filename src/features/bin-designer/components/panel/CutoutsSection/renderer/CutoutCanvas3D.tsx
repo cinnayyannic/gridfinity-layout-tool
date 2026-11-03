@@ -81,6 +81,8 @@ export interface CutoutCanvas3DProps {
   readonly selection: ReadonlySet<string>;
   /** Cutouts stranded past the board edge — framed with a red warning outline. */
   readonly offBoardIds?: ReadonlySet<string>;
+  /** Placed copies a pocket check names, framed dashed. */
+  readonly issueInstanceIds?: ReadonlySet<string>;
   readonly preview: PreviewMap;
   readonly mode: InteractionMode;
   readonly drawingPreview: DrawingPreview | null;
@@ -111,12 +113,13 @@ export interface CutoutCanvas3DProps {
   readonly onGroupScaleStart: (mmX: number, mmY: number) => void;
   readonly segmentHover?: SegmentHoverInfo | null;
   readonly onPathDrawingVertexDown?: (index: number, mmX: number, mmY: number) => void;
-  readonly onVertexPointDown?: (index: number, mmX: number, mmY: number) => void;
+  readonly onVertexPointDown?: (index: number, mmX: number, mmY: number, ring?: number) => void;
   readonly onVertexHandleDown?: (
     index: number,
     handleType: 'in' | 'out',
     mmX: number,
-    mmY: number
+    mmY: number,
+    ring?: number
   ) => void;
   /** Externally-managed camera zoom (workspace mode). When provided, the R3F camera syncs to this value. */
   readonly externalZoom?: number;
@@ -142,6 +145,7 @@ export function CutoutCanvas3D({
   canvasHeight,
   selection,
   offBoardIds,
+  issueInstanceIds,
   preview,
   mode,
   drawingPreview,
@@ -330,6 +334,7 @@ export function CutoutCanvas3D({
         groupContext={groupContext}
         selection={selection}
         offBoardIds={offBoardIds}
+        issueInstanceIds={issueInstanceIds}
         preview={preview}
         mode={mode}
         isDragging={isDragging}

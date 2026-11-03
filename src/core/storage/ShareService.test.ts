@@ -17,7 +17,15 @@ import {
 } from '@/core/storage';
 import type { Layout } from '@/core/types';
 import { binId, categoryId, designId, gridUnits, heightUnits, layerId } from '@/core/types';
-import { getUserMessage, ok, err, storageNotFound } from '@/core/result';
+import {
+  getUserMessage,
+  ok,
+  err,
+  isErr,
+  storageMeshMissing,
+  storageNotFound,
+  unwrap,
+} from '@/core/result';
 import type { Result, ValidationError, ValidationImportError } from '@/core/result';
 import {
   registerDesignStorePort,
@@ -48,6 +56,7 @@ const fakePort: DesignStorePort = {
   saveDesign: (...args: unknown[]) => mockSaveDesign(...args),
   upsertRegistryEntry: (...args: unknown[]) => mockUpsertRegistryEntry(...args),
   registryEdgeFields: async () => ({}),
+  registryPlacementFields: async () => ({}),
 };
 
 function expectImportError(result: Result<unknown, ValidationError>): ValidationImportError {
@@ -390,6 +399,18 @@ describe('storage-share', () => {
       expect(mockURL.revokeObjectURL).toHaveBeenCalledWith('blob:test');
     });
 
+    it('downloads nothing when a linked design names a missing mesh file', async () => {
+      registerDesignStorePort(fakePort);
+      mockLoadDesign.mockResolvedValue(err(storageMeshMissing('a'.repeat(64))));
+      const layout = createTestLayout();
+      layout.bins = layout.bins.map((bin) => ({ ...bin, linkedDesignId: designId('design-1') }));
+
+      const result = await downloadLayoutAsFile(layout);
+
+      expect(isErr(result)).toBe(true);
+      expect(mockAnchor.click).not.toHaveBeenCalled();
+    });
+
     it('uses custom filename if provided', async () => {
       const layout = createTestLayout();
       await downloadLayoutAsFile(layout, 'custom-name.json');
@@ -470,6 +491,14 @@ describe('storage-share', () => {
       const value = expectOk(result);
       expect(value.name).toBe(layout.name);
       expect(value.drawer).toEqual(layout.drawer);
+    });
+
+    it('keeps what each bin holds through a JSON export and import', () => {
+      const layout = createTestLayout();
+      const items = [{ id: 'i1', name: 'M3 screws', qty: 40 }];
+      layout.bins = [{ ...layout.bins[0], items }];
+      const value = expectOk(importLayoutResult(exportLayoutJSON(layout)));
+      expect(value.bins[0].items).toEqual(items);
     });
 
     it('returns Err with ValidationImportError on invalid JSON', () => {
@@ -642,7 +671,7 @@ describe('storage-share', () => {
 
     it('exports layout without linked designs (no linkedDesigns key in output)', async () => {
       const layout = createTestLayout();
-      const json = await exportLayoutJSONWithDesigns(layout);
+      const json = unwrap(await exportLayoutJSONWithDesigns(layout));
 
       const parsed = JSON.parse(json);
       expect(parsed.linkedDesigns).toBeUndefined();
@@ -666,7 +695,7 @@ describe('storage-share', () => {
         })
       );
 
-      const json = await exportLayoutJSONWithDesigns(layout);
+      const json = unwrap(await exportLayoutJSONWithDesigns(layout));
       const parsed = JSON.parse(json);
 
       expect(parsed.linkedDesigns).toBeDefined();
@@ -677,7 +706,7 @@ describe('storage-share', () => {
         name: 'Test Bin',
         params: DEFAULT_BIN_PARAMS,
       });
-      expect(mockLoadDesign).toHaveBeenCalledWith('design-1');
+      expect(mockLoadDesign).toHaveBeenCalledWith('design-1', {});
     });
 
     it('embeds an assembly design as kind + envelope + structure', async () => {
@@ -702,7 +731,7 @@ describe('storage-share', () => {
         })
       );
 
-      const json = await exportLayoutJSONWithDesigns(layout);
+      const json = unwrap(await exportLayoutJSONWithDesigns(layout));
       const parsed = JSON.parse(json);
 
       expect(parsed.linkedDesigns).toHaveLength(1);
@@ -721,12 +750,12 @@ describe('storage-share', () => {
       // Mock loadDesign to return not found error
       mockLoadDesign.mockResolvedValue(err(storageNotFound('design-1')));
 
-      const json = await exportLayoutJSONWithDesigns(layout);
+      const json = unwrap(await exportLayoutJSONWithDesigns(layout));
       const parsed = JSON.parse(json);
 
       // Should not include linkedDesigns key when no designs were found
       expect(parsed.linkedDesigns).toBeUndefined();
-      expect(mockLoadDesign).toHaveBeenCalledWith('design-1');
+      expect(mockLoadDesign).toHaveBeenCalledWith('design-1', {});
     });
 
     it('includes only found designs when some are missing', async () => {
@@ -756,12 +785,21 @@ describe('storage-share', () => {
         )
         .mockResolvedValueOnce(err(storageNotFound('design-2')));
 
-      const json = await exportLayoutJSONWithDesigns(layout);
+      const json = unwrap(await exportLayoutJSONWithDesigns(layout));
       const parsed = JSON.parse(json);
 
       expect(parsed.linkedDesigns).toBeDefined();
       expect(parsed.linkedDesigns).toHaveLength(1);
       expect(parsed.linkedDesigns[0].id).toBe('design-1');
+    });
+
+    it('fails the whole export when a linked design names a missing mesh file', async () => {
+      const layout = createLayoutWithLinkedDesigns();
+      mockLoadDesign.mockResolvedValue(err(storageMeshMissing('a'.repeat(64))));
+
+      const exported = await exportLayoutJSONWithDesigns(layout);
+
+      expect(isErr(exported) && exported.error.code).toBe('STORAGE_MESH_MISSING');
     });
   });
 
@@ -1153,6 +1191,26 @@ describe('storage-share', () => {
       );
     });
 
+    // The layout reserves a slanted design's end support from these facts.
+    it('registers how a design stands and leans with it', async () => {
+      mockSaveDesign.mockResolvedValue(savedAs('design_shared_deadbeef'));
+      const slant = { config: { angleDeg: 45, side: 'back' as const, endSupport: true } };
+      const port: DesignStorePort = {
+        ...fakePort,
+        registryPlacementFields: async () => ({ slant, socketless: true }),
+      };
+      registerDesignStorePort(port);
+
+      await restoreSharedDesigns(SHARE_ID, layoutLinkedTo('remote-design-1'), [
+        { id: 'remote-design-1', name: 'Pens', params: { ...DEFAULT_BIN_PARAMS } },
+      ]);
+
+      expect(mockUpsertRegistryEntry).toHaveBeenCalledWith(
+        expect.objectContaining({ slant, socketless: true })
+      );
+      registerDesignStorePort(fakePort);
+    });
+
     // Unlike a one-shot file import, a share link is re-fetched on every visit.
     it('derives a stable local id so re-opening a link does not duplicate designs', async () => {
       mockSaveDesign.mockResolvedValue(savedAs('design_shared_deadbeef'));
@@ -1218,7 +1276,7 @@ describe('storage-share', () => {
         linkedDesignId: i === 0 ? designId('design-1') : undefined,
       }));
 
-      const json = await exportLayoutJSONWithDesigns(layout);
+      const json = unwrap(await exportLayoutJSONWithDesigns(layout));
       const parsed = JSON.parse(json);
 
       expect(parsed.linkedDesigns).toBeUndefined();

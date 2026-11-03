@@ -11,9 +11,12 @@ import {
   getAll as outboxGetAll,
   clearAll as clearOutbox,
   enqueue as outboxEnqueue,
+  markFailure as outboxMarkFailure,
+  MAX_ATTEMPTS,
 } from './outbox';
 import type {
   AdapterChange,
+  PushPlan,
   SyncAdapter,
   SyncAdapters,
   LayoutAdapter,
@@ -30,6 +33,7 @@ vi.mock('./apiFetch', () => ({
 }));
 
 import * as engine from './engine';
+import { DESIGN_SCHEMA_VERSION, LAYOUT_SCHEMA_VERSION } from './payloadKey';
 
 interface MockAdapter extends SyncAdapter {
   triggerChange: (change: AdapterChange) => void;
@@ -134,6 +138,12 @@ describe('engine.start / stop', () => {
     expect(useSyncStatusStore.getState().state).toBe('idle');
     expect(useSyncStatusStore.getState().lastError).toBeUndefined();
   });
+
+  it('stop resets the status left by a sign-in claim before any engine started', () => {
+    useSyncStatusStore.getState().beginSync();
+    engine.stop();
+    expect(useSyncStatusStore.getState().state).toBe('idle');
+  });
 });
 
 describe('push: PUT happy path', () => {
@@ -147,7 +157,11 @@ describe('push: PUT happy path', () => {
       expect.objectContaining({ method: 'PUT' })
     );
     const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
-    expect(body).toEqual({ layout: { v: 1 }, modifiedAt: 1000 });
+    expect(body).toEqual({
+      layout: { v: 1 },
+      modifiedAt: 1000,
+      schemaVersion: LAYOUT_SCHEMA_VERSION,
+    });
     expect(await outboxGetAll()).toEqual([]);
   });
 
@@ -161,7 +175,11 @@ describe('push: PUT happy path', () => {
       expect.objectContaining({ method: 'PUT' })
     );
     const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
-    expect(body).toEqual({ design: { v: 1 }, modifiedAt: 2000 });
+    expect(body).toEqual({
+      design: { v: 1 },
+      modifiedAt: 2000,
+      schemaVersion: DESIGN_SCHEMA_VERSION,
+    });
   });
 
   it('after success, status returns to idle and lastSyncedAt is set', async () => {
@@ -172,6 +190,21 @@ describe('push: PUT happy path', () => {
     expect(s.state).toBe('idle');
     expect(s.pendingCount).toBe(0);
     expect(s.lastSyncedAt).toBeGreaterThan(0);
+  });
+
+  it('sends a newer snapshot than the entry once, then clears the entry', async () => {
+    // The sign-in claim queues an item before the engine subscribes, so a save
+    // landing in between moves the item past its entry without a re-enqueue.
+    layoutsAdapter.triggerChange({ kind: 'put', id: 'lay-1', modifiedAt: 2000 });
+    await outboxEnqueue({ kind: 'layouts', id: 'lay-1', modifiedAt: 1000, op: 'put' });
+
+    engine.start(adapters);
+    await flush();
+
+    const puts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT');
+    expect(puts).toHaveLength(1);
+    expect(JSON.parse(puts[0][1].body as string).modifiedAt).toBe(2000);
+    expect(await outboxGetAll()).toEqual([]);
   });
 });
 
@@ -213,6 +246,7 @@ describe('push: 409 conflict', () => {
       id: 'lay-1',
       payload: { v: 99 },
       modifiedAt: 9000,
+      schemaVersion: 1,
     });
     expect(events).toContainEqual(
       expect.objectContaining({ type: 'remote-replaced-local', kind: 'layouts', id: 'lay-1' })
@@ -445,5 +479,392 @@ describe('push: get returns null', () => {
       ([, init]) => (init as RequestInit | undefined)?.method === 'PUT'
     );
     expect(puts.length).toBe(0);
+  });
+});
+
+describe('push: preparePush', () => {
+  function puts(): RequestInit[] {
+    return fetchMock.mock.calls
+      .map(([, init]) => init as RequestInit)
+      .filter((init) => init.method === 'PUT');
+  }
+
+  it('sends the item the plan settles on, not the one get reads', async () => {
+    designsAdapter.preparePush = vi.fn(async (id: string) => ({
+      status: 'send' as const,
+      item: { id, payload: { planned: true }, modifiedAt: 2000 },
+    }));
+    engine.start(adapters);
+    designsAdapter.triggerChange({ kind: 'put', id: 'des-1', modifiedAt: 2000 });
+    await flush();
+
+    expect(JSON.parse(puts()[0].body as string)).toEqual({
+      design: { planned: true },
+      modifiedAt: 2000,
+      schemaVersion: DESIGN_SCHEMA_VERSION,
+    });
+    expect(designsAdapter.get).not.toHaveBeenCalled();
+    expect(await outboxGetAll()).toEqual([]);
+  });
+
+  it('sends nothing for a plan that settles after the engine stopped', async () => {
+    let settle = (_plan: PushPlan<unknown>): void => undefined;
+    designsAdapter.preparePush = vi.fn<NonNullable<SyncAdapter['preparePush']>>(
+      () =>
+        new Promise((resolve) => {
+          settle = resolve;
+        })
+    );
+    engine.start(adapters);
+    designsAdapter.triggerChange({ kind: 'put', id: 'des-1', modifiedAt: 2000 });
+    await vi.waitFor(() => expect(designsAdapter.preparePush).toHaveBeenCalled());
+
+    engine.stop();
+    settle({ status: 'send', item: { id: 'des-1', payload: {}, modifiedAt: 2000 } });
+    await flush();
+
+    expect(puts()).toEqual([]);
+  });
+
+  it('reports nothing for a plan that fails after the engine stopped', async () => {
+    let fail = (): void => undefined;
+    designsAdapter.preparePush = vi.fn<NonNullable<SyncAdapter['preparePush']>>(
+      () =>
+        new Promise((_, reject) => {
+          fail = () => reject(new Error('mesh upload: session ended'));
+        })
+    );
+    engine.start(adapters);
+    designsAdapter.triggerChange({ kind: 'put', id: 'des-1', modifiedAt: 2000 });
+    await vi.waitFor(() => expect(designsAdapter.preparePush).toHaveBeenCalled());
+
+    engine.stop();
+    fail();
+    await flush();
+
+    expect(useSyncStatusStore.getState().lastError).toBeUndefined();
+    expect(puts()).toEqual([]);
+  });
+
+  it('handles no reply that lands after the engine stopped', async () => {
+    let answer = (_res: Response): void => undefined;
+    fetchMock.mockImplementation((_url: string, init?: RequestInit) =>
+      init?.method === 'PUT'
+        ? new Promise<Response>((resolve) => {
+            answer = resolve;
+          })
+        : Promise.resolve(new Response(null, { status: 200 }))
+    );
+    designsAdapter.preparePush = vi.fn(async (id: string) => ({
+      status: 'send' as const,
+      item: { id, payload: { v: 1 }, modifiedAt: 2000 },
+    }));
+    engine.start(adapters);
+    designsAdapter.triggerChange({ kind: 'put', id: 'des-1', modifiedAt: 2000 });
+    await vi.waitFor(() => expect(puts()).toHaveLength(1));
+
+    engine.stop();
+    answer(
+      new Response(JSON.stringify({ stored: { design: { v: 9 }, modifiedAt: 3000 } }), {
+        status: 409,
+      })
+    );
+    await flush();
+
+    expect(designsAdapter.applyRemote).not.toHaveBeenCalled();
+  });
+
+  describe('a conflict around the stop', () => {
+    const conflictBody = { stored: { design: { v: 9 }, modifiedAt: 3000 } };
+
+    beforeEach(() => {
+      designsAdapter.preparePush = vi.fn(async (id: string) => ({
+        status: 'send' as const,
+        item: { id, payload: { v: 1 }, modifiedAt: 2000 },
+      }));
+    });
+
+    it('writes nothing for a 409 whose body is read after the stop', async () => {
+      let readBody = (): void => undefined;
+      fetchMock.mockImplementation((_url: string, init?: RequestInit) =>
+        Promise.resolve(
+          init?.method === 'PUT'
+            ? ({
+                ok: false,
+                status: 409,
+                json: () =>
+                  new Promise((resolve) => {
+                    readBody = () => resolve(conflictBody);
+                  }),
+              } as unknown as Response)
+            : new Response(null, { status: 200 })
+        )
+      );
+      engine.start(adapters);
+      designsAdapter.triggerChange({ kind: 'put', id: 'des-1', modifiedAt: 2000 });
+      await vi.waitFor(() => expect(puts()).toHaveLength(1));
+
+      void engine.stop();
+      readBody();
+      await flush();
+
+      expect(designsAdapter.applyRemote).not.toHaveBeenCalled();
+    });
+
+    it('settles a stop once a conflict write already under way has landed', async () => {
+      fetchMock.mockImplementation((_url: string, init?: RequestInit) =>
+        Promise.resolve(
+          new Response(init?.method === 'PUT' ? JSON.stringify(conflictBody) : null, {
+            status: init?.method === 'PUT' ? 409 : 200,
+          })
+        )
+      );
+      let landWrite = (): void => undefined;
+      designsAdapter.applyRemote = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            landWrite = resolve;
+          })
+      );
+      engine.start(adapters);
+      designsAdapter.triggerChange({ kind: 'put', id: 'des-1', modifiedAt: 2000 });
+      await vi.waitFor(() => expect(designsAdapter.applyRemote).toHaveBeenCalled());
+
+      let settled = false;
+      const stopping = engine.stop().then(() => {
+        settled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(settled).toBe(false);
+
+      landWrite();
+      await stopping;
+    });
+  });
+
+  it('still reports a plan that fails while the engine runs', async () => {
+    designsAdapter.preparePush = vi.fn<NonNullable<SyncAdapter['preparePush']>>(async () => {
+      throw new Error('idb closed');
+    });
+    engine.start(adapters);
+    designsAdapter.triggerChange({ kind: 'put', id: 'des-1', modifiedAt: 2000 });
+    await flush();
+
+    expect(useSyncStatusStore.getState().lastError).toContain('idb closed');
+  });
+
+  it('drops the entry when the plan skips it', async () => {
+    designsAdapter.preparePush = vi.fn(async () => ({ status: 'skip' as const }));
+    engine.start(adapters);
+    designsAdapter.triggerChange({ kind: 'put', id: 'des-1', modifiedAt: 2000 });
+    await flush();
+
+    expect(puts()).toEqual([]);
+    expect(await outboxGetAll()).toEqual([]);
+  });
+
+  it('keeps a deferred entry under the failure backoff, then sends it on a later drain', async () => {
+    const preparePush = vi
+      .fn<NonNullable<SyncAdapter['preparePush']>>()
+      .mockResolvedValueOnce({ status: 'defer', reason: 'mesh upload: HTTP 500' })
+      .mockImplementation(async (id) => ({
+        status: 'send',
+        item: { id, payload: { v: 2 }, modifiedAt: 2000 },
+      }));
+    designsAdapter.preparePush = preparePush;
+    engine.start(adapters);
+    const events: engine.EngineEvent[] = [];
+    engine.onEngineEvent((e) => events.push(e));
+    designsAdapter.triggerChange({ kind: 'put', id: 'des-1', modifiedAt: 2000 });
+    await flush();
+
+    expect(puts()).toEqual([]);
+    const [entry] = await outboxGetAll();
+    expect(entry.attempts).toBe(1);
+    expect(entry.nextAttemptAt).toBeGreaterThan(Date.now());
+    expect(useSyncStatusStore.getState().state).toBe('offline');
+    expect(useSyncStatusStore.getState().lastError).toContain('mesh upload: HTTP 500');
+    expect(events).toEqual([]);
+
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(entry.nextAttemptAt + 1);
+      await engine.flushNow();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(preparePush).toHaveBeenCalledTimes(2);
+    expect(puts()).toHaveLength(1);
+    expect(await outboxGetAll()).toEqual([]);
+  });
+
+  it('wakes for a deferred entry when its backoff ends, not only on the next edit', async () => {
+    const preparePush = vi
+      .fn<NonNullable<SyncAdapter['preparePush']>>()
+      .mockResolvedValueOnce({ status: 'defer', reason: 'mesh upload: HTTP 500' })
+      .mockResolvedValueOnce({ status: 'defer', reason: 'mesh upload: HTTP 500' })
+      .mockImplementation(async (id) => ({
+        status: 'send',
+        item: { id, payload: { v: 2 }, modifiedAt: 2000 },
+      }));
+    designsAdapter.preparePush = preparePush;
+    engine.start(adapters);
+    designsAdapter.triggerChange({ kind: 'put', id: 'des-1', modifiedAt: 2000 });
+
+    await vi.waitFor(() => expect(puts()).toHaveLength(1), { timeout: 6_000, interval: 50 });
+    expect(preparePush).toHaveBeenCalledTimes(3);
+  }, 10_000);
+
+  it('waits out a throttled push without spending an attempt', async () => {
+    designsAdapter.preparePush = vi.fn(async () => ({
+      status: 'throttle' as const,
+      retryAfterMs: 30_000,
+    }));
+    engine.start(adapters);
+    designsAdapter.triggerChange({ kind: 'put', id: 'des-1', modifiedAt: 2000 });
+    await flush();
+
+    expect(puts()).toEqual([]);
+    const [entry] = await outboxGetAll();
+    expect(entry.attempts).toBe(0);
+    expect(entry.nextAttemptAt).toBeGreaterThanOrEqual(Date.now() + 29_000);
+    expect(useSyncStatusStore.getState().lastError).toContain('Rate limited');
+  });
+
+  it('gives up on a push deferred past the attempt budget, like any failure', async () => {
+    designsAdapter.preparePush = vi.fn(async () => ({
+      status: 'defer' as const,
+      reason: 'mesh upload: HTTP 500',
+    }));
+    engine.start(adapters);
+    await new Promise((r) => setTimeout(r, 10));
+    const events: engine.EngineEvent[] = [];
+    engine.onEngineEvent((e) => events.push(e));
+    await outboxEnqueue({ kind: 'designs', id: 'des-1', modifiedAt: 2000, op: 'put' });
+
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      for (let i = 0; i < MAX_ATTEMPTS; i++) {
+        vi.setSystemTime(Date.now() + 10 * 60 * 1000);
+        await engine.flushNow();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'sync-error', reason: 'gave-up', id: 'des-1' })
+    );
+    expect(await outboxGetAll()).toEqual([]);
+  });
+});
+
+describe('drain timer', () => {
+  function putsTo(id: string): unknown[] {
+    return fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        (url as string).endsWith(`/${id}`) && (init as RequestInit | undefined)?.method === 'PUT'
+    );
+  }
+
+  async function waitingIds(): Promise<string[]> {
+    return (await outboxGetAll()).map((entry) => entry.id).sort();
+  }
+
+  it("keeps an entry's earlier retry when a throttle asks for a later drain", async () => {
+    let failingStatus = 503;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/throttled')) {
+        await vi.waitFor(async () => {
+          const failing = (await outboxGetAll()).find((entry) => entry.id === 'failing');
+          expect(failing?.attempts).toBe(1);
+        });
+        return new Response(null, { status: 429, headers: { 'Retry-After': '60' } });
+      }
+      return new Response(null, { status: failingStatus });
+    });
+    engine.start(adapters);
+
+    layoutsAdapter.triggerChange({ kind: 'put', id: 'failing', modifiedAt: 1000 });
+    layoutsAdapter.triggerChange({ kind: 'put', id: 'throttled', modifiedAt: 1000 });
+    await vi.waitFor(async () => {
+      const throttled = (await outboxGetAll()).find((entry) => entry.id === 'throttled');
+      expect(throttled?.nextAttemptAt).toBeGreaterThan(Date.now() + 50_000);
+    });
+    failingStatus = 200;
+
+    await vi.waitFor(async () => expect(await waitingIds()).toEqual(['throttled']), {
+      timeout: 4_000,
+      interval: 50,
+    });
+    expect(putsTo('failing')).toHaveLength(2);
+  }, 10_000);
+
+  it('wakes for an entry due before the drain already waiting', async () => {
+    designsAdapter.preparePush = vi.fn(async () => ({
+      status: 'throttle' as const,
+      retryAfterMs: 60_000,
+    }));
+    engine.start(adapters);
+    designsAdapter.triggerChange({ kind: 'put', id: 'des-1', modifiedAt: 2000 });
+    await vi.waitFor(async () => {
+      const [entry] = await outboxGetAll();
+      expect(entry?.nextAttemptAt).toBeGreaterThan(Date.now() + 50_000);
+    });
+
+    vi.mocked(layoutsAdapter.get).mockImplementation(async (id) => ({
+      id,
+      payload: { v: 1 },
+      modifiedAt: 1000,
+    }));
+    await outboxEnqueue({ kind: 'layouts', id: 'lay-1', modifiedAt: 1000, op: 'put' });
+    await outboxMarkFailure('layouts', 'lay-1');
+    await engine.flushNow();
+
+    await vi.waitFor(() => expect(putsTo('lay-1')).toHaveLength(1), {
+      timeout: 4_000,
+      interval: 50,
+    });
+    expect(await waitingIds()).toEqual(['des-1']);
+  }, 10_000);
+});
+
+describe('push: 424 missing dependency', () => {
+  function missingResponse(missing: unknown): Response {
+    return new Response(JSON.stringify({ error: 'missing', code: 'MESH_MISSING', missing }), {
+      status: 424,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  it('hands the adapter what is missing and keeps the entry for a retry', async () => {
+    const onMissing = vi.fn();
+    designsAdapter.onMissing = onMissing;
+    fetchMock.mockResolvedValueOnce(missingResponse(['a'.repeat(64), 7]));
+    engine.start(adapters);
+    const events: engine.EngineEvent[] = [];
+    engine.onEngineEvent((e) => events.push(e));
+
+    designsAdapter.triggerChange({ kind: 'put', id: 'des-1', modifiedAt: 2000 });
+    await flush();
+
+    expect(onMissing).toHaveBeenCalledWith(['a'.repeat(64)]);
+    expect(designsAdapter.applyRemote).not.toHaveBeenCalled();
+    const entries = await outboxGetAll();
+    expect(entries).toHaveLength(1);
+    expect(entries[0].attempts).toBe(1);
+    expect(events).toEqual([]);
+    expect(useSyncStatusStore.getState().state).toBe('offline');
+  });
+
+  it('retries an adapter without the hook all the same', async () => {
+    fetchMock.mockResolvedValueOnce(missingResponse('not a list'));
+    engine.start(adapters);
+
+    layoutsAdapter.triggerChange({ kind: 'put', id: 'lay-1', modifiedAt: 2000 });
+    await flush();
+
+    expect(await outboxGetAll()).toHaveLength(1);
   });
 });

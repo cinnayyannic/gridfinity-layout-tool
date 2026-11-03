@@ -6,21 +6,27 @@ import type { BinParams, SavedDesign } from '../types';
 import { assemblyHeightUnits } from '@/shared/types/assemblyPlacement';
 import { GRIDFINITY_SPEC } from '@/shared/printSettings/gridfinityGeometry';
 
+/** The fields that decide a design's kind. A version's content carries the same set. */
+type DesignKindFields = Pick<SavedDesign, 'kind' | 'params' | 'envelope' | 'structure'>;
+
 /** True when the design is a bin (has flat `params`). */
-export function isBinDesign(design: SavedDesign): design is SavedDesign & { params: BinParams } {
+export function isBinDesign<T extends DesignKindFields>(
+  design: T
+): design is T & { params: BinParams } {
   return (design.kind ?? 'bin') === 'bin' && design.params !== undefined;
 }
 
 /**
- * Kinds cloud sync carries: bins and Workshop assemblies (small JSON).
- * Imported meshes stay local — their structure embeds a base64 mesh blob.
+ * Kinds cloud sync carries: bins, Workshop assemblies and imported meshes,
+ * whose mesh travels as a ref to a stored file. Legacy tool racks stay local.
  */
-export function isSyncableDesign(design: SavedDesign): boolean {
+export function isSyncableDesign(design: DesignKindFields): boolean {
+  if (isBinDesign(design)) return true;
+  if (design.envelope === undefined) return false;
+  const structureKind = design.structure?.kind;
   return (
-    isBinDesign(design) ||
-    (design.kind === 'assembly' &&
-      design.envelope !== undefined &&
-      design.structure?.kind === 'assembly')
+    (design.kind === 'assembly' && structureKind === 'assembly') ||
+    (design.kind === 'importedMesh' && structureKind === 'importedMesh')
   );
 }
 

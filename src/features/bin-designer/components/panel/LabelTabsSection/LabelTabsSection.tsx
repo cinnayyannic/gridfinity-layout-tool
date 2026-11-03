@@ -7,10 +7,12 @@
  * the text and little else.
  */
 
+import { MoreDisclosure } from '@/shared/components/MoreDisclosure';
 import { useCallback, useState } from 'react';
 import { FeatureToggle } from '../FeatureToggle';
+import { FeatureTip } from '../../FeatureTip';
 import { getSegmentClass, SEGMENT_GROUP_CLASS } from '@/shared/components/segmentedControlClasses';
-import { Button, CheckboxRow, Stepper, InfoIcon, Collapsible } from '@/design-system';
+import { Button, Stepper, InfoIcon } from '@/design-system';
 import { DESIGNER_CONSTRAINTS } from '../../../constants';
 import type { LabelTabAlignment, LabelTabEdges } from '../../../types';
 import {
@@ -19,6 +21,7 @@ import {
   LABEL_PLATE_FIT_OFFSET_STEP,
 } from '@/shared/constants/labelPlates';
 import type { LabelSocketStyle } from '@/shared/constants/labelPlates';
+import { FieldLabel, LabelInfo, OptionNotes } from '../shared';
 import { LabelTextList } from './LabelTextList';
 import { LabelSectionWarnings } from './LabelSectionWarnings';
 import { LabelColorControls } from './LabelColorControls';
@@ -118,6 +121,7 @@ export function LabelTabsSection() {
       onPlateIconChange={handlers.setCompartmentPlateIcon}
       suggestedName={state.binNameSuggestion?.name}
       onApplySuggestedName={handlers.applyBinNameSuggestion}
+      layoutLabelFillsBlank={state.layoutLabelFillsBlank}
     />
   );
 
@@ -127,14 +131,25 @@ export function LabelTabsSection() {
       checked={state.label.enabled}
       onChange={handlers.toggleLabelTabs}
       disabledReason={meta.disabledReason}
+      badge={<FeatureTip tip="labelTabs" feature={t('binDesigner.labelTabs')} />}
       primaryControls={
         <>
           {/* Label type leads because it decides what the captions below become:
               cut into the bin, or engraved on separately printed plates (#2666)
               — which in socket mode also gives each row a plate to size. */}
           <div>
-            <span className="mb-1 block text-label text-content-tertiary">
+            <span className="mb-1 flex items-center gap-1.5 text-label text-content-tertiary">
               {t('binDesigner.tabMode')}
+              <LabelInfo label={t('binDesigner.tabMode')}>
+                <OptionNotes
+                  options={[
+                    {
+                      label: t('binDesigner.tabMode.socket'),
+                      note: t('binDesigner.tabMode.socketHint'),
+                    },
+                  ]}
+                />
+              </LabelInfo>
             </span>
             <div role="group" aria-label={t('binDesigner.tabMode')} className={SEGMENT_GROUP_CLASS}>
               {TAB_MODE_OPTIONS.map((option) => {
@@ -157,12 +172,6 @@ export function LabelTabsSection() {
                 );
               })}
             </div>
-            {state.isSocketMode && (
-              <p className="mt-1 flex items-start gap-1 text-xs text-content-tertiary">
-                <InfoIcon size="xs" className="mt-0.5 shrink-0" />
-                <span>{t('binDesigner.tabMode.socketHint')}</span>
-              </p>
-            )}
           </div>
 
           {labelText}
@@ -170,8 +179,18 @@ export function LabelTabsSection() {
           {state.isSocketMode && (
             <>
               <div>
-                <span className="mb-1 block text-label text-content-tertiary">
+                <span className="mb-1 flex items-center gap-1.5 text-label text-content-tertiary">
                   {t('binDesigner.socketStyle')}
+                  <LabelInfo label={t('binDesigner.socketStyle')}>
+                    <OptionNotes
+                      options={[
+                        {
+                          label: t('binDesigner.socketStyle.slideChannel'),
+                          note: t('binDesigner.socketStyle.slideHint'),
+                        },
+                      ]}
+                    />
+                  </LabelInfo>
                 </span>
                 <div
                   role="group"
@@ -195,24 +214,14 @@ export function LabelTabsSection() {
                     );
                   })}
                 </div>
-                {(state.label.socketStyle ?? 'clickIn') === 'slideChannel' && (
-                  <p className="mt-1 flex items-start gap-1 text-xs text-content-tertiary">
-                    <InfoIcon size="xs" className="mt-0.5 shrink-0" />
-                    <span>{t('binDesigner.socketStyle.slideHint')}</span>
-                  </p>
-                )}
               </div>
               {(state.label.socketStyle ?? 'clickIn') === 'clickIn' && (
-                <div>
-                  <CheckboxRow
-                    label={t('binDesigner.socketRemovalHole')}
-                    checked={state.label.removalHole === true}
-                    onChange={handlers.setRemovalHole}
-                  />
-                  <p className="mt-0.5 pl-7 text-label leading-snug text-content-tertiary">
-                    {t('binDesigner.socketRemovalHoleHint')}
-                  </p>
-                </div>
+                <FeatureToggle
+                  label={t('binDesigner.socketRemovalHole')}
+                  checked={state.label.removalHole === true}
+                  onChange={() => handlers.setRemovalHole(state.label.removalHole !== true)}
+                  info={t('binDesigner.socketRemovalHoleHint')}
+                />
               )}
               {state.rowsForced && (
                 <p className="flex items-start gap-1 text-xs text-content-tertiary">
@@ -234,12 +243,11 @@ export function LabelTabsSection() {
                   </span>
                 </p>
               )}
-              <Collapsible
-                title={t('binDesigner.plateFitGroup')}
+              <MoreDisclosure
+                label={t('binDesigner.plateFitGroup')}
                 summary={plateFitReadout}
-                expanded={expandedGroups.has('plateFit')}
-                onExpandedChange={(open) => setGroupExpanded('plateFit', open)}
-                size="sm"
+                open={expandedGroups.has('plateFit')}
+                onOpenChange={(open) => setGroupExpanded('plateFit', open)}
               >
                 <div className="min-w-0">
                   <span className="mb-1 flex items-center gap-1 text-xs font-medium text-content-secondary">
@@ -277,8 +285,8 @@ export function LabelTabsSection() {
                   />
                 </div>
                 <LabelFitSampleButton />
-                <LabelPlatesControls />
-              </Collapsible>
+              </MoreDisclosure>
+              <LabelPlatesControls />
             </>
           )}
 
@@ -291,19 +299,16 @@ export function LabelTabsSection() {
 
           {/* Placement: which edges carry a tab, and where the tab sits across
               its compartment. Both answer "where does the label go". */}
-          <Collapsible
-            title={groupTitles.placement}
+          <MoreDisclosure
+            label={groupTitles.placement}
             summary={placementReadout}
-            expanded={expandedGroups.has('placement')}
-            onExpandedChange={(open) => setGroupExpanded('placement', open)}
-            size="sm"
+            open={expandedGroups.has('placement')}
+            onOpenChange={(open) => setGroupExpanded('placement', open)}
             badge={warningBadge('placement')}
           >
             <div className="space-y-3">
               <div>
-                <span className="mb-1 block text-label text-content-tertiary">
-                  {t('binDesigner.tabEdges')}
-                </span>
+                <FieldLabel>{t('binDesigner.tabEdges')}</FieldLabel>
                 <div
                   role="group"
                   aria-label={t('binDesigner.tabEdges')}
@@ -381,7 +386,7 @@ export function LabelTabsSection() {
                 </div>
               )}
             </div>
-          </Collapsible>
+          </MoreDisclosure>
 
           <LabelTabShapeControls
             state={state}
@@ -408,14 +413,13 @@ export function LabelTabsSection() {
             />
           )}
 
-          <Collapsible
-            title={groupTitles.colors}
-            expanded={expandedGroups.has('colors')}
-            onExpandedChange={(open) => setGroupExpanded('colors', open)}
-            size="sm"
+          <MoreDisclosure
+            label={groupTitles.colors}
+            open={expandedGroups.has('colors')}
+            onOpenChange={(open) => setGroupExpanded('colors', open)}
           >
             <LabelColorControls />
-          </Collapsible>
+          </MoreDisclosure>
         </>
       }
     />

@@ -213,11 +213,18 @@ export interface BinDimensions {
    * (it mirrors the support and has no way to omit it).
    */
   readonly lipHasSupport: boolean;
+  /**
+   * The lip carries a notch at every internal grid line. Resolved once so the
+   * shell key and every lip builder (`shellStage`, `splitBinBuilder`) agree.
+   */
+  readonly lipNotches: boolean;
   readonly interiorHeight: number;
   readonly maxDimension: number;
   readonly shellKey: string;
   readonly withMagnet: boolean;
   readonly withScrew: boolean;
+  /** Holes at the outer corners only; false whenever the bin drills none. */
+  readonly cornerHolesOnly: boolean;
   /**
    * True when the shell is built with compartment cavities subtracted
    * directly (per-compartment cavity cut). In that path the divider

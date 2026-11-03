@@ -6,11 +6,14 @@
 
 import type {
   CornerCutParams,
+  Drawer,
   DrawerOutline,
+  Layout,
   MagnetAnchor,
   StoredBaseplateParams,
 } from '@/core/types';
-import { DEFAULT_MAGNET_ANCHOR } from '@/core/types';
+import { DEFAULT_MAGNET_ANCHOR, STACK_SEAM_TRIM_MM, effectiveGridUnitMmY } from '@/core/types';
+import { DEFAULT_BASEPLATE_PARAMS } from '@/core/baseplateDefaults';
 import type { ResolvedBaseplateParams } from '@/shared/types/bin';
 import { isSeatedConnectorStyle } from '@/shared/types/bin';
 import { clampCornerCuts, cornerCutVertices } from '@/shared/utils/cornerCutOutline';
@@ -21,8 +24,20 @@ import {
   resolveOutlineFrame,
 } from '@/shared/utils/outlineFrame';
 import { screwPadThicknessMm } from '@/shared/generation/screwHolePlan';
+import { pieceScrewsNeedPad } from '@/shared/generation/screwHolePlacement';
 import { baseplateFloorDepthBeforeScrews } from '@/shared/printSettings/baseplateHeight';
 import { normalizeSplitOverride } from './splitOverride';
+import {
+  bodyParamsForDetach,
+  computeBaseplateTiling,
+  pieceToBaseplateParams,
+} from './splitPlanner';
+
+/** The print bed a plate is split for, which decides its pieces. */
+export interface PrintBedMm {
+  readonly widthMm: number;
+  readonly depthMm: number;
+}
 
 /**
  * Largest corner radius the plain rounding path may cut: the arc can enter
@@ -144,6 +159,7 @@ function resolveOutline(
   outline: DrawerOutline | undefined;
   paddingOn: boolean;
   overhang?: ResolvedBaseplateParams['outlineOverhang'];
+  outlineIsCornerRounding?: boolean;
 } {
   if (outlineOn && drawerOutline !== undefined) {
     const frame = resolveOutlineFrame(drawerOutline, {
@@ -180,7 +196,7 @@ function resolveRadiusOutline(
   widthMm: number,
   depthMm: number,
   gridUnitMm: number
-): { outline: DrawerOutline | undefined; paddingOn: boolean } {
+): { outline: DrawerOutline | undefined; paddingOn: boolean; outlineIsCornerRounding?: boolean } {
   // No active drawer shape: corner radii beyond the plain rounding limit become
   // a radius-cut outline, so the generator's cell classification handles the
   // sockets the arc consumes (the plain path must never orphan a pocket, which is
@@ -220,13 +236,14 @@ function resolveRadiusOutline(
   return {
     outline: { vertices: cornerCutVertices(totalW, totalD, cuts) },
     paddingOn: true,
+    outlineIsCornerRounding: true,
   };
 }
 
 /**
- * Floor pad mount-down screws add under the plate, from the stored params alone.
- * Shared with the panel, which has to know the slab height a plate will print
- * at without the drawer and split plan `buildFullParams` needs.
+ * Pad a mount-down screw needs under the plate when it falls back to the pocket
+ * floor, from the stored params alone. Whether the plate carries it depends on
+ * where every piece's screws land, which `buildFullParams` decides.
  */
 export function resolveScrewPadMm(stored: StoredBaseplateParams): number {
   if (stored.screwHoles?.enabled !== true) return 0;
@@ -246,6 +263,29 @@ export function resolveScrewPadMm(stored: StoredBaseplateParams): number {
 }
 
 /**
+ * Keep the floor pad only when some piece needs it (`pieceScrewsNeedPad`): a
+ * screw that falls back to the floor, or a margin screw recessed deeper than
+ * the plate can retain. Junction screws and shallow margin screws cost no
+ * height. Pieces share one slab, so every piece the bed splits the plate into
+ * is planned, exactly as each will be built. Without a bed the plate is planned
+ * as the one piece it is unsplit.
+ */
+function decideScrewPad(
+  params: ResolvedBaseplateParams,
+  printBed: PrintBedMm | undefined
+): ResolvedBaseplateParams {
+  const tiling =
+    printBed !== undefined
+      ? computeBaseplateTiling(params, printBed.widthMm, printBed.depthMm)
+      : undefined;
+  const pieces =
+    tiling?.isSplit === true
+      ? tiling.pieces.map((piece) => pieceToBaseplateParams(piece, params))
+      : [bodyParamsForDetach(params)];
+  return pieces.some(pieceScrewsNeedPad) ? params : { ...params, screwPadThicknessMm: 0 };
+}
+
+/**
  * Build full generation params from the stored per-layout config.
  *
  * @param drawerOutline - The drawer's non-rectangular boundary, if any.
@@ -259,6 +299,11 @@ export function resolveScrewPadMm(stored: StoredBaseplateParams): number {
  * and detached margins are outline-unaware, so while a shape is active they are
  * functionally zeroed, stored values untouched (the stack-print stripping
  * precedent).
+ *
+ * @param printBed - The bed the plate is split for. Only the mount-down screw
+ * pad reads it, since the pad is owed when any piece of the split has a floor
+ * screw. Every caller that builds or measures a screwed plate must pass it, or
+ * its height can disagree with the pieces the generator builds.
  */
 export function buildFullParams(
   stored: StoredBaseplateParams,
@@ -277,7 +322,8 @@ export function buildFullParams(
   gridShiftX: number = 0,
   gridShiftY: number = 0,
   // The layout's low-profile base; the plate's pockets must match its bins.
-  lowProfileBase?: boolean
+  lowProfileBase?: boolean,
+  printBed?: PrintBedMm
 ): ResolvedBaseplateParams {
   const {
     synced,
@@ -295,11 +341,14 @@ export function buildFullParams(
   // NOT stripped, and neither is a corner radius the user set, plain or
   // converted to a radius-cut outline: the tiles split and dedupe by
   // fingerprint, so identical ones stack into towers (an unsplit rounded plate
-  // stacks whole) while the unique corner tiles print singly. A corner tile's
-  // lone rounded corner is congruent about neither flip axis, so its flipped
-  // copies carry it on the opposite side of the tower (a few mm of overhang at
-  // one seam); that beats flattening a radius the user asked for. Only the
-  // implicit spec radius is squared, via `roundingOn` below.
+  // stacks whole) while the unique corner tiles print singly. A rounded corner
+  // tile, plain or cut as an outline, is congruent about neither flip axis, so
+  // its flipped copies carry the corner to the opposite side of the tower
+  // (an overhang at one seam); that beats flattening a radius the user asked
+  // for. A shaped tile no turn maps onto itself, or a cut radius whose corner
+  // hangs further than plain rounding's can, prints every copy turned instead
+  // (`planPlateFlip`).
+  // Only the implicit spec radius is squared, via `roundingOn` below.
   // Dovetail connectors survive: tongues, grooves, and the dovetail key are
   // full-height vertical prisms that flip cleanly. Only snap clip is
   // incompatible — its blind top pocket (sealed floor + undercut ledge) inverts
@@ -310,7 +359,7 @@ export function buildFullParams(
 
   const effFractionalEdgeX = synced ? fractionalEdgeX : (stored.fractionalEdgeX ?? 'end');
   const effFractionalEdgeY = synced ? fractionalEdgeY : (stored.fractionalEdgeY ?? 'end');
-  const { outline, paddingOn, overhang } = resolveOutline(
+  const { outline, paddingOn, overhang, outlineIsCornerRounding } = resolveOutline(
     drawerOutline,
     outlineOn,
     stored,
@@ -344,13 +393,9 @@ export function buildFullParams(
   // uniform-tile assumption stacking relies on: the same two reasons magnets and
   // the solid floor are stripped. The stored value returns on toggle-off.
   const screwHoles = stackingOn ? undefined : stored.screwHoles;
-  // The pad is provisioned whenever screws are on, not only when this plate's
-  // own bands fall short. The split plan is not known here, and a split plate
-  // almost always needs it: a corner piece's seam-side anchors have no margin
-  // band and a fully interior piece has none at all, so deriving from the
-  // unsplit plate would leave interior pieces unfastened, the exact failure
-  // per-piece placement exists to prevent. With magnets the shortfall is
-  // typically 0.6mm, since the magnet floor already covers most of the recess.
+  // Provisioned first, then kept only if a piece needs it (`decideScrewPad`).
+  // With magnets the shortfall is typically 0.6mm, since the magnet floor
+  // already covers most of the recess.
   const screwPad = screwHoles?.enabled === true ? resolveScrewPadMm(stored) : undefined;
   // The connector is only meaningful when margins actually detach. When
   // stacking strips a snapClip style to undefined, the seam gate downstream
@@ -370,7 +415,7 @@ export function buildFullParams(
       ? true
       : undefined;
 
-  return {
+  const params: ResolvedBaseplateParams = {
     width,
     depth,
     gridUnitMm,
@@ -378,6 +423,7 @@ export function buildFullParams(
     nozzleSizeMm,
     outline,
     outlineOverhang: overhang,
+    ...(outlineIsCornerRounding ? { outlineIsCornerRounding } : {}),
     magnetHoles: stackingOn ? false : stored.magnetHoles,
     magnetDiameter: stored.magnetDiameter,
     magnetDepth: stored.magnetDepth,
@@ -385,6 +431,7 @@ export function buildFullParams(
     ...(stored.magnetChamfer === true ? { magnetChamfer: true } : {}),
     magnetAnchor,
     ...(lowProfileBase === true ? { lowProfileBase: true } : {}),
+    ...(stackingOn ? { stackSeamTrimMm: STACK_SEAM_TRIM_MM } : {}),
     paddingLeft: paddingOn ? stored.paddingLeft : 0,
     paddingRight: paddingOn ? stored.paddingRight : 0,
     paddingFront: paddingOn ? stored.paddingFront : 0,
@@ -415,6 +462,7 @@ export function buildFullParams(
     connectorSlotsAllEdges,
     connectorFitOffset: stored.connectorFitOffset,
     lightweight: stored.lightweight,
+    ecoPlate: !stackingOn && stored.ecoPlate === true,
     // Stack printing nests flipped plates into each other, which needs the
     // pockets through-cut — a solid floor would block the nesting — so strip it
     // while stacking (restored when stacking is off, like magnets above).
@@ -422,6 +470,11 @@ export function buildFullParams(
     solidFloorThickness: stored.solidFloorThickness,
     screwHoles,
     screwPadThicknessMm: screwPad,
+    // Stripped while stacking with the other magnets: a flipped tile would
+    // carry the holes on top, and the uniform-tile assumption holds no
+    // per-tile differences.
+    mountMagnets:
+      !stackingOn && stored.mountMagnets?.enabled === true ? stored.mountMagnets : undefined,
     cornerRadius: roundingOn ? stored.cornerRadius : 0,
     cornerRadii: roundingOn ? stored.cornerRadii : undefined,
     detachMargins,
@@ -441,4 +494,62 @@ export function buildFullParams(
       effFractionalEdgeY
     ),
   };
+  return screwPad !== undefined && screwPad > 0 ? decideScrewPad(params, printBed) : params;
+}
+
+/** The layout fields a plate's screw pad depends on. */
+export type PlateLayout = Pick<
+  Layout,
+  | 'gridUnitMm'
+  | 'gridUnitMmY'
+  | 'magnetAnchor'
+  | 'lowProfileBase'
+  | 'printBedSize'
+  | 'printBedDepth'
+  | 'baseplateParams'
+> & {
+  readonly drawer: Pick<
+    Drawer,
+    | 'width'
+    | 'depth'
+    | 'outline'
+    | 'fractionalEdgeX'
+    | 'fractionalEdgeY'
+    | 'gridShiftX'
+    | 'gridShiftY'
+  >;
+};
+
+/**
+ * The mount-down screw pad a layout's plate prints with, decided against the
+ * pieces its print bed splits it into, for readouts that need the plate's
+ * height without building its params. `lowProfileBase` overrides the layout's,
+ * to ask what the plate would be with it toggled.
+ */
+export function plateScrewPadMm(
+  layout: PlateLayout,
+  nozzleSizeMm: number,
+  lowProfileBase: boolean | undefined = layout.lowProfileBase
+): number {
+  const stored = layout.baseplateParams ?? DEFAULT_BASEPLATE_PARAMS;
+  if (stored.screwHoles?.enabled !== true) return 0;
+  const { drawer } = layout;
+  return (
+    buildFullParams(
+      stored,
+      drawer.width,
+      drawer.depth,
+      layout.gridUnitMm,
+      drawer.fractionalEdgeX ?? 'end',
+      drawer.fractionalEdgeY ?? 'end',
+      nozzleSizeMm,
+      drawer.outline,
+      layout.magnetAnchor,
+      effectiveGridUnitMmY(layout),
+      drawer.gridShiftX ?? 0,
+      drawer.gridShiftY ?? 0,
+      lowProfileBase,
+      { widthMm: layout.printBedSize, depthMm: layout.printBedDepth ?? layout.printBedSize }
+    ).screwPadThicknessMm ?? 0
+  );
 }

@@ -273,6 +273,26 @@ export const FEATURE_FLAGS = [
     addedAt: '2026-08',
     requiresRefresh: false,
   },
+  {
+    id: 'slant',
+    name: 'Slanted Bins',
+    description:
+      'Lean a bin toward one side so pens, markers and tools too tall to stand fit a shallow drawer. The base stays flat on the grid, a row of slanted bins leans on itself, and the last bin can take an end support.',
+    status: 'experimental',
+    risk: 'low',
+    addedAt: '2026-10',
+    requiresRefresh: false,
+  },
+  {
+    id: 'places',
+    name: 'Find What Your Bins Hold',
+    description:
+      'Say what each bin holds, then find it in any layout from the command palette (Ctrl/Cmd+K) or the layouts sheet on a phone, and jump straight to it. Folders become places, areas and storage units.',
+    status: 'experimental',
+    risk: 'low',
+    addedAt: '2026-10',
+    requiresRefresh: false,
+  },
 ] as const satisfies readonly FeatureFlag[];
 
 export type FeatureId = (typeof FEATURE_FLAGS)[number]['id'];

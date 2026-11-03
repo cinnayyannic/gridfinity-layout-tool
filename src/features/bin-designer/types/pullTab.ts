@@ -1,0 +1,45 @@
+/** The four outer walls, and the divider nearest the middle of the bin. */
+export type PullTabWall = 'front' | 'back' | 'left' | 'right' | 'center';
+export type PullTabOuterWall = Exclude<PullTabWall, 'center'>;
+/** A divider running along the bin's width (parallel to the front wall) or its depth. */
+export type PullTabCenterAxis = 'width' | 'depth';
+
+/** Raised wall grip, with a blind recess facing into the bin. All sizes in mm. */
+export interface PullTabConfig {
+  readonly enabled: boolean;
+  /**
+   * The wall of a tab that stands on the front ('width') or the right
+   * ('depth') alone. Every other selection writes {@link walls}, and this then
+   * names the axis of its first wall.
+   */
+  readonly wall: 'width' | 'depth';
+  /**
+   * Every wall carrying a tab, when that is not the front or the right alone.
+   *
+   * Absent for those two, so a design saved before this existed builds
+   * byte-identical geometry, and one that visits the picker and comes back
+   * fingerprints as one that never did (`communityParamsFingerprint` hashes
+   * `params` wholesale). Geometry reads it only through `resolvePullTabWalls`,
+   * and the shell key serializes its outer walls in this same stored form.
+   */
+  readonly walls?: PullTabWall[];
+  /**
+   * Which way the divider under a 'center' tab runs. Absent takes a width
+   * divider when there is one. Written only while `walls` includes 'center'.
+   */
+  readonly centerAxis?: PullTabCenterAxis;
+  readonly backRecess: boolean;
+  readonly thickness: number;
+  readonly width: number;
+  readonly widthMode: 'mm' | 'percent';
+  readonly widthPercent: number;
+  readonly height: number;
+  readonly topRadius: number;
+  readonly rootRadius: number;
+  readonly recessHeight: number;
+  readonly recessBorder: number;
+  readonly recessDepth: number;
+  readonly recessRadius: number;
+  readonly recessEdgeRadius: number;
+  readonly recessInsideRadius: number;
+}

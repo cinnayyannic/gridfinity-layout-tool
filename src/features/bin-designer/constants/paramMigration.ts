@@ -1,3 +1,4 @@
+import { resolvePullTab } from '@/shared/utils/pullTabPlan';
 /**
  * Backward-compat migration for persisted bin designs.
  *
@@ -37,6 +38,8 @@ import {
   DEFAULT_LID_CONFIG,
   LID_EXTRA_HEIGHT_MIN_MM,
   LID_EXTRA_HEIGHT_MAX_MM,
+  LID_HEIGHT_UNITS_MAX,
+  LID_HEIGHT_UNITS_MIN,
   LID_TOP_THICKNESS_MIN_MM,
   LID_TOP_THICKNESS_MAX_MM,
 } from '../types/lid';
@@ -44,6 +47,8 @@ import type { LidConfig } from '../types/lid';
 import { DEFAULT_TEXT_STYLE_DEFAULTS } from '../types/text';
 import type { TextStyleDefaults } from '../types/text';
 import { MAX_CUTOUT_TOP_OFFSET_MM } from '../utils/cutoutFill';
+import { withSyncedLidHeight } from '../utils/lidHeightUnits';
+import { withResolvedCutoutDepths } from '@/shared/utils/cutoutDepth';
 import {
   DEFAULT_BIN_PARAMS,
   DEFAULT_CUTOUT_CONFIG,
@@ -90,6 +95,7 @@ import {
   migrateBentoCompartmentFields,
   migrateInteriorFilletMm,
 } from './paramMigrationCompartments';
+import { migrateSlant, normalizeSlant } from '@/shared/utils/slantPlan';
 export { migrateWalls } from './paramMigrationWalls';
 export type { LegacyWallConfig } from './paramMigrationWalls';
 
@@ -104,6 +110,12 @@ function migrateExtraHeightMm(raw: unknown): number {
     return DEFAULT_LID_CONFIG.extraHeightMm;
   }
   return Math.min(LID_EXTRA_HEIGHT_MAX_MM, Math.max(LID_EXTRA_HEIGHT_MIN_MM, raw));
+}
+
+/** Whole units within bounds, or absent; the store narrows it to what the lid can reach. */
+function migrateLidHeightUnits(raw: unknown): number | undefined {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return undefined;
+  return Math.min(LID_HEIGHT_UNITS_MAX, Math.max(LID_HEIGHT_UNITS_MIN, Math.round(raw)));
 }
 
 /**
@@ -202,6 +214,12 @@ export function migrateParams(params: MigrateParamsInput): BinParams {
   }
   if (mergedBase.lowProfile !== true) {
     delete (mergedBase as { lowProfile?: boolean }).lowProfile;
+  }
+  if (mergedBase.lipNotches !== true) {
+    delete (mergedBase as { lipNotches?: boolean }).lipNotches;
+  }
+  if (mergedBase.cornerHolesOnly !== true) {
+    delete (mergedBase as { cornerHolesOnly?: boolean }).cornerHolesOnly;
   }
   // A stored pin diameter from the 5mm era meets pin holes now cut at a fixed
   // 3mm, so the printed parts are unassemblable and the server validator
@@ -439,9 +457,10 @@ export function migrateParams(params: MigrateParamsInput): BinParams {
       )
     : undefined;
 
-  return {
+  const migrated = withSyncedLidHeight({
     ...DEFAULT_BIN_PARAMS,
     ...rest,
+    pullTab: params.pullTab ? resolvePullTab(params.pullTab) : undefined,
     style,
     base: baseConfig,
     compartments: compartmentsConfig,
@@ -479,11 +498,13 @@ export function migrateParams(params: MigrateParamsInput): BinParams {
         clickRails: rawClickRails,
         clickRailCoverage: rawCoverage,
         extraHeightMm: rawExtraHeight,
+        heightUnits: rawHeightUnits,
         topThicknessMm: rawTopThickness,
         retentionMagnet: rawRetentionMagnet,
         tray: rawTray,
         grip: rawGrip,
         relieveInterior: rawRelieveInterior,
+        fill: rawFill,
         slide: rawSlide,
         hinge: rawHinge,
         cutouts: _rawLidCutouts,
@@ -504,6 +525,8 @@ export function migrateParams(params: MigrateParamsInput): BinParams {
         attachment: migrateAttachment(rawAttachment, clickRails),
         // Clamp the mm cavity boost so a corrupt design can't blow up the lid.
         extraHeightMm: migrateExtraHeightMm(rawExtraHeight),
+        // Spread `undefined` deliberately: millimetre mode is an absent key.
+        heightUnits: migrateLidHeightUnits(rawHeightUnits),
         // Older designs have no floor-plate knob — they fall back to the
         // 0.8mm baseline and so regenerate byte-identically.
         topThicknessMm: clampNumber(
@@ -523,6 +546,8 @@ export function migrateParams(params: MigrateParamsInput): BinParams {
         // NOT left to the `DEFAULT_LID_CONFIG` spread above: that defaults it
         // on, which is right for a new design and wrong for every old one.
         relieveInterior: rawRelieveInterior === true,
+        // Spread `undefined` deliberately, as `cutouts` below does: off is an absent key.
+        fill: rawFill === true ? true : undefined,
         slide: migrateSlide(rawSlide),
         hinge: migrateHinge(rawHinge),
         // Spread `undefined` deliberately: the key is present-but-undefined here,
@@ -550,7 +575,9 @@ export function migrateParams(params: MigrateParamsInput): BinParams {
     ),
     // Spread rather than assigned: an absent radius must stay an absent key.
     ...optionalInteriorFillet(rawInteriorFillet),
-  };
+    slant: migrateSlant((rest as Record<string, unknown>).slant),
+  });
+  return withResolvedCutoutDepths(normalizeSlant(migrated));
 }
 
 function optionalInteriorFillet(raw: unknown): Pick<BinParams, 'interiorFilletMm'> {

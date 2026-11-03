@@ -7,24 +7,28 @@
  * Registry is updated whenever the Bin Designer saves or deletes a design.
  */
 
-import type { DesignId } from '@/core/types';
+import type { DesignId, DesignSlantFacts } from '@/core/types';
+import { CONSTRAINTS } from '@/core/constants';
 import type { ItemEnvelope, ItemKind } from '@/shared/types/item';
 import type { AssemblyStructure } from '@/shared/types/assembly';
 import { assemblyOverhangMm, assemblyRiseMm } from '@/shared/types/assemblyPlacement';
 import { GRIDFINITY_SPEC } from '@/shared/printSettings/gridfinityGeometry';
 import type { Result } from '@/core/result';
 import type { StorageError } from '@/core/result/errors';
-import { isOk } from '@/core/result';
+import { isOk, ok } from '@/core/result';
 import { saveToLocalStorage, loadFromLocalStorage } from '@/core/storage/backends/localStorage';
 import {
   assembledHeight,
   type AssembledHeightSource,
 } from '@/shared/printSettings/assembledHeight';
 import { planKnifeRest } from '@/shared/utils/knifeRestPlan';
+import { migrateSlant, slantBlocker } from '@/shared/utils/slantPlan';
 import { hasOverhang, resolveOverhang } from '@/shared/utils/overhang';
 import { isPartialMask } from '@/shared/utils/cellMask';
-import type { BinParams } from '../types';
+import type { BinParams, SavedDesign } from '../types';
 import { isSocketlessBase } from '../types/base';
+import { migrateParams } from '../constants/paramMigration';
+import { designFootprint } from '../utils/designKind';
 
 const REGISTRY_KEY = 'gridfinity-custom-bins-v1';
 
@@ -136,6 +140,13 @@ export interface CustomBinRef {
     readonly front: number;
     readonly back: number;
   };
+  /**
+   * What the layout needs to reserve a placed bin's end support, which it
+   * checks synchronously, without the full params. Absent = an upright design
+   * that could take a placed slant and has no extra wall, or an entry saved
+   * before the field.
+   */
+  readonly slant?: DesignSlantFacts;
   /** ISO timestamp of last update */
   readonly updatedAt: string;
 }
@@ -215,12 +226,35 @@ export function registryKnifeRestFields(params: BinParams): Pick<CustomBinRef, '
 }
 
 /**
+ * Project the slant facts out of a full `BinParams`. Spread wherever
+ * {@link registryHeightFields} is; an explicit `slant: undefined` clears a
+ * stale entry, as {@link registryKnifeRestFields} does.
+ */
+export function registrySlantFields(params: BinParams): Pick<CustomBinRef, 'slant'> {
+  const config = migrateSlant(params.slant);
+  const extraWallMm = Math.max(0, params.extraWallHeightMm ?? 0);
+  const facts: DesignSlantFacts = {
+    ...(config ? { config } : {}),
+    ...(slantBlocker(params) !== null ? { blocked: true as const } : {}),
+    ...(extraWallMm > 0 ? { extraWallMm } : {}),
+    ...(params.gridUnitMm !== CONSTRAINTS.GRID_UNIT_MM_DEFAULT
+      ? { gridUnitMm: params.gridUnitMm }
+      : {}),
+    ...(params.gridUnitMmY !== undefined ? { gridUnitMmY: params.gridUnitMmY } : {}),
+    ...(params.heightUnitMm !== CONSTRAINTS.HEIGHT_UNIT_MM_DEFAULT
+      ? { heightUnitMm: params.heightUnitMm }
+      : {}),
+  };
+  return { slant: Object.keys(facts).length > 0 ? facts : undefined };
+}
+
+/**
  * Project the design's own overhang out of a full `BinParams`.
  *
  * Spread wherever {@link registryHeightFields} is. Explicitly `undefined` when
  * there is none, so a re-save that turned the overhang off clears the stale
  * field rather than carrying it — the same contract as
- * {@link registryKnifeRestFields}, and the reason `withCarriedGeometry` tests
+ * {@link registryKnifeRestFields}, and the reason `withCarriedFields` tests
  * key presence for both.
  *
  * Suppressed for a partial cell mask, matching `deriveDimensions`: a custom
@@ -262,6 +296,67 @@ export function registryAssemblyFields(
   };
 }
 
+export function registryAssemblyEntry(design: SavedDesign): CustomBinRef | null {
+  if (!design.envelope || design.structure?.kind !== 'assembly') return null;
+  const { width, depth, height } = designFootprint(design);
+  return {
+    id: design.id,
+    name: design.name,
+    width,
+    depth,
+    height,
+    ...registryEdgeFields({}),
+    ...registryAssemblyFields(design.envelope, design.structure),
+    updatedAt: design.updatedAt,
+  };
+}
+
+/**
+ * The full registry entry for a saved parametric bin, or `null` for any other
+ * kind. Build it from the design a write returns, not from params read before
+ * an async step, which a save or sync pull may have replaced meanwhile.
+ */
+export function registryParamsEntry(design: SavedDesign): CustomBinRef | null {
+  const { params } = design;
+  if (!params) return null;
+  return {
+    id: design.id,
+    name: design.name,
+    width: params.width,
+    depth: params.depth,
+    height: params.height,
+    ...registryEdgeFields(params),
+    ...registryHeightFields(params),
+    ...registryOverhangFields(params),
+    ...registrySlantFields(params),
+    ...registryKnifeRestFields(params),
+    updatedAt: design.updatedAt,
+  };
+}
+
+/**
+ * The full registry entry for a saved Workshop assembly or imported mesh, or
+ * `null` for any other kind. `saveDesign` never registers a design, so the
+ * paths that store one outside the designer (a sync pull, the startup pass)
+ * build the entry here. An imported mesh's entry matches the one its import wrote.
+ */
+export function registryItemEntry(design: SavedDesign): CustomBinRef | null {
+  if (!design.envelope || design.structure?.kind !== 'importedMesh') {
+    return registryAssemblyEntry(design);
+  }
+  const { width, depth, height } = designFootprint(design);
+  return {
+    id: design.id,
+    name: design.name,
+    width,
+    depth,
+    height,
+    kind: 'importedMesh',
+    ...registryEdgeFields({}),
+    updatedAt: design.updatedAt,
+  };
+}
+
 /**
  * Validate one raw localStorage entry and project it onto the `CustomBinRef`
  * shape. Returns `null` for anything that does not match so malformed or
@@ -290,6 +385,7 @@ function parseEntry(raw: unknown): CustomBinRef | null {
     hasLip,
     knifeRest,
     overhangMm,
+    slant,
   } = raw as Record<string, unknown>;
   if (
     typeof id !== 'string' ||
@@ -367,8 +463,36 @@ function parseEntry(raw: unknown): CustomBinRef | null {
         },
       };
     })(),
+    ...(() => {
+      const facts = parseSlantFacts(slant);
+      return facts ? { slant: facts } : {};
+    })(),
     updatedAt,
   };
+}
+
+function parseSlantFacts(raw: unknown): DesignSlantFacts | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const {
+    config: rawConfig,
+    blocked,
+    extraWallMm,
+    gridUnitMm,
+    gridUnitMmY,
+    heightUnitMm,
+  } = raw as Record<string, unknown>;
+  const config = migrateSlant(rawConfig);
+  const positive = (v: unknown): v is number =>
+    typeof v === 'number' && Number.isFinite(v) && v > 0;
+  const facts: DesignSlantFacts = {
+    ...(config ? { config } : {}),
+    ...(blocked === true ? { blocked: true as const } : {}),
+    ...(positive(extraWallMm) ? { extraWallMm } : {}),
+    ...(positive(gridUnitMm) ? { gridUnitMm } : {}),
+    ...(positive(gridUnitMmY) ? { gridUnitMmY } : {}),
+    ...(positive(heightUnitMm) ? { heightUnitMm } : {}),
+  };
+  return Object.keys(facts).length > 0 ? facts : undefined;
 }
 
 /**
@@ -407,7 +531,7 @@ export function upsertRegistryEntry(ref: CustomBinRef): Result<void, StorageErro
   const refs = loadRegistry();
   const idx = refs.findIndex((r) => r.id === ref.id);
   if (idx >= 0) {
-    refs[idx] = withCarriedGeometry(ref, refs[idx]);
+    refs[idx] = withCarriedFields(ref, refs[idx]);
   } else {
     refs.push(ref);
   }
@@ -417,18 +541,24 @@ export function upsertRegistryEntry(ref: CustomBinRef): Result<void, StorageErro
 }
 
 /**
- * Carry the geometry-derived fields forward when an update omits them.
+ * Carry the design kind and the geometry-derived fields forward when an update
+ * omits them.
  *
  * An upsert replaces the whole entry, and most writers only have a thumbnail or
  * a new name to record — a rename must not silently erase the assembled height
- * the drawer-ceiling check reads. Thirteen call sites write this registry, so
- * the rule is enforced here rather than remembered at each: a writer holding
- * `BinParams` spreads {@link registryHeightFields} and overwrites these with
- * fresh values, and a writer that is not touching geometry cannot drop them.
+ * the drawer-ceiling check reads, nor the kind that tells layout surfaces an
+ * imported mesh or an assembly from a parametric bin. Thirteen call sites write
+ * this registry, so the rule is enforced here rather than remembered at each: a
+ * writer holding `BinParams` spreads {@link registryHeightFields} and overwrites
+ * these with fresh values, and a writer that is not touching geometry cannot
+ * drop them.
  */
-function withCarriedGeometry(next: CustomBinRef, prev: CustomBinRef): CustomBinRef {
+function withCarriedFields(next: CustomBinRef, prev: CustomBinRef): CustomBinRef {
   return {
     ...next,
+    // A design never turns back into a parametric bin, so an absent kind only
+    // means the writer did not know it.
+    ...(next.kind === undefined && prev.kind !== undefined ? { kind: prev.kind } : {}),
     // The delta belongs to the rise it was measured with: carried only with it.
     ...(next.assembledRiseMm === undefined && prev.assembledRiseMm !== undefined
       ? {
@@ -454,7 +584,76 @@ function withCarriedGeometry(next: CustomBinRef, prev: CustomBinRef): CustomBinR
     ...(!('knifeRest' in next) && prev.knifeRest !== undefined
       ? { knifeRest: prev.knifeRest }
       : {}),
+    ...(!('slant' in next) && prev.slant !== undefined ? { slant: prev.slant } : {}),
   };
+}
+
+/**
+ * Refresh one entry's slant facts, and every field that sizes its end
+ * support, from its design's params, for a writer that holds the params but
+ * none of the entry's other fields, such as a sync pull. The support reserves
+ * layout cells, so these cannot wait for the designer to write the entry
+ * again. The params may be stored ones from before a field existed. A design
+ * the registry does not know stays out of it.
+ */
+export function refreshRegistrySlant(id: string, stored: BinParams): Result<void, StorageError> {
+  return refreshRegistrySlants([{ id, params: stored }]);
+}
+
+/**
+ * {@link refreshRegistrySlant} for many designs, in one registry write that
+ * happens only when some entry differs from its design.
+ */
+export function refreshRegistrySlants(
+  designs: readonly { readonly id: string; readonly params: BinParams }[]
+): Result<void, StorageError> {
+  const stored = new Map(designs.map((d) => [d.id, d.params]));
+  const refs = loadRegistry();
+  const next = refs.map((ref) => {
+    const params = stored.get(ref.id);
+    if (!params) return ref;
+    const fresh = withFreshSlant(ref, migrateParams(params));
+    return sortedJson(fresh) === sortedJson(ref) ? ref : fresh;
+  });
+  if (next.every((ref, i) => ref === refs[i])) return ok(undefined);
+  const result = saveRegistry(next);
+  notifySubscribers();
+  return result;
+}
+
+function withFreshSlant(ref: CustomBinRef, params: BinParams): CustomBinRef {
+  const { slant } = registrySlantFields(params);
+  const { slant: _stale, lowProfileRiseDeltaMm: _staleDelta, ...rest } = ref;
+  return {
+    ...rest,
+    width: params.width,
+    depth: params.depth,
+    height: params.height,
+    ...registryEdgeFields(params),
+    ...registryHeightFields(params),
+    ...(slant ? { slant } : {}),
+  };
+}
+
+function sortedJson(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === 'object' && !Array.isArray(v)
+      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b)))
+      : v
+  );
+}
+
+/**
+ * Change an entry's name and nothing else, for a writer that holds no geometry
+ * for the design. `updatedAt` stays as stored on purpose: it keys the linked
+ * mesh caches, and a rename leaves the mesh as it was.
+ */
+export function renameRegistryEntry(id: string, name: string): Result<void, StorageError> {
+  const refs = loadRegistry();
+  if (!refs.some((r) => r.id === id)) return ok(undefined);
+  const result = saveRegistry(refs.map((r) => (r.id === id ? { ...r, name } : r)));
+  notifySubscribers();
+  return result;
 }
 
 /**

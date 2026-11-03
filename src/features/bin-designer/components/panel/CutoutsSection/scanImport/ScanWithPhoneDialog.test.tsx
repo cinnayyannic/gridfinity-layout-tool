@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { deliverExport } from '@/shared/exportDestination/deliverExport';
+import { trackEvent } from '@/shared/analytics/posthog';
 import { ScanWithPhoneDialog } from './ScanWithPhoneDialog';
+
+vi.mock('@/shared/exportDestination/deliverExport', () => ({
+  deliverExport: vi.fn(async () => true),
+}));
 
 const mockAddScanCutouts = vi.fn((..._args: unknown[]) => 1);
 vi.mock('./useScanImport', () => ({
@@ -18,6 +24,14 @@ vi.mock('./useScanSession', () => ({
   useScanSession: (_active: boolean, onSvg: (svg: string) => void) => {
     session.onSvg = onSvg;
     return session.current;
+  },
+}));
+
+const trace = vi.hoisted(() => ({ onTraced: null as ((svg: string) => void) | null }));
+vi.mock('../../../TraceView/TraceView', () => ({
+  TraceView: ({ onTraced }: { onTraced: (svg: string) => void }) => {
+    trace.onTraced = onTraced;
+    return <p>trace view</p>;
   },
 }));
 
@@ -50,6 +64,24 @@ describe('ScanWithPhoneDialog', () => {
     URL.revokeObjectURL = vi.fn();
   });
 
+  it('adds what a photo traced on this computer, as a desktop trace', async () => {
+    render(<ScanWithPhoneDialog open onClose={vi.fn()} />);
+    fireEvent.click(screen.getByText('binDesigner.cutouts.traceView.open'));
+    await screen.findByText('trace view');
+
+    act(() =>
+      trace.onTraced?.(
+        '<svg viewBox="0 0 50 30" data-scan-units="mm"><path d="M 0 0 L 50 0 L 50 30 L 0 30 Z"/></svg>'
+      )
+    );
+
+    expect(mockAddScanCutouts).toHaveBeenCalledTimes(1);
+    expect(trackEvent).toHaveBeenCalledWith(
+      'scan_import',
+      expect.objectContaining({ success: true, source: 'desktop_trace' })
+    );
+  });
+
   it('shows the upload affordance in the awaiting state', () => {
     render(<ScanWithPhoneDialog open onClose={vi.fn()} />);
     expect(screen.getByText('binDesigner.cutouts.scanImport.upload')).toBeInTheDocument();
@@ -68,20 +100,13 @@ describe('ScanWithPhoneDialog', () => {
     session.current = { phase: 'waiting', url: 'https://example.com/scan/abc' };
     render(<ScanWithPhoneDialog open onClose={vi.fn()} />);
 
-    const clicks: HTMLAnchorElement[] = [];
-    const realClick = HTMLAnchorElement.prototype.click;
-    HTMLAnchorElement.prototype.click = function mockClick(this: HTMLAnchorElement) {
-      clicks.push(this);
-    };
-    try {
-      fireEvent.click(screen.getByText('binDesigner.cutouts.scanImport.calibrationSheet'));
-    } finally {
-      HTMLAnchorElement.prototype.click = realClick;
-    }
+    fireEvent.click(screen.getByText('binDesigner.cutouts.scanImport.calibrationSheet'));
 
-    expect(clicks).toHaveLength(1);
-    expect(clicks[0].download).toBe('gridfinity-calibration-sheet.svg');
-    expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    expect(deliverExport).toHaveBeenCalledTimes(1);
+    expect(deliverExport).toHaveBeenCalledWith(
+      expect.any(Blob),
+      'gridfinity-calibration-sheet.svg'
+    );
   });
 
   it('moves to review with an empty scale field after a valid upload', async () => {
@@ -113,6 +138,21 @@ describe('ScanWithPhoneDialog', () => {
     expect(await screen.findByText('binDesigner.cutouts.scanImport.added.one')).toBeInTheDocument();
     fireEvent.click(screen.getByText('binDesigner.cutouts.scanImport.done'));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('asks for the longest tool’s length when an unscaled scan holds several', async () => {
+    render(<ScanWithPhoneDialog open onClose={vi.fn()} />);
+    uploadSvg(
+      '<svg viewBox="0 0 300 100"><rect x="0" y="0" width="120" height="40"/>' +
+        '<rect x="200" y="0" width="30" height="90"/></svg>'
+    );
+
+    const field = await screen.findByLabelText('binDesigner.cutouts.scanImport.scaleLabelLongest');
+    fireEvent.change(field, { target: { value: '60' } });
+    fireEvent.click(screen.getByText('binDesigner.cutouts.scanImport.add'));
+
+    const addedSpecs = mockAddScanCutouts.mock.calls[0][0] as Array<{ width: number }>;
+    expect(Math.max(...addedSpecs.map((s) => s.width))).toBeCloseTo(60, 5);
   });
 
   it('skips scale-confirm and adds directly when the phone produced mm output', async () => {

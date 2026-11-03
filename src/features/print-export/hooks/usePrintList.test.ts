@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { usePrintList } from '@/features/print-export/hooks/usePrintList';
 import { useLayoutStore } from '@/core/store/layout';
@@ -17,6 +17,8 @@ import {
 import type { Layout, Bin } from '@/core/types';
 import { useLabelPlateCounts } from '@/shared/hooks/useLabelPlateCounts';
 import { useLinkedDesignOverhangs } from '@/shared/hooks/useLinkedDesignOverhangs';
+import { useLinkedDesignKinds } from '@/shared/hooks/useLinkedDesignKinds';
+import { registerLinkedSlantResolver } from '@/shared/utils/placedSlant';
 
 vi.mock('@/shared/hooks/useLabelPlateCounts', () => ({
   useLabelPlateCounts: vi.fn(() => new Map()),
@@ -28,8 +30,13 @@ vi.mock('@/shared/hooks/useLinkedDesignOverhangs', () => ({
   useLinkedDesignOverhangs: vi.fn(() => new Map()),
 }));
 
+vi.mock('@/shared/hooks/useLinkedDesignKinds', () => ({
+  useLinkedDesignKinds: vi.fn(() => new Map()),
+}));
+
 const mockUseLabelPlateCounts = vi.mocked(useLabelPlateCounts);
 const mockUseLinkedDesignOverhangs = vi.mocked(useLinkedDesignOverhangs);
+const mockUseLinkedDesignKinds = vi.mocked(useLinkedDesignKinds);
 
 // Helper to create test bins
 function createTestBin(overrides: Partial<Bin> = {}): Bin {
@@ -66,6 +73,7 @@ describe('usePrintList', () => {
     vi.clearAllMocks();
     mockUseLabelPlateCounts.mockImplementation(() => new Map());
     mockUseLinkedDesignOverhangs.mockImplementation(() => new Map());
+    mockUseLinkedDesignKinds.mockImplementation(() => new Map());
 
     // Reset stores
     const layout = createTestLayout();
@@ -484,7 +492,14 @@ describe('usePrintList', () => {
       mockUseLabelPlateCounts.mockImplementation(
         () =>
           new Map([
-            [D1, { plateSet: { perBin: 2, widthsU: [1, 2] as const }, tabsWithoutText: false }],
+            [
+              D1,
+              {
+                plateSet: { perBin: 2, widthsU: [1, 2] as const },
+                tabsWithoutText: false,
+                blankCaptionTakesBinLabel: false,
+              },
+            ],
           ])
       );
       const layout = createTestLayout([
@@ -506,7 +521,14 @@ describe('usePrintList', () => {
       mockUseLabelPlateCounts.mockImplementation(
         () =>
           new Map([
-            [D1, { plateSet: { perBin: 1, widthsU: [1] as const }, tabsWithoutText: false }],
+            [
+              D1,
+              {
+                plateSet: { perBin: 1, widthsU: [1] as const },
+                tabsWithoutText: false,
+                blankCaptionTakesBinLabel: false,
+              },
+            ],
           ])
       );
       const layout = createTestLayout([createTestBin({ linkedDesignId: D1 })]);
@@ -520,6 +542,39 @@ describe('usePrintList', () => {
       });
 
       expect(result.current.totalLabelPlates).toBe(0);
+    });
+  });
+
+  describe('blank label tabs', () => {
+    const D1 = designId('design-1');
+
+    function render(blankCaptionTakesBinLabel: boolean) {
+      mockUseLabelPlateCounts.mockImplementation(
+        () => new Map([[D1, { plateSet: null, tabsWithoutText: true, blankCaptionTakesBinLabel }]])
+      );
+      useLayoutStore.setState({
+        layout: createTestLayout([
+          createTestBin({ linkedDesignId: D1, label: 'Screws' }),
+          createTestBin({ linkedDesignId: D1, x: gridUnits(1) }),
+        ]),
+      });
+      const { result } = renderHook(() => usePrintList());
+      return {
+        labeled: result.current.rows.find((r) => r.labels.includes('Screws')),
+        unlabeled: result.current.rows.find((r) => r.labels.length === 0),
+      };
+    }
+
+    it('spares the bins whose layout label fills the blank caption', () => {
+      const { labeled, unlabeled } = render(true);
+      expect(labeled?.labelTabsWithoutText).toBeUndefined();
+      expect(unlabeled?.labelTabsWithoutText).toBe(true);
+    });
+
+    it('flags every bin when the design takes no layout label', () => {
+      const { labeled, unlabeled } = render(false);
+      expect(labeled?.labelTabsWithoutText).toBe(true);
+      expect(unlabeled?.labelTabsWithoutText).toBe(true);
     });
   });
 
@@ -606,6 +661,42 @@ describe('usePrintList', () => {
       expect(result.current.rows[0].totalPieces).toBe(1);
     });
 
+    // 4 units of grid fit the 180mm bed; 21mm of left padding pushes the
+    // extended part to 189mm, which does not.
+    function withPaddedBed(bins: Bin[]): Layout {
+      return {
+        ...withBed(bins),
+        baseplateParams: {
+          magnetHoles: false,
+          magnetDiameter: mm(6),
+          magnetDepth: mm(2),
+          paddingLeft: mm(21),
+          paddingRight: mm(0),
+          paddingFront: mm(0),
+          paddingBack: mm(0),
+        },
+      };
+    }
+
+    it('charges the drawer margin against the bed for a parametric design', () => {
+      useLayoutStore.setState({
+        layout: withPaddedBed([{ ...linkedBin(), extendToMargin: true }]),
+      });
+
+      const { result } = renderHook(() => usePrintList());
+      expect(result.current.rows[0].needsSplit).toBe(true);
+    });
+
+    it('does not charge the drawer margin for an imported mesh, which prints as stored', () => {
+      mockUseLinkedDesignKinds.mockImplementation(() => new Map([[DESIGN, 'importedMesh']]));
+      useLayoutStore.setState({
+        layout: withPaddedBed([{ ...linkedBin(), extendToMargin: true }]),
+      });
+
+      const { result } = renderHook(() => usePrintList());
+      expect(result.current.rows[0].needsSplit).toBe(false);
+    });
+
     it('ignores a design overhang for a bin that is not linked to it', () => {
       mockUseLinkedDesignOverhangs.mockImplementation(
         () => new Map([[DESIGN, { left: 61.5, right: 42, front: 0, back: 0, enabled: true }]])
@@ -616,6 +707,35 @@ describe('usePrintList', () => {
 
       const { result } = renderHook(() => usePrintList());
       expect(result.current.rows[0].needsSplit).toBe(false);
+    });
+  });
+  describe('slanted bins', () => {
+    const SLANT = { angleDeg: 40, side: 'back' as const };
+    const wide = (overrides: Partial<Bin> = {}): Bin =>
+      createTestBin({ width: gridUnits(6), depth: gridUnits(1), ...overrides });
+    const onBed = (bins: Bin[]): Layout => ({ ...createTestLayout(bins), printBedSize: mm(180) });
+    const pieces = (bins: Bin[]): number => {
+      useLayoutStore.setState({ layout: onBed(bins) });
+      const { result } = renderHook(() => usePrintList());
+      return result.current.rows[0].totalPieces;
+    };
+
+    afterEach(() => registerLinkedSlantResolver(null));
+
+    it('never splits a bin with a placed slant', () => {
+      expect(pieces([wide()])).toBeGreaterThan(1);
+      expect(pieces([wide({ slant: SLANT })])).toBe(1);
+    });
+
+    it('never splits a bin whose linked design slants', () => {
+      const DESIGN = designId('d-slanted');
+      registerLinkedSlantResolver((id) => (id === DESIGN ? { config: SLANT } : undefined));
+      expect(pieces([wide({ linkedDesignId: DESIGN })])).toBe(1);
+    });
+
+    it('splits a slanted bin whose own overhang keeps it upright, as the export does', () => {
+      const overhang = { left: 5, right: 0, front: 0, back: 0 };
+      expect(pieces([wide({ slant: SLANT, overhang })])).toBeGreaterThan(1);
     });
   });
 });

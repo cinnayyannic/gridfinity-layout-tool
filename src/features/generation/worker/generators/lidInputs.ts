@@ -13,6 +13,7 @@ import type {
   LidCompatibilitySide,
   LidGripMode,
   LidGripSides,
+  TextQuarterTurn,
   TextStyleDefaults,
 } from '@/shared/types/bin';
 import type { MagnetAnchor } from '@/core/types';
@@ -27,8 +28,10 @@ import {
   resolveLidGripHeightPlan,
   hasLidGrip,
   hasBinLipDip,
+  lidFillBottomZ,
   resolveTextStyle,
 } from '@/shared/types/bin';
+import { GRIDFINITY_SPEC } from '@/shared/printSettings/gridfinityGeometry';
 import { isPartialMask, type CellMask } from '@/shared/utils/cellMask';
 import { railFoulingLabelFootprints } from '@/shared/utils/labelTabPlan';
 import type { LabelTabFootprint } from '@/shared/utils/labelTabPlan';
@@ -61,6 +64,7 @@ export interface LidTextInputs {
    * through it, and a field added later needs no change here.
    */
   readonly style: TextStyleDefaults & { readonly fontSizeOverride?: number };
+  readonly rotation: TextQuarterTurn;
 }
 
 /**
@@ -80,6 +84,22 @@ export interface LidCutoutInputs {
   readonly thickness: number;
   /** Design-wide type style — a text element's caption resolves through it. */
   readonly textDefaults: BinParams['textDefaults'];
+}
+
+/** The lid-fill plug, in lid-local coordinates. */
+export interface LidFillInputs {
+  /**
+   * Plug underside, flush with the lid's mating edge: the magnet bosses' face
+   * on a magnetic lid, the skirt's bottom on any other. Both planes are already
+   * held clear of the bin, so the plug adds no fit of its own to get wrong.
+   */
+  readonly bottomZ: number;
+  /**
+   * Inset of the plug's outline from the lid's outer perimeter: past the
+   * cavity, into the skirt, so the weld is volumetric, but inside the skirt's
+   * outer face everywhere the plug reaches.
+   */
+  readonly outlineInset: number;
 }
 
 /** Geometric inputs derived from BinParams. */
@@ -312,6 +332,8 @@ export interface LidInputs {
    * in, so the builder never re-derives either.
    */
   readonly cutouts: LidCutoutInputs | null;
+  /** Null without a plug ({@link lidFillBottomZ}). */
+  readonly fill: LidFillInputs | null;
   /**
    * Resolved sliding-lid geometry, or null for every other attachment.
    *
@@ -385,6 +407,43 @@ function resolveLidCutoutInputs(params: BinParams): LidCutoutInputs | null {
   };
 }
 
+/**
+ * Whether the lid should keep its natural (unflipped) orientation on export.
+ *
+ * A tray recess lives on the top face and the mating cavity on the underside;
+ * they want opposite print orientations and one side needs supports
+ * (decision D1, "auto by attachment"). Click-rail lids always flip so the rails
+ * print clean (the tray then needs supports); friction/magnetic tray lids skip
+ * the flip so the tray prints clean (the gentler cavity/magnet overhang takes
+ * the supports). Non-tray lids always flip.
+ *
+ * Read by the builder as well as the export, because a hinged lid's pin bore
+ * has to point its peak at whichever face ends up on top in the print.
+ */
+export function keepsNaturalOrientation(params: BinParams): boolean {
+  // A sliding lid is already print-ready: it is a flat plate whose retaining
+  // chamfer is a TOP edge and whose only other feature is an underside relief
+  // for first-layer squish. Flipping it would put the chamfer against the bed
+  // and print the joint's bearing edge into the elephant foot it exists to
+  // avoid, and there is no cavity or rail the flip was ever for.
+  if (isSlideLid(params.lid)) return true;
+  const trayActive = params.lid.tray.enabled && !params.lid.stackableTop;
+  return trayActive && params.lid.attachment !== 'clickRails';
+}
+
+function resolveLidFillInputs(params: BinParams, mateRelief: number): LidFillInputs | null {
+  const bottomZ = lidFillBottomZ(params);
+  if (bottomZ === null) return null;
+  return {
+    bottomZ,
+    outlineInset:
+      GRIDFINITY_SPEC.LIP_SMALL_TAPER +
+      GRIDFINITY_SPEC.LIP_BIG_TAPER +
+      LID_FIT_CLEARANCE +
+      mateRelief,
+  };
+}
+
 export function resolveLidInputs(params: BinParams): LidInputs {
   const { gridUnitMm, heightUnitMm } = params;
   // Y axis uses gridUnitMmY when set (non-square grid); equals X for square.
@@ -418,7 +477,9 @@ export function resolveLidInputs(params: BinParams): LidInputs {
   // a state where the bin skips its matching posts, so the pair couldn't mate.
   const hingePlan = planHingeLid(params).geometry;
   const hingeDetentSide =
-    hingePlan !== null && hingePlan.catchMode === 'detent' ? hingePlan.catchSide : null;
+    hingePlan !== null && hingePlan.catchMode === 'detent' && hingePlan.detentFits
+      ? hingePlan.catchSide
+      : null;
   const hingeMagnetCatch = hingePlan !== null && hingePlan.catchMode === 'magnets';
   const retentionMagnetSide = hingePlan?.catchMode === 'magnets' ? hingePlan.catchSide : null;
   // Magnetic attachment OR a hinged lid's magnet catch. Both put the same
@@ -452,10 +513,8 @@ export function resolveLidInputs(params: BinParams): LidInputs {
       params.surfaceText?.style,
       params.surfaceText?.lidStyle
     );
-    text = { value: lidTextValue, style };
+    text = { value: lidTextValue, style, rotation: params.surfaceText?.lidTextRotation ?? 0 };
   }
-
-  const cutouts = resolveLidCutoutInputs(params);
 
   // Floor plate takes the largest of: the user's knob, a stack-magnet pocket's
   // depth+ceiling, and a tray recess's depth+floor.
@@ -495,6 +554,7 @@ export function resolveLidInputs(params: BinParams): LidInputs {
   // here rather than inline below because the height reads the depth: a
   // chamfer's 45° section is sized by whichever of the two is scarcer.
   const anchorZ = lidAnchorZ(heightUnitMm, LID_FIT_CLEARANCE, cavityExtra);
+  const fill = resolveLidFillInputs(params, mateRelief);
   const gripDepthMm = gripActive ? resolveLidGripDepth(params).depthMm : 0;
 
   return {
@@ -603,7 +663,8 @@ export function resolveLidInputs(params: BinParams): LidInputs {
     wallBottomZ: lidWallBottomZ(heightUnitMm, LID_FIT_CLEARANCE, cavityExtra),
     cellMask,
     text,
-    cutouts,
+    cutouts: resolveLidCutoutInputs(params),
+    fill,
     slide,
     outerOffsetX,
     overhangAddW: addW,

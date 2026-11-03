@@ -1,4 +1,5 @@
 import supportersData from '../data/supporters.json';
+import { isSupporterDepartment } from '../constants';
 
 /** One supporter as served by `/api/supporters`. `name` null = shown anonymously. */
 export interface SupporterRecord {
@@ -7,6 +8,8 @@ export interface SupporterRecord {
   joinedAt?: string;
   /** Only ever present alongside a name (Ko-fi's public opt-in gates the whole shout-out). */
   message?: string;
+  /** Server-assigned credits department; absent on the bundled fallback and for anonymous. */
+  department?: number;
 }
 
 export interface SupportersData {
@@ -19,6 +22,7 @@ export interface SupporterBin {
   name: string | null;
   joinedAt?: string;
   message?: string;
+  department?: number;
   /** The single most recent supporter (by `joinedAt`), for the arrival glow. */
   isNewest: boolean;
 }
@@ -69,6 +73,7 @@ export function buildSupporterBins(
     joinedAt: s.joinedAt,
     // A message never rides with an anonymous bin, even if the payload carries one.
     message: s.name ? s.message : undefined,
+    department: s.name ? s.department : undefined,
     isNewest: i === newest,
   }));
 
@@ -95,41 +100,6 @@ export function joinedThisMonth(
   }).length;
 }
 
-export interface SupportBucket {
-  /** `YYYY-MM` of the bucket. */
-  key: string;
-  count: number;
-}
-
-/**
- * Monthly join counts over the trailing `months` window ending at `now`,
- * oldest first — the series a sparkline plots. Buckets with no joins are 0, so
- * the line has no gaps.
- */
-export function supportHistogram(
-  data: SupportersData = FALLBACK_SUPPORTERS,
-  months: number,
-  now: Date = new Date()
-): SupportBucket[] {
-  const monthKey = (d: Date): string =>
-    `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-
-  const buckets: SupportBucket[] = [];
-  const indexByKey = new Map<string, number>();
-  for (let i = months - 1; i >= 0; i--) {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
-    indexByKey.set(monthKey(d), buckets.length);
-    buckets.push({ key: monthKey(d), count: 0 });
-  }
-
-  for (const s of data.supporters) {
-    if (!s.joinedAt) continue;
-    const idx = indexByKey.get(monthKey(new Date(s.joinedAt)));
-    if (idx !== undefined) buckets[idx].count += 1;
-  }
-  return buckets;
-}
-
 /** Narrow an unknown API response to `SupportersData`. */
 export function isSupportersData(value: unknown): value is SupportersData {
   if (typeof value !== 'object' || value === null) return false;
@@ -139,7 +109,12 @@ export function isSupportersData(value: unknown): value is SupportersData {
   if (!Array.isArray(supporters)) return false;
   return supporters.every((s: unknown) => {
     if (typeof s !== 'object' || s === null) return false;
-    const record = s as { name?: unknown; joinedAt?: unknown; message?: unknown };
+    const record = s as {
+      name?: unknown;
+      joinedAt?: unknown;
+      message?: unknown;
+      department?: unknown;
+    };
     const nameOk = record.name === null || typeof record.name === 'string';
     const joinedOk = record.joinedAt === undefined || typeof record.joinedAt === 'string';
     // A message is only valid alongside a non-empty name: never trust a payload
@@ -149,6 +124,8 @@ export function isSupportersData(value: unknown): value is SupportersData {
       (typeof record.message === 'string' &&
         typeof record.name === 'string' &&
         record.name.length > 0);
-    return nameOk && joinedOk && messageOk;
+    const departmentOk =
+      record.department === undefined || isSupporterDepartment(record.department);
+    return nameOk && joinedOk && messageOk && departmentOk;
   });
 }

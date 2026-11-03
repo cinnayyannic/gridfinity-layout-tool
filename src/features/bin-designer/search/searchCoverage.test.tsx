@@ -16,6 +16,7 @@ const ALL_AVAILABLE: ControlAvailabilityContext = {
   needsSplit: true,
   viewMode: 'rail',
   slideTrayEnabled: true,
+  slantVisible: true,
 };
 
 const GOLDEN: { query: string; expect: string[] }[] = [
@@ -24,6 +25,7 @@ const GOLDEN: { query: string; expect: string[] }[] = [
   { query: 'honeycomb', expect: ['Lightweight floor'] },
   { query: 'magnet', expect: ['Magnet holes'] },
   { query: 'screw', expect: ['Screw holes'] },
+  { query: 'fewer magnets', expect: ['Corners only'] },
   { query: 'stacking lip', expect: ['Stacking lip'] },
   { query: 'feet', expect: ['Detachable feet'] },
   { query: 'spacer', expect: ['Spacer'] },

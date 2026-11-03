@@ -70,6 +70,7 @@
     "binDesigner.cutouts.repeat.radius",
     "binDesigner.cutouts.rotation",
     "binDesigner.cutouts.scanImport.resultSize",
+    "binDesigner.cutouts.traceView.rulerLength",
     "binDesigner.cutouts.scoopUniform",
     "binDesigner.cutouts.section.color",
     "binDesigner.cutouts.section.label",
@@ -105,6 +106,8 @@
     "binDesigner.lid.outerDimensions",
     "binDesigner.lid.railsTwoAxis",
     "binDesigner.lid.summary",
+    "binDesigner.lid.text.rotation",
+    "binDesigner.lid.text.rotationOption",
     "binDesigner.lid.topSurface.flat",
     "binDesigner.measure.deltas",
     "binDesigner.multiColor.experimental",
@@ -345,7 +348,8 @@
     "workshop.view.side",
     "workshop.view.top",
     "binDesigner.cutouts.openSideForm",
-    "binDesigner.cutouts.openSideForm.tunnel"
+    "binDesigner.cutouts.openSideForm.tunnel",
+    "supporters.credits.gag.cateringValue"
   ],
   "valuePatterns": [
     "^\\{[\\w,\\s]+\\}$",

@@ -9,13 +9,21 @@
  */
 
 import type { Layout, LayoutLibrary, DesignId } from '@/core/types';
-import type { Result, StorageError, LayoutLibraryLimitError } from '@/core/result';
-import { isOk, isErr } from '@/core/result';
+import type {
+  Result,
+  StorageError,
+  StorageMeshMissingError,
+  StorageNotSavedError,
+  LayoutLibraryLimitError,
+} from '@/core/result';
+import { err, isOk, isErr, ok, storageNotSaved } from '@/core/result';
 import { CONSTRAINTS } from '@/core/constants';
 import { loadLayoutAsync } from './LayoutService';
 import { createLayoutEntry } from './LayoutManager';
 import { importLayoutJSON } from './ShareService';
 import { getDesignStorePort } from './designStorePort';
+import { deliverExport } from '@/shared/exportDestination/deliverExport';
+import { primeExportFolder } from '@/shared/exportDestination/exportFolder';
 interface LinkedDesignExport {
   readonly id: string;
   readonly name: string;
@@ -79,11 +87,15 @@ export function isArchiveFormat(data: unknown): data is LayoutArchive {
 /**
  * Export all layouts in the library as a JSON archive string.
  * Loads each layout from storage and bundles them together.
+ *
+ * Fails when a linked design's mesh file is missing: the design exists, so
+ * archiving the layout without it would leave a bin naming a design the
+ * archive does not hold.
  */
 export async function exportAllLayouts(
   library: LayoutLibrary,
   onProgress?: (progress: ExportProgress) => void
-): Promise<ExportResult> {
+): Promise<Result<ExportResult, StorageMeshMissingError>> {
   const total = library.entries.length;
   const layouts: ArchiveLayoutEntry[] = [];
   let skipped = 0;
@@ -118,7 +130,10 @@ export async function exportAllLayouts(
           if (port !== null) {
             for (const id of designIds) {
               const result = await port.loadDesign(id);
-              if (!isOk(result)) continue;
+              if (!isOk(result)) {
+                if (result.error.code === 'STORAGE_MESH_MISSING') return err(result.error);
+                continue;
+              }
               const design = result.value;
               if (design.params) {
                 linkedDesigns.push({ id: design.id, name: design.name, params: design.params });
@@ -160,33 +175,31 @@ export async function exportAllLayouts(
     layouts,
   };
 
-  return {
+  return ok({
     json: JSON.stringify(archive),
     exported: layouts.length,
     skipped,
-  };
+  });
 }
 
 /**
- * Download all layouts as a single JSON archive file.
+ * Save all layouts as a single JSON archive file through the user's export
+ * destination. Fails, saving nothing, when a linked design's mesh file is
+ * missing. Resolves once the file is saved locally (downloaded or written to
+ * the export folder); an upload to the export URL carries on afterwards.
  */
 export async function downloadArchive(
   library: LayoutLibrary,
   onProgress?: (progress: ExportProgress) => void
-): Promise<ExportResult> {
-  const result = await exportAllLayouts(library, onProgress);
+): Promise<Result<ExportResult, StorageMeshMissingError | StorageNotSavedError>> {
+  primeExportFolder();
+  const exported = await exportAllLayouts(library, onProgress);
+  if (!isOk(exported)) return exported;
+  const result = exported.value;
   const blob = new Blob([result.json], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-
-  const a = document.createElement('a');
-  a.href = url;
   const date = new Date().toISOString().slice(0, 10);
-  a.download = `gridfinity-layouts-${date}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  return result;
+  const saved = await deliverExport(blob, `gridfinity-layouts-${date}.json`);
+  return saved ? exported : err(storageNotSaved());
 }
 /**
  * Parse and validate a bulk archive from raw JSON.

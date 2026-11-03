@@ -8,6 +8,7 @@ import {
 } from './designerValidationConstants.js';
 import { HEX_COLOR_REGEX } from './designerColorValidation.js';
 import { validateTextStyleOverride, LABEL_TEXT_MAX_LENGTH } from './designerTextValidation.js';
+import { MAX_MESH_UPLOAD_BYTES, isMeshHash } from './meshFile.js';
 
 const VALID_CUTOUT_COLOR_SCOPES = ['floor', 'floorAndWalls'] as const;
 /** Mirrors the client `CUTOUT_OPEN_SIDES`. */
@@ -22,6 +23,65 @@ export const VALID_CUTOUT_FILL_REFERENCES = ['rim', 'floor'] as const;
  * `src/features/bin-designer/types/cutout.ts`.
  */
 export const VALID_CUTOUT_LABEL_MODES = ['engrave', 'socket'] as const;
+
+/**
+ * Cross-boundary contract: MUST match `STORED_CUTOUT_DEPTH_MODES` in
+ * `src/features/bin-designer/types/cutout.ts`. `fixed` is stored as the
+ * field's absence, so it is not a valid value.
+ */
+export const VALID_CUTOUT_DEPTH_MODES = ['floor', 'through'] as const;
+
+/**
+ * Cross-boundary contract: MUST match `CUTOUT_ENTRY_PROFILES` in
+ * `src/features/bin-designer/types/cutout.ts`.
+ */
+export const VALID_CUTOUT_ENTRY_PROFILES = ['chamfer', 'round'] as const;
+
+/**
+ * Cross-boundary contract: MUST match `CUTOUT_FINGER_BOTTOMS` in
+ * `src/features/bin-designer/types/cutout.ts`.
+ */
+export const VALID_CUTOUT_FINGER_BOTTOMS = ['curved', 'flat'] as const;
+
+/**
+ * Cross-boundary contract: MUST match `SPLIT_DEPTH_MODES` in
+ * `src/features/bin-designer/types/cutout.ts`.
+ */
+export const VALID_SPLIT_DEPTH_MODES = ['floor'] as const;
+
+function splitProblem(split: unknown): string | null {
+  if (!isObject(split)) return 'must be an object';
+  for (const end of ['a', 'b'] as const) {
+    const p = split[end];
+    if (
+      !isObject(p) ||
+      !isNumber(p.x) ||
+      !isNumber(p.y) ||
+      Math.abs(p.x) > CONSTRAINTS.MAX_SPLIT_POINT_MM ||
+      Math.abs(p.y) > CONSTRAINTS.MAX_SPLIT_POINT_MM
+    ) {
+      return `.${end} must be a point within ±${CONSTRAINTS.MAX_SPLIT_POINT_MM} mm`;
+    }
+  }
+  // Unbounded above, as the pocket's own depth is: a custom height unit can make
+  // a bin taller than any fixed ceiling, and the generator clamps to the fill.
+  if (!isNumber(split.cutDepth) || split.cutDepth <= 0) {
+    return '.cutDepth must be above 0';
+  }
+  if (
+    split.depthMode !== undefined &&
+    !VALID_SPLIT_DEPTH_MODES.includes(split.depthMode as (typeof VALID_SPLIT_DEPTH_MODES)[number])
+  ) {
+    return `.depthMode must be one of: ${VALID_SPLIT_DEPTH_MODES.join(', ')}`;
+  }
+  if (
+    split.floorMm !== undefined &&
+    !(isNumber(split.floorMm) && inRange(split.floorMm, 0, CONSTRAINTS.MAX_CUTOUT_FLOOR_MM))
+  ) {
+    return `.floorMm must be between 0 and ${CONSTRAINTS.MAX_CUTOUT_FLOOR_MM}`;
+  }
+  return null;
+}
 
 /**
  * Global fill level for a cutout bin.
@@ -88,6 +148,43 @@ export function validateCutouts(value: unknown): string | null {
       )
     ) {
       return `cutouts[${i}].leanDeg must be a number within ±${CONSTRAINTS.MAX_CUTOUT_LEAN_DEG}`;
+    }
+    if (
+      c.entryProfile !== undefined &&
+      !VALID_CUTOUT_ENTRY_PROFILES.includes(
+        c.entryProfile as (typeof VALID_CUTOUT_ENTRY_PROFILES)[number]
+      )
+    ) {
+      return `cutouts[${i}].entryProfile must be one of: ${VALID_CUTOUT_ENTRY_PROFILES.join(', ')}`;
+    }
+    if (
+      c.finger !== undefined &&
+      !(
+        isObject(c.finger) &&
+        VALID_CUTOUT_FINGER_BOTTOMS.includes(
+          c.finger.bottom as (typeof VALID_CUTOUT_FINGER_BOTTOMS)[number]
+        )
+      )
+    ) {
+      return `cutouts[${i}].finger.bottom must be one of: ${VALID_CUTOUT_FINGER_BOTTOMS.join(', ')}`;
+    }
+    if (c.split !== undefined) {
+      const problem = splitProblem(c.split);
+      if (problem) return `cutouts[${i}].split${problem.startsWith('.') ? problem : ` ${problem}`}`;
+    }
+    // The depth mode decides how deep the generator cuts, so an unknown one must
+    // stop here rather than build silently as a fixed depth.
+    if (
+      c.depthMode !== undefined &&
+      !VALID_CUTOUT_DEPTH_MODES.includes(c.depthMode as (typeof VALID_CUTOUT_DEPTH_MODES)[number])
+    ) {
+      return `cutouts[${i}].depthMode must be one of: ${VALID_CUTOUT_DEPTH_MODES.join(', ')}`;
+    }
+    if (
+      c.floorMm !== undefined &&
+      !(isNumber(c.floorMm) && inRange(c.floorMm, 0, CONSTRAINTS.MAX_CUTOUT_FLOOR_MM))
+    ) {
+      return `cutouts[${i}].floorMm must be between 0 and ${CONSTRAINTS.MAX_CUTOUT_FLOOR_MM}`;
     }
     // Open sides name walls the worker breaches, so an unknown entry must stop
     // here rather than ride into storage as an inert string. Each entry is a
@@ -181,6 +278,8 @@ const BASE64_REGEX = /^[A-Za-z0-9+/]+={0,2}$/;
 const CONTROL_CHARS_REGEX = /[\u0000-\u001f\u007f]/;
 
 const ALLOWED_MESH_ASSET_KEYS = new Set(['name', 'data', 'triangleCount', 'sizeMm', 'outlines']);
+/** MIRROR: the fields of `MeshAssetRef` in `src/shared/generation/meshAsset.ts`. */
+const ALLOWED_MESH_REF_KEYS = new Set(['name', 'hash', 'triangleCount', 'sizeMm', 'bytes']);
 
 /**
  * Display names for cutout groups. Keyed by group id, so both halves are
@@ -208,13 +307,120 @@ export function validateCutoutGroupNames(value: unknown): string | null {
   return null;
 }
 
+/** Tells a ref from an inline asset the way the client's `isMeshAssetRef` does. */
+export function isMeshRef(asset: Record<string, unknown>): boolean {
+  return 'hash' in asset;
+}
+
+/** The hash of every ref in a `meshAssets` map that passed {@link validateMeshAssets}. */
+export function meshRefHashes(meshAssets: unknown): string[] {
+  if (!isObject(meshAssets)) return [];
+  return Object.values(meshAssets).flatMap((asset) =>
+    isObject(asset) && isMeshRef(asset) && isString(asset.hash) ? [asset.hash] : []
+  );
+}
+
+/**
+ * One mesh asset, its errors reported under `path`. With `allowRefs` it may
+ * instead name a stored mesh file by hash. This checks a ref's shape only;
+ * whether the account holds the file is the caller's check, since it needs
+ * Redis.
+ */
+export function validateMeshAsset(
+  assetRaw: unknown,
+  path: string,
+  allowRefs: boolean
+): string | null {
+  if (!isObject(assetRaw)) return `${path} must be an object`;
+  const ref = allowRefs && isMeshRef(assetRaw);
+  const allowedKeys = ref ? ALLOWED_MESH_REF_KEYS : ALLOWED_MESH_ASSET_KEYS;
+  for (const key of Object.keys(assetRaw)) {
+    if (!allowedKeys.has(key)) return `${path} has unknown key: ${key}`;
+  }
+  const a = assetRaw;
+  if (
+    !isString(a.name) ||
+    a.name.length === 0 ||
+    a.name.length > CONSTRAINTS.MAX_MESH_NAME_LENGTH ||
+    CONTROL_CHARS_REGEX.test(a.name)
+  ) {
+    return `${path}.name must be a clean string (max ${CONSTRAINTS.MAX_MESH_NAME_LENGTH} chars)`;
+  }
+  if (ref) {
+    if (!isMeshHash(a.hash)) return `${path}.hash must be a lowercase hex SHA-256`;
+  } else if (
+    !isString(a.data) ||
+    a.data.length === 0 ||
+    a.data.length > CONSTRAINTS.MAX_MESH_DATA_LENGTH ||
+    !BASE64_REGEX.test(a.data)
+  ) {
+    return `${path}.data must be base64 (max ${CONSTRAINTS.MAX_MESH_DATA_LENGTH} chars)`;
+  }
+  if (
+    !isNumber(a.triangleCount) ||
+    !Number.isInteger(a.triangleCount) ||
+    !inRange(a.triangleCount, 1, CONSTRAINTS.MAX_MESH_ASSET_TRIANGLES)
+  ) {
+    return `${path}.triangleCount must be an integer in [1, ${CONSTRAINTS.MAX_MESH_ASSET_TRIANGLES}]`;
+  }
+  if (!isObject(a.sizeMm)) return `${path}.sizeMm must be an object`;
+  for (const axis of ['x', 'y', 'z'] as const) {
+    const v = a.sizeMm[axis];
+    if (!isNumber(v) || v <= 0 || v > CONSTRAINTS.MAX_MESH_SIZE_MM) {
+      return `${path}.sizeMm.${axis} must be in (0, ${CONSTRAINTS.MAX_MESH_SIZE_MM}]`;
+    }
+  }
+  if (ref) {
+    if (
+      !isNumber(a.bytes) ||
+      !Number.isInteger(a.bytes) ||
+      !inRange(a.bytes, 1, MAX_MESH_UPLOAD_BYTES)
+    ) {
+      return `${path}.bytes must be an integer in [1, ${MAX_MESH_UPLOAD_BYTES}]`;
+    }
+    return null;
+  }
+  if (!Array.isArray(a.outlines) || a.outlines.length === 0) {
+    return `${path}.outlines must be a non-empty array`;
+  }
+  let totalPoints = 0;
+  for (const ring of a.outlines) {
+    if (!Array.isArray(ring) || ring.length < 3) {
+      return `${path}.outlines rings need at least 3 points`;
+    }
+    totalPoints += ring.length;
+    for (const point of ring) {
+      if (
+        !isObject(point) ||
+        !isNumber(point.x) ||
+        !isNumber(point.y) ||
+        Math.abs(point.x) > CONSTRAINTS.MAX_MESH_SIZE_MM ||
+        Math.abs(point.y) > CONSTRAINTS.MAX_MESH_SIZE_MM
+      ) {
+        return `${path}.outlines points must be finite {x, y} within ±${CONSTRAINTS.MAX_MESH_SIZE_MM}mm`;
+      }
+    }
+  }
+  if (totalPoints > CONSTRAINTS.MAX_MESH_OUTLINE_POINTS) {
+    return `${path}.outlines exceed ${CONSTRAINTS.MAX_MESH_OUTLINE_POINTS} total points`;
+  }
+  return null;
+}
+
 /**
  * Validate the mesh imprint asset map (STL imports). The mesh geometry itself
  * is regenerated client-side from the compressed data, but a crafted blob
  * could smuggle megabytes of junk or orphan references, so structure, caps,
  * and cutout cross-references are all enforced here.
+ *
+ * With `allowRefs`, an entry may instead name a stored mesh file by hash
+ * ({@link validateMeshAsset}).
  */
-export function validateMeshAssets(value: unknown, cutouts: unknown): string | null {
+export function validateMeshAssets(
+  value: unknown,
+  cutouts: unknown,
+  allowRefs = false
+): string | null {
   const meshCutoutIds: { index: number; meshId: unknown }[] = [];
   if (Array.isArray(cutouts)) {
     for (let i = 0; i < cutouts.length; i++) {
@@ -231,71 +437,16 @@ export function validateMeshAssets(value: unknown, cutouts: unknown): string | n
   if (!isObject(value)) return 'meshAssets must be an object';
 
   const entries = Object.entries(value);
-  if (entries.length > CONSTRAINTS.MAX_MESH_ASSETS) {
-    return `max ${CONSTRAINTS.MAX_MESH_ASSETS} mesh assets`;
-  }
+  let totalTriangles = 0;
   for (const [id, assetRaw] of entries) {
     if (id.length === 0 || id.length > 64 || CONTROL_CHARS_REGEX.test(id)) {
       return 'meshAssets keys must be non-empty strings (max 64 chars)';
     }
-    if (!isObject(assetRaw)) return `meshAssets.${id} must be an object`;
-    for (const key of Object.keys(assetRaw)) {
-      if (!ALLOWED_MESH_ASSET_KEYS.has(key)) return `meshAssets.${id} has unknown key: ${key}`;
-    }
-    const a = assetRaw;
-    if (
-      !isString(a.name) ||
-      a.name.length === 0 ||
-      a.name.length > CONSTRAINTS.MAX_MESH_NAME_LENGTH ||
-      CONTROL_CHARS_REGEX.test(a.name)
-    ) {
-      return `meshAssets.${id}.name must be a clean string (max ${CONSTRAINTS.MAX_MESH_NAME_LENGTH} chars)`;
-    }
-    if (
-      !isString(a.data) ||
-      a.data.length === 0 ||
-      a.data.length > CONSTRAINTS.MAX_MESH_DATA_LENGTH ||
-      !BASE64_REGEX.test(a.data)
-    ) {
-      return `meshAssets.${id}.data must be base64 (max ${CONSTRAINTS.MAX_MESH_DATA_LENGTH} chars)`;
-    }
-    if (
-      !isNumber(a.triangleCount) ||
-      !Number.isInteger(a.triangleCount) ||
-      !inRange(a.triangleCount, 1, CONSTRAINTS.MAX_MESH_ASSET_TRIANGLES)
-    ) {
-      return `meshAssets.${id}.triangleCount must be an integer in [1, ${CONSTRAINTS.MAX_MESH_ASSET_TRIANGLES}]`;
-    }
-    if (!isObject(a.sizeMm)) return `meshAssets.${id}.sizeMm must be an object`;
-    for (const axis of ['x', 'y', 'z'] as const) {
-      const v = a.sizeMm[axis];
-      if (!isNumber(v) || v <= 0 || v > CONSTRAINTS.MAX_MESH_SIZE_MM) {
-        return `meshAssets.${id}.sizeMm.${axis} must be in (0, ${CONSTRAINTS.MAX_MESH_SIZE_MM}]`;
-      }
-    }
-    if (!Array.isArray(a.outlines) || a.outlines.length === 0) {
-      return `meshAssets.${id}.outlines must be a non-empty array`;
-    }
-    let totalPoints = 0;
-    for (const ring of a.outlines) {
-      if (!Array.isArray(ring) || ring.length < 3) {
-        return `meshAssets.${id}.outlines rings need at least 3 points`;
-      }
-      totalPoints += ring.length;
-      for (const point of ring) {
-        if (
-          !isObject(point) ||
-          !isNumber(point.x) ||
-          !isNumber(point.y) ||
-          Math.abs(point.x) > CONSTRAINTS.MAX_MESH_SIZE_MM ||
-          Math.abs(point.y) > CONSTRAINTS.MAX_MESH_SIZE_MM
-        ) {
-          return `meshAssets.${id}.outlines points must be finite {x, y} within ±${CONSTRAINTS.MAX_MESH_SIZE_MM}mm`;
-        }
-      }
-    }
-    if (totalPoints > CONSTRAINTS.MAX_MESH_OUTLINE_POINTS) {
-      return `meshAssets.${id}.outlines exceed ${CONSTRAINTS.MAX_MESH_OUTLINE_POINTS} total points`;
+    const assetError = validateMeshAsset(assetRaw, `meshAssets.${id}`, allowRefs);
+    if (assetError) return assetError;
+    totalTriangles += (assetRaw as { triangleCount: number }).triangleCount;
+    if (totalTriangles > CONSTRAINTS.MAX_MESH_TRIANGLES_TOTAL) {
+      return `meshAssets declare more than ${CONSTRAINTS.MAX_MESH_TRIANGLES_TOTAL} triangles in total`;
     }
   }
 

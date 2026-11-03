@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { hingePinLengths, planHingeLid, resolveHingeFitMm } from './hingeLidPlan';
+import {
+  hingePinLengths,
+  latchReliefRadiusMm,
+  planHingeLid,
+  resolveHingeFitMm,
+} from './hingeLidPlan';
 import { DEFAULT_BIN_PARAMS } from '@/features/bin-designer/constants';
 import {
   DEFAULT_LID_HINGE_CONFIG,
@@ -13,6 +18,7 @@ import {
   resolveLidPlateThickness,
 } from '@/features/bin-designer/types/lid';
 import { buildFullMask } from '@/shared/utils/cellMask';
+import { GRIDFINITY_SPEC } from '@/shared/printSettings/gridfinityGeometry';
 import type { BinParams, LidHingeConfig, LidRailSide } from '@/features/bin-designer/types';
 
 function params(over: Partial<BinParams> = {}, hinge: Partial<LidHingeConfig> = {}): BinParams {
@@ -266,6 +272,90 @@ describe('planHingeLid — the axis', () => {
     const { geometry } = planHingeLid(params());
     expect(geometry?.axisAboveLipTopMm).toBeGreaterThan(0);
   });
+
+  it('raises the hinge wall by however far the axis sits above a stock lid', () => {
+    const plan = (over: Partial<BinParams>, extraHeightMm = 0) => {
+      const { geometry } = planHingeLid(
+        params({ ...over, lid: { ...DEFAULT_BIN_PARAMS.lid, extraHeightMm } })
+      );
+      if (!geometry) throw new Error('expected hinge geometry');
+      return geometry;
+    };
+    const stock = plan({});
+    expect(stock.wallRiseMm).toBe(0);
+    expect(stock.axisAboveStopMm).toBe(stock.axisAboveLipTopMm);
+    for (const g of [plan({}, 20), plan({ heightUnitMm: 10 })]) {
+      expect(g.wallRiseMm).toBeCloseTo(g.axisAboveLipTopMm - stock.axisAboveLipTopMm, 9);
+      expect(g.axisAboveStopMm).toBeCloseTo(stock.axisAboveStopMm, 9);
+      expect(g.trimTiltDeg).toBeCloseTo(stock.trimTiltDeg, 9);
+      expect(g.stopRadiusMm).toBeCloseTo(stock.stopRadiusMm, 9);
+    }
+    const short = plan({ heightUnitMm: 6 });
+    expect(short.wallRiseMm).toBe(0);
+    expect(short.axisAboveStopMm).toBe(short.axisAboveLipTopMm);
+  });
+
+  it('relieves the latch plug whenever the axis sits above a stock lid, and only then', () => {
+    const relieves = (over: Partial<BinParams>, extraHeightMm = 0): boolean | undefined =>
+      planHingeLid(params({ ...over, lid: { ...DEFAULT_BIN_PARAMS.lid, extraHeightMm } })).geometry
+        ?.relievesLatch;
+    expect(relieves({})).toBe(false);
+    expect(relieves({}, 1)).toBe(true);
+    expect(relieves({ heightUnitMm: 10 })).toBe(true);
+    expect(relieves({ heightUnitMm: 6 })).toBe(false);
+  });
+
+  it('shifts the hinge along the axis with the cavity, on whichever wall it runs', () => {
+    const along = (side: LidRailSide): number | undefined =>
+      planHingeLid(
+        params({ overhang: { enabled: true, left: 0, right: 4, front: 0, back: 0 } }, { side })
+      ).geometry?.alongOffsetMm;
+    expect(along('back')).toBeCloseTo(2, 9);
+    expect(along('front')).toBeCloseTo(-2, 9);
+    const acrossDepth = (side: LidRailSide): number | undefined =>
+      planHingeLid(
+        params({ overhang: { enabled: true, left: 0, right: 0, front: 0, back: 4 } }, { side })
+      ).geometry?.alongOffsetMm;
+    expect(acrossDepth('left')).toBeCloseTo(2, 9);
+    expect(acrossDepth('right')).toBeCloseTo(-2, 9);
+    expect(planHingeLid(params()).geometry?.alongOffsetMm).toBe(0);
+  });
+
+  it('keeps a snap rail only while the relief leaves a plug to hang it from', () => {
+    const fits = (depth: number, extraHeightMm: number, catchMode: 'none' | 'detent') =>
+      planHingeLid(
+        params({ depth, lid: { ...DEFAULT_BIN_PARAMS.lid, extraHeightMm } }, { catchMode })
+      ).geometry?.detentFits;
+    expect(fits(2, 0, 'detent')).toBe(true);
+    expect(fits(2, 20, 'detent')).toBe(true);
+    expect(fits(1, 100, 'detent')).toBe(false);
+    expect(fits(1, 100, 'none')).toBe(true);
+  });
+
+  it('bounds the trim only where its plane would reach past the cavity face', () => {
+    // How far inboard the plane runs by the time it reaches the lid's lowest
+    // material, the bottom of the mating wall. Inside the bound with no extra
+    // height, so those lids are cut exactly as before; far outside it on a tall
+    // lid, where the bound is what keeps the side walls.
+    const reach = (extraHeightMm: number): { reach: number; bound: number } => {
+      const { geometry } = planHingeLid(
+        params({ lid: { ...DEFAULT_BIN_PARAMS.lid, extraHeightMm } })
+      );
+      if (!geometry) throw new Error('expected hinge geometry');
+      const depth =
+        geometry.axisAboveLipTopMm +
+        GRIDFINITY_SPEC.LIP_BIG_TAPER +
+        GRIDFINITY_SPEC.LIP_VERTICAL_PART;
+      return {
+        reach: depth * Math.tan((-geometry.trimTiltDeg * Math.PI) / 180),
+        bound: geometry.trimInboardMm,
+      };
+    };
+    const stock = reach(0);
+    expect(stock.reach).toBeLessThan(stock.bound);
+    const tall = reach(20);
+    expect(tall.reach).toBeGreaterThan(tall.bound);
+  });
 });
 
 describe('planHingeLid — sides', () => {
@@ -324,6 +414,43 @@ describe('planHingeLid — the pin', () => {
     const short = hingePinLengths(params({ width: 2 }))[0];
     const long = hingePinLengths(params({ width: 5 }))[0];
     expect(long).toBeGreaterThan(short);
+  });
+});
+
+describe('latchReliefRadiusMm', () => {
+  // The lip on the latch wall as far down as the plug reaches: its 45° taper,
+  // then its vertical face. Sampled, so the closed form has an independent
+  // check on which of its three candidates wins.
+  const nearestLip = (a: number, d: number): number => {
+    const taper = GRIDFINITY_SPEC.LIP_BIG_TAPER;
+    const vertical = GRIDFINITY_SPEC.LIP_VERTICAL_PART;
+    let best = Infinity;
+    for (let i = 0; i <= 400; i++) {
+      const u = (taper * i) / 400;
+      best = Math.min(best, Math.hypot(a - u, d + u));
+      best = Math.min(best, Math.hypot(a - taper, d + taper + (vertical * i) / 400));
+    }
+    return best;
+  };
+
+  it('stays inside the nearest lip point, by the clearance', () => {
+    const cases: Array<[number, number]> = [
+      [80, 1.3],
+      [80, 21],
+      [250, 21],
+      [40, 41],
+      [20, 101],
+      // The nearest point falls mid-taper only when the two are this close.
+      [40, 38],
+      [80, 77.5],
+    ];
+    for (const [a, d] of cases) {
+      expect({ a, d, r: latchReliefRadiusMm(a, d, 0.25) + 0.25 }).toEqual({
+        a,
+        d,
+        r: expect.closeTo(nearestLip(a, d), 3),
+      });
+    }
   });
 });
 

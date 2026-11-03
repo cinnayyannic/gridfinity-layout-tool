@@ -9,6 +9,7 @@ import type {
   TypeStemWarning,
 } from '@/shared/types/generation';
 import type { BinParams } from './binParams';
+import type { BodyTypeMemory } from './bodyTypeMemory';
 import type { ItemEnvelope, ItemKind, ItemStructure } from '@/shared/types/item';
 
 /**
@@ -65,6 +66,8 @@ export interface GenerationResult {
    * companion block. One part in one colour, so no face groups.
    */
   readonly knifeRestMesh?: StackPlateMeshData;
+  /** Optional end support for a slanted bin. One part in one colour, so no face groups. */
+  readonly slantSupportMesh?: StackPlateMeshData;
   /** Optional sliding-tray mesh — the companion part that rides the bin's rail. */
   readonly slideTrayMesh?: SlideTrayMeshData;
   /** Swappable label plates with their seated poses (socket mode, preview only). */
@@ -106,6 +109,8 @@ export interface CachedMesh {
   readonly edgeVertices: Float32Array;
   readonly triangleCount: number;
   readonly byteSize: number;
+  /** The whole generation, so a restore brings back the companion parts and colour groups too. */
+  readonly result?: GenerationResult;
 }
 
 /** History entry pairing params with optional cached mesh */
@@ -120,6 +125,11 @@ export interface HistoryEntry {
   readonly itemKind?: ItemKind;
   readonly structure?: ItemStructure | null;
   readonly envelope?: ItemEnvelope | null;
+  /**
+   * Captured with the params so undo puts back what the next body-type switch
+   * can give back. Absent on entries from before the field existed.
+   */
+  readonly bodyTypeMemory?: BodyTypeMemory | null;
 }
 
 // Designer UI State Types

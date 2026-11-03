@@ -14,6 +14,8 @@ export interface SupporterRecord {
   /** ISO timestamp of when they first supported. Absent on legacy entries. */
   joinedAt?: string;
   message?: string;
+  /** Credits-roll department, only alongside a name. Derived on read, never stored. */
+  department?: number;
 }
 
 /** Public shape served by `/api/supporters` and mirrored by the bundled JSON fallback. */
@@ -39,8 +41,8 @@ export interface KofiPayload {
 /** Ko-fi allows long names; the tape texture wraps but can't absorb an essay. */
 export const MAX_DISPLAY_NAME_LENGTH = 32;
 
-/** A supporter message shows on a bin's tape card; keep it to a glanceable line. */
-export const MAX_MESSAGE_LENGTH = 140;
+/** Ko-fi messages stop at 280 characters, so a supporter's words arrive whole. */
+export const MAX_MESSAGE_LENGTH = 280;
 
 /**
  * Characters that must never reach a rendered supporter name:
@@ -78,8 +80,41 @@ function stripUnsafeNameChars(text: string): string {
   return out;
 }
 
+/**
+ * KEEP IN LOCKSTEP with `SUPPORTER_DEPARTMENT_COUNT` in
+ * `src/features/supporters/constants.ts`. Effectively permanent: changing it
+ * moves almost every supporter to a different department.
+ */
+export const SUPPORTER_DEPARTMENT_COUNT = 8;
+
+/**
+ * Keyed by the `supporters:donors` hash field rather than the name so a
+ * department survives a rename and is independent of whether two people share
+ * a name. Only the index leaves the server, never the field itself.
+ */
+export function supporterDepartment(donorKey: string): number {
+  const digest = createHash('sha256').update(`department:${donorKey}`).digest();
+  return digest.readUInt32BE(0) % SUPPORTER_DEPARTMENT_COUNT;
+}
+
+/** Attach the department to a named record; anonymous records share one on the client. */
+export function withDepartment(donorKey: string, record: SupporterRecord): SupporterRecord {
+  return record.name ? { ...record, department: supporterDepartment(donorKey) } : record;
+}
+
+/**
+ * Cap at `max` UTF-16 units without cutting an emoji in half: a lone surrogate
+ * left at the end is invalid text, and `encodeURIComponent` throws on it.
+ */
+export function sliceWhole(text: string, max: number): string {
+  const cut = text.slice(0, max);
+  const last = cut.charCodeAt(cut.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
+
 /** Bound the sanitize pass so it stays linear in a small constant, not the payload. */
 const SANITIZE_INPUT_CAP = MAX_DISPLAY_NAME_LENGTH * 8;
+const MESSAGE_SANITIZE_INPUT_CAP = MAX_MESSAGE_LENGTH * 2;
 
 /** Webhook dedupe markers only need to outlive Ko-fi's retry window. */
 export const MESSAGE_DEDUPE_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -143,7 +178,7 @@ export function normalizeDisplayName(
 
   // Strip before capping to the display length, so invisible padding can't eat
   // the budget and push the actual name off the end.
-  const cleaned = stripUnsafeNameChars(bounded).trim().slice(0, MAX_DISPLAY_NAME_LENGTH);
+  const cleaned = sliceWhole(stripUnsafeNameChars(bounded).trim(), MAX_DISPLAY_NAME_LENGTH);
   if (!cleaned) return null;
 
   // Filter last, on exactly the text we will render. This ordering is
@@ -163,8 +198,8 @@ export function normalizeDisplayName(
  * never reach here.
  */
 export function filterMessage(rawMessage: string | null | undefined): string | null {
-  const bounded = (rawMessage ?? '').trim().slice(0, SANITIZE_INPUT_CAP);
-  const cleaned = stripUnsafeNameChars(bounded).trim().slice(0, MAX_MESSAGE_LENGTH);
+  const bounded = (rawMessage ?? '').trim().slice(0, MESSAGE_SANITIZE_INPUT_CAP);
+  const cleaned = sliceWhole(stripUnsafeNameChars(bounded).trim(), MAX_MESSAGE_LENGTH);
   if (!cleaned) return null;
   if (!filterDisplayName(cleaned).passed) return null;
   return cleaned;
@@ -213,6 +248,73 @@ export function serializeDonorRecord(record: SupporterRecord): string {
   if (record.joinedAt) payload.t = record.joinedAt;
   if (record.name && record.message) payload.m = record.message;
   return JSON.stringify(payload);
+}
+
+/**
+ * A repeat payment from someone already on the wall. The stored record wins,
+ * so a self-service rename or going anonymous survives another tip, and so
+ * does the earlier join date. Only a public payment's message replaces the
+ * stored one; a blank never wipes it. An undated legacy record stays undated:
+ * dating it now would tag a long-time supporter "just joined".
+ */
+export function mergeDonorRecord(
+  stored: SupporterRecord | null,
+  incoming: SupporterRecord
+): SupporterRecord {
+  if (!stored) return incoming;
+  const joinedAt =
+    stored.joinedAt && incoming.joinedAt && incoming.joinedAt < stored.joinedAt
+      ? incoming.joinedAt
+      : stored.joinedAt;
+  return { name: stored.name, joinedAt, message: incoming.message ?? stored.message };
+}
+
+const RECORD_ATTEMPTS = 3;
+
+const COMPARE_AND_SET = `
+if (redis.call('HGET', KEYS[1], ARGV[1]) or '') == ARGV[2] then
+  redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
+  return 1
+end
+return 0`;
+
+interface DonorRedis extends Redis {
+  donorCompareAndSet(key: string, field: string, expected: string, value: string): Promise<number>;
+}
+
+// Registered lazily and per instance, like `ensureMeshScripts` in meshIndex.ts.
+function ensureDonorScript(redis: Redis): DonorRedis {
+  const client = redis as DonorRedis;
+  if (typeof client.donorCompareAndSet !== 'function') {
+    client.defineCommand('donorCompareAndSet', { numberOfKeys: 1, lua: COMPARE_AND_SET });
+  }
+  return client;
+}
+
+/**
+ * Write a payment into its donor's field, merged with what is there. The
+ * compare-and-set means a self-service edit landing between the read and the
+ * write is merged on the next attempt instead of overwritten. The last attempt
+ * writes unconditionally: Ko-fi never replays, so losing the payment is worse
+ * than losing a concurrent edit.
+ */
+export async function recordDonor(
+  redis: Redis,
+  field: string,
+  incoming: SupporterRecord
+): Promise<void> {
+  const key = supportersDonorsKey();
+  const client = ensureDonorScript(redis);
+  for (let attempt = 1; ; attempt++) {
+    const raw = await client.hget(key, field);
+    const merged = mergeDonorRecord(raw === null ? null : parseDonorRecord(raw), incoming);
+    const value = serializeDonorRecord(merged);
+    if (attempt === RECORD_ATTEMPTS) {
+      await client.hset(key, field, value);
+      return;
+    }
+    if ((await client.donorCompareAndSet(key, field, raw ?? '', value)) === 1) return;
+  }
 }
 
 /**
@@ -276,6 +378,8 @@ export function parseKofiPayload(body: unknown): KofiPayload | null {
  */
 export async function readSupporters(redis: Redis): Promise<SupportersPayload> {
   const donors = await redis.hgetall(supportersDonorsKey());
-  const supporters = Object.values(donors).map(parseDonorRecord);
+  const supporters = Object.entries(donors).map(([key, raw]) =>
+    withDepartment(key, parseDonorRecord(raw))
+  );
   return { supporters };
 }

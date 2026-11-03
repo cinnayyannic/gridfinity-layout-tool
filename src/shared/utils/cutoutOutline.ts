@@ -8,7 +8,8 @@
  */
 
 import type { Cutout } from '@/shared/types/bin';
-import type { MeshAsset } from '@/shared/generation/meshAsset';
+import type { MeshAssetEntry } from '@/shared/generation/meshAsset';
+import { meshAssetOutlines } from '@/shared/generation/meshOutlines';
 import { DEFAULT_POLYGON_SIDES, MIN_PATH_POINTS } from '@/shared/types/bin';
 import { clampPolygonSides, regularPolygonPoints, slotCornerRadius } from './cutoutPolygon';
 import { flattenPath, type Point2D } from './pathGeometryBezier';
@@ -105,6 +106,20 @@ function pathRing(c: Cutout): OutlineRing | null {
 }
 
 /**
+ * A path cutout's island rings, turned about the same centre as its outline.
+ * Empty for every other shape and for a path with no outline.
+ */
+export function cutoutHoleRings(c: Cutout): OutlineRing[] {
+  if (c.shape !== 'path' || !c.holes || pathRing(c) === null) return [];
+  const cx = c.x + c.width / 2;
+  const cy = c.y + c.depth / 2;
+  return c.holes
+    .map((hole) => flattenPath(hole))
+    .filter((flat) => flat.length >= 3)
+    .map((flat) => flat.map((p) => rotateAbout(p.x, p.y, cx, cy, c.rotation)));
+}
+
+/**
  * The outline ring, or null for a shape too degenerate to outline. A text
  * element cuts nothing, and a mesh imprint's silhouette lives in its asset,
  * so neither has a ring here.
@@ -126,15 +141,17 @@ export function cutoutOutlineRing(c: Cutout): OutlineRing | null {
  * live in its own lay-flat frame spanning [0..sizeX]×[0..sizeY], so each is
  * centred on the footprint, turned by the cutout's rotation (clockwise
  * positive, the same `-rotation` the worker and `MeshFootprintMesh` apply)
- * and moved to the instance. Empty when the asset is missing.
+ * and moved to the instance. Empty when the asset is missing or its file has
+ * not arrived.
  */
-export function meshOutlineRings(c: Cutout, asset: MeshAsset | undefined): OutlineRing[] {
-  if (!asset) return [];
+export function meshOutlineRings(c: Cutout, asset: MeshAssetEntry | undefined): OutlineRing[] {
+  const outlines = meshAssetOutlines(asset);
+  if (!asset || !outlines) return [];
   const cx = c.x + c.width / 2;
   const cy = c.y + c.depth / 2;
   const hx = asset.sizeMm.x / 2;
   const hy = asset.sizeMm.y / 2;
-  return asset.outlines
+  return outlines
     .filter((ring) => ring.length >= 3)
     .map((ring) => ring.map((p) => rotateAbout(cx + p.x - hx, cy + p.y - hy, cx, cy, c.rotation)));
 }

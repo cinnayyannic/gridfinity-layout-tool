@@ -31,7 +31,9 @@ export type {
   TextStyleOverride,
   SurfaceTextConfig,
   WallTextSide,
+  WallTextFace,
   WallTextVerticalAlign,
+  TextQuarterTurn,
 } from './text';
 export {
   DEFAULT_TEXT_STYLE_DEFAULTS,
@@ -59,12 +61,19 @@ export {
   matchTextPreset,
   normalizeTextInput,
   resolveTextStyle,
+  resolveWallTextStyle,
+  resolveFloorTextStyle,
   snapToTypeScale,
   splitTextLines,
   withExactLabelSize,
   withFontSizeOverride,
   WALL_TEXT_SIDES,
+  WALL_TEXT_FACES,
   WALL_TEXT_ALIGNS,
+  TEXT_QUARTER_TURNS,
+  isTextQuarterTurn,
+  topRowAnchor,
+  wallTextFace,
 } from './text';
 
 export type {
@@ -206,6 +215,9 @@ export {
   lidGripRequestedDepthMm,
   lidGripHeightMm,
   hasLidGrip,
+  lidHasFill,
+  lidFillBottomZ,
+  attachmentTakesFill,
   hasAnyLidGripSide,
   hasBinLipDip,
   lidGripModeAllowed,
@@ -226,6 +238,12 @@ export type {
   CutoutFillReference,
   Cutout,
   CutoutColorScope,
+  CutoutDepthMode,
+  CutoutEntryProfile,
+  CutoutFinger,
+  CutoutSplit,
+  CutoutSplitPoint,
+  CutoutFingerBottom,
   CutoutArrayMode,
   CutoutArrayConfig,
   CutoutLabelMode,
@@ -234,6 +252,11 @@ export type {
 } from './cutout';
 export {
   CUTOUT_FILL_REFERENCES,
+  CUTOUT_DEPTH_MODES,
+  CUTOUT_ENTRY_PROFILES,
+  CUTOUT_FINGER_BOTTOMS,
+  SPLIT_DEPTH_MODES,
+  STORED_CUTOUT_DEPTH_MODES,
   DEFAULT_GROUP_OP,
   DEFAULT_CUTOUT_COLOR_SCOPE,
   GROUP_OPS,
@@ -241,6 +264,8 @@ export {
   CUTOUT_OPEN_SIDES,
   MIN_OPEN_SIDE_WIDTH_MM,
   MIN_PATH_POINTS,
+  MAX_PATH_POINTS,
+  MAX_CUTOUT_HOLES,
   MIN_POLYGON_SIDES,
   MAX_POLYGON_SIDES,
   DEFAULT_POLYGON_SIDES,
@@ -250,6 +275,7 @@ export {
   maxEntryChamfer,
   MAX_CUTOUT_CLEARANCE,
   MAX_CUTOUT_CHAMFER,
+  MAX_CUTOUT_FLOOR_MM,
   CHAMFER_SHAPES,
   MAX_CUTOUT_LEAN_DEG,
   LEAN_SHAPES,
@@ -311,12 +337,14 @@ export * from './compartments';
 export * from './interior';
 export * from './labelTabs';
 export * from './handles';
+export * from './pullTab';
 export * from './walls';
 export * from './slide';
 export * from './floor';
 export * from './splitConnector';
 export * from './binParams';
 export * from './generation';
+export * from './bodyTypeMemory';
 export * from './uiState';
 export * from './savedDesign';
 export * from './designVersion';

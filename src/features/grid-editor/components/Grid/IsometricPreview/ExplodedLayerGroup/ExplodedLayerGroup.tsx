@@ -2,7 +2,7 @@ import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Group } from 'three';
-import type { DesignId, LayerId } from '@/core/types';
+import type { BinId, LayerId } from '@/core/types';
 import { MergedBinMeshes } from '../MergedBinMeshes';
 import {
   LinkedBinMesh,
@@ -23,16 +23,16 @@ const FLOOR_OPACITY_ACTIVE = 0.1;
 interface ExplodedLayerGroupProps {
   layerId: LayerId;
   layerName: string;
-  layerHeightMm: number;
   nonSelectedBins: BinRenderData[];
   selectedBins: BinRenderData[];
-  /** Resolved real geometries for linked designs, keyed by design id. */
-  designGeometries: Map<DesignId, DesignGeometryEntry>;
+  /** Resolved real geometries for linked bins, keyed by bin id. */
+  designGeometries: Map<BinId, DesignGeometryEntry>;
   gridUnitMm: number;
   explodedZOffset: number;
   isActive: boolean;
   drawerWidth: number;
   drawerDepth: number;
+  floorZ: number;
   layerCenterZ: number;
   showChrome: boolean;
   onLayerClick: (layerId: LayerId) => void;
@@ -46,7 +46,6 @@ interface ExplodedLayerGroupProps {
 export function ExplodedLayerGroup({
   layerId,
   layerName,
-  layerHeightMm,
   nonSelectedBins,
   selectedBins,
   designGeometries,
@@ -55,6 +54,7 @@ export function ExplodedLayerGroup({
   isActive,
   drawerWidth,
   drawerDepth,
+  floorZ,
   layerCenterZ,
   showChrome,
   onLayerClick,
@@ -88,7 +88,7 @@ export function ExplodedLayerGroup({
     >
       {/* Translucent floor plane — anchors each layer visually in space */}
       {showChrome && (
-        <mesh position={[drawerWidth / 2, drawerDepth / 2, 0.005]}>
+        <mesh position={[drawerWidth / 2, drawerDepth / 2, floorZ + 0.005]}>
           <planeGeometry args={[drawerWidth, drawerDepth]} />
           <meshBasicMaterial
             color={isActive ? '#f59e0b' : '#ffffff'}
@@ -128,7 +128,6 @@ export function ExplodedLayerGroup({
         <LayerLabel
           layerId={layerId}
           layerName={layerName}
-          layerHeightMm={layerHeightMm}
           isActive={isActive}
           drawerWidth={drawerWidth}
           layerCenterZ={layerCenterZ}

@@ -30,6 +30,8 @@ export type ErrorCode =
   | 'STORAGE_CORRUPTED'
   | 'STORAGE_UNAVAILABLE'
   | 'STORAGE_NETWORK_ERROR'
+  | 'STORAGE_MESH_MISSING'
+  | 'STORAGE_NOT_SAVED'
   | 'VALIDATION_OUT_OF_BOUNDS'
   | 'VALIDATION_COLLISION'
   | 'VALIDATION_INVALID_LAYER'
@@ -147,6 +149,25 @@ export interface StorageNetworkError extends AppError {
 }
 
 /**
+ * A design names a mesh file (by content hash) that is not on this device.
+ * Anything built from the design without it would silently drop the mesh.
+ */
+export interface StorageMeshMissingError extends AppError {
+  readonly kind: 'StorageError';
+  readonly code: 'STORAGE_MESH_MISSING';
+  readonly hash: string;
+}
+
+/**
+ * An export was built but neither saved to the export folder nor downloaded.
+ * The delivery path has already told the user.
+ */
+export interface StorageNotSavedError extends AppError {
+  readonly kind: 'StorageError';
+  readonly code: 'STORAGE_NOT_SAVED';
+}
+
+/**
  * Union of all storage-related errors.
  */
 export type StorageError =
@@ -154,7 +175,9 @@ export type StorageError =
   | StorageNotFoundError
   | StorageCorruptedError
   | StorageUnavailableError
-  | StorageNetworkError;
+  | StorageNetworkError
+  | StorageMeshMissingError
+  | StorageNotSavedError;
 
 // Validation Errors
 

@@ -12,6 +12,7 @@
 
 import type { Bin, Layout, ValidationReason } from '@/core/types';
 import { normalizeDrawerOutline } from './drawerOutline';
+import { migrateLayoutFields } from './layoutMigration';
 import { dropOrphanedPairs } from './binPairs';
 import {
   binId as toBinId,
@@ -29,9 +30,10 @@ import {
   isValidLayer,
   isValidBin,
   isValidCategory,
+  type BinShape,
   type DrawerShape,
 } from './validationGuards';
-import { canPlaceBin } from './validationPlacement';
+import { canPlaceFootprint } from './validationPlacement';
 import { validateCustomProperties } from './validationProperties';
 
 /** Human-readable suffixes for placement failure reasons. */
@@ -39,9 +41,9 @@ export const PLACEMENT_REASON_MESSAGE: Record<ValidationReason, string> = {
   out_of_bounds: 'is out of bounds',
   exceeds_width: 'exceeds drawer width',
   exceeds_depth: 'exceeds drawer depth',
-  exceeds_height: 'exceeds available height',
+  exceeds_height: 'would stack past the drawer top',
   invalid_layer: 'references invalid layer',
-  blocked_zone: 'overlaps with blocked zone from upper layer',
+  blocked_zone: 'would rest on clearance reserved above another bin',
   collision: 'collides with another bin',
   outside_drawer: 'is outside the drawer shape',
 };
@@ -128,8 +130,9 @@ export function validateImport(data: unknown): ImportValidationResult {
       return;
     }
 
-    // For non-staging bins, use canPlaceBin for full validation
-    // (bounds, height, collisions, blocked zones)
+    // For non-staging bins, check the footprint (bounds, drawer shape,
+    // same-layer collisions). Stacks past the drawer top load and show as
+    // such in the editor.
     if (bin.layerId !== STAGING_ID) {
       // Build partial layout with already-validated bins for collision checking
       const partialLayout: Layout = {
@@ -151,13 +154,12 @@ export function validateImport(data: unknown): ImportValidationResult {
         heightUnitMm: mm(7),
       };
 
-      const placementResult = canPlaceBin(
+      const placementResult = canPlaceFootprint(
         {
           x: gridUnits(bin.x),
           y: gridUnits(bin.y),
           width: gridUnits(bin.width),
           depth: gridUnits(bin.depth),
-          height: heightUnits(bin.height),
         },
         toLayerId(bin.layerId),
         partialLayout
@@ -167,6 +169,10 @@ export function validateImport(data: unknown): ImportValidationResult {
         const message = PLACEMENT_REASON_MESSAGE[placementResult.reason] || 'has invalid placement';
         errors.push(`Bin ${i} ${message}`);
         return; // Don't add invalid bins to collision pool for subsequent checks
+      }
+      if (bin.height > drawer.height) {
+        errors.push(`Bin ${i} is taller than the drawer`);
+        return;
       }
     }
 
@@ -202,12 +208,6 @@ export function validateImport(data: unknown): ImportValidationResult {
     }
   });
 
-  // Validate total layer height
-  const totalHeight = validLayers.reduce((sum, layer) => sum + layer.height, 0);
-  if (totalHeight > drawer.height) {
-    errors.push('Total layer height exceeds drawer height');
-  }
-
   // Validate each category using type guard and check uniqueness
   const categoryNames = new Set<string>();
   categories.forEach((cat, i) => {
@@ -230,13 +230,24 @@ export function validateImport(data: unknown): ImportValidationResult {
   // old client may have resized the drawer without adapting the shape) and
   // drop it when invalid or rectangle-equivalent. Half-pairs are unpaired for
   // the same reason: a dangling pairId makes every pair expansion a no-op.
-  const typedLayout = data as Layout;
+  const typedLayout = migrateLayoutFields(layout) as Layout;
   return {
     valid: true,
     errors: [],
     layout: normalizeDrawerOutline({
       ...typedLayout,
-      bins: [...dropOrphanedPairs<Bin>(typedLayout.bins)],
+      bins: [...dropOrphanedPairs<Bin>(typedLayout.bins.map(withTextFields))],
     }),
   };
+}
+
+/**
+ * Stored shares and hand-written files may omit both fields, and every reader
+ * of a bin calls string methods on them.
+ */
+function withTextFields(bin: Bin): Bin {
+  const { label, notes } = bin as BinShape;
+  return label === undefined || notes === undefined
+    ? { ...bin, label: label ?? '', notes: notes ?? '' }
+    : bin;
 }

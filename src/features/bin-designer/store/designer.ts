@@ -24,9 +24,18 @@ import {
   createUISlice,
   createPersistenceSlice,
 } from './slices';
+import type { Set } from './slices/paramSlice/types';
+import { syncCutoutDepths, syncLidHeightUnits, syncSlantLip } from './helpers';
 
 export const useDesignerStore = create<DesignerState>()(
-  immer((set, get) => {
+  immer((rawSet, get) => {
+    const set: Set = (fn) =>
+      rawSet((state) => {
+        fn(state);
+        syncLidHeightUnits(state);
+        syncSlantLip(state);
+        syncCutoutDepths(state);
+      });
     // Wrapped at composition time (not per call site) so every path that
     // turns a SavedDesign into the current design (including programmatic
     // getState().loadDesign callers that mount no hook) reconciles a
@@ -58,8 +67,21 @@ export const useDesignerStore = create<DesignerState>()(
       ...createHistorySlice(set, get),
       ...createUISlice(set),
       ...persistenceSlice,
+      // An import's thickness prompt and a body-type switch's cleared settings
+      // belong to the design they were made in.
+      newDesign: (kind) => {
+        persistenceSlice.newDesign(kind);
+        set((state) => {
+          state.ui.depthPromptIds = [];
+          state.ui.bodyTypeMemory = null;
+        });
+      },
       loadDesign: (design: SavedDesign) => {
         persistenceSlice.loadDesign(design);
+        set((state) => {
+          state.ui.depthPromptIds = [];
+          state.ui.bodyTypeMemory = null;
+        });
         void reconcilePublishedId(design);
       },
     };

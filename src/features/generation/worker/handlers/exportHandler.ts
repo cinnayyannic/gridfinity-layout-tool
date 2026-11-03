@@ -43,6 +43,7 @@ import {
 } from '@/shared/utils/knifeRestPlan';
 import { exportSlideFitSample } from '../generators/slideFitSample';
 import { exportFitTestSlice } from '../generators/fitTestSlice';
+import { exportFitTestOutline } from '../generators/fitTestOutline';
 import { ensureFontsLoaded } from '../wasmInstantiator';
 import type { FaceGroupData } from '@/shared/types/generation';
 import { buildLid, buildStackPlate } from '../generators/lidBuilder';
@@ -55,6 +56,8 @@ import {
   classifyExportError,
   extractExportTransferBuffers,
 } from './workerContext';
+import { buildPlacedSlantSupport, exportSlantSupport } from '../generators/slantSupportBuilder';
+import { planSlantSupport } from '@/shared/utils/slantPlan';
 
 export async function handleExport(message: ExportMessage): Promise<void> {
   const payload = message.payload;
@@ -224,9 +227,9 @@ export async function handleExportSlideFitSample(
 }
 
 /**
- * Export the cutout fit-test card. Runs a full export-quality generation (the
- * card is a slice of the real solid), so it takes the bin's own timeout rather
- * than the fixed coupon ceiling.
+ * Export the cutout fit test, as the card or as its outline. Either runs a full
+ * export-quality generation (both are cut from the real solid), so it takes the
+ * bin's own timeout rather than the fixed coupon ceiling.
  */
 export async function handleExportFitTest(message: ExportFitTestMessage): Promise<void> {
   const payload = message.payload;
@@ -235,11 +238,17 @@ export async function handleExportFitTest(message: ExportFitTestMessage): Promis
     'FIT_TEST_EXPORT_RESULT',
     async () => {
       reportProgress(payload.requestId, 'merge', 0);
-      const result = await exportFitTestSlice(payload.params, payload.format, {
-        thicknessMm: payload.thicknessMm,
-        stamp: payload.stamp,
-        bed: payload.bed,
-      });
+      const result =
+        payload.mode === 'outline'
+          ? await exportFitTestOutline(payload.params, payload.format, {
+              size: payload.outline,
+              bed: payload.bed,
+            })
+          : await exportFitTestSlice(payload.params, payload.format, {
+              thicknessMm: payload.thicknessMm,
+              stamp: payload.stamp,
+              bed: payload.bed,
+            });
       reportProgress(payload.requestId, 'merge', 1);
       return {
         pieces: result.pieces,
@@ -307,8 +316,9 @@ export async function handleExportCombined(message: ExportCombinedMessage): Prom
       // so it belongs in this gate for the same reason the feet do — without it
       // the block takes the bin-only return and the rest never ships.
       const hasKnifeRest = shouldGenerateKnifeRest(params);
+      const slantSupportPlan = planSlantSupport(params);
 
-      if (!hasDividers && !hasLid && !hasFeet && !hasKnifeRest) {
+      if (!hasDividers && !hasLid && !hasFeet && !hasKnifeRest && !slantSupportPlan) {
         reportProgress(requestId, 'merge', 1);
         return {
           pieces: [{ data: binResult.data, label: 'bin' }] as CombinedExportPiece[],
@@ -359,6 +369,9 @@ export async function handleExportCombined(message: ExportCombinedMessage): Prom
         // would sit inside the block it stands next to.
         const restPlan = hasKnifeRest ? planKnifeRest(params) : null;
         let restSolid = restPlan ? buildKnifeRestSolid(params, restPlan, true) : null;
+        const supportSolid = slantSupportPlan
+          ? buildPlacedSlantSupport(params, slantSupportPlan, true)
+          : null;
         try {
           if (lidSolid) {
             const positioned = translate(lidSolid, [0, 0, lidZ]);
@@ -383,6 +396,7 @@ export async function handleExportCombined(message: ExportCombinedMessage): Prom
             ...(stackPlateSolid ? [stackPlateSolid] : []),
             ...feetSolids,
             ...(restSolid ? [restSolid] : []),
+            ...(supportSolid ? [supportSolid] : []),
           ]);
           const blob = unwrap(exportSTEP(assembly));
 
@@ -399,6 +413,7 @@ export async function handleExportCombined(message: ExportCombinedMessage): Prom
           lidSolid?.delete();
           stackPlateSolid?.delete();
           restSolid?.delete();
+          supportSolid?.delete();
         }
       }
 
@@ -450,6 +465,11 @@ export async function handleExportCombined(message: ExportCombinedMessage): Prom
       const restExport = await exportKnifeRest(params, format, tolerance, angularTolerance);
       if (restExport) {
         pieces.push({ data: restExport.data, label: 'knife-rest' });
+      }
+
+      const supportExport = await exportSlantSupport(params, format, tolerance, angularTolerance);
+      if (supportExport) {
+        pieces.push({ data: supportExport.data, label: 'slant-support' });
       }
 
       reportProgress(requestId, 'merge', 1);

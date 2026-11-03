@@ -7,11 +7,11 @@
  * - restoreHistoryEntry: restore params + optional cached mesh from a history entry
  */
 
-import { current, type Draft } from 'immer';
-import { isSocketlessBase } from '@/features/bin-designer/types/base';
+import { castDraft, current, isDraft, type Draft } from 'immer';
 import { parentGroups, unitTag } from '@/features/bin-designer/utils/cutoutHierarchy';
 import type {
   BinParams,
+  BodyTypeMemory,
   CachedMesh,
   Cutout,
   CutoutArrayConfig,
@@ -25,36 +25,26 @@ import { evictIfNeeded } from './meshCacheManager';
 import { isFractional } from '@/core/constants';
 import { heldCutoutFillMm, reanchorCutoutFill } from '@/features/bin-designer/utils/cutoutFill';
 import { hasHalfBinDetail, isPartialMask } from '@/shared/utils/cellMask';
-import { useHalfGridModeStore } from '@/core/store/halfGridMode';
 import { trackToolActivated } from '@/shared/analytics/posthog/conversionEvents';
 import { findAssemblyPart } from '@/features/bin-designer/utils/assemblyTree';
+import { syncedLidHeight } from '@/features/bin-designer/utils/lidHeightUnits';
+import { resolveSlant } from '@/shared/utils/slantPlan';
+import {
+  cutoutDepthFrame,
+  followsDepthMode,
+  resolveCutoutDepth,
+  splitSideB,
+} from '@/shared/utils/cutoutDepth';
 
 /**
- * Resolve the parameters a fresh bin starts from.
+ * The user's saved "default for new bins", or the factory defaults.
  *
- * Layered, in order of precedence:
- * 1. The user's saved "default for new bins" (style-only) if present,
- *    otherwise the hardcoded factory `DEFAULT_BIN_PARAMS`.
- * 2. `base.halfSockets = true` when the layout-level half-grid mode is
- *    active. Skipped for flat-floor bins — the `halfSockets ⇔ flat-floor`
- *    mutual-exclusion constraint takes precedence, and a user who switched
- *    to a flat floor made an explicit choice that shouldn't be overridden
- *    by a mode toggle elsewhere. The check reads the
- *    *resolved* base style so a custom flat-floor default is also honored.
- *
- * Called from `newDesign` and `resetToDefaults` so both fresh-start paths
- * pick up the user default + coupling without re-implementing it.
+ * Ignores the layout's half-grid mode on purpose: the app turns that on by
+ * itself for any fractional drawer, so it says nothing about the feet a user
+ * wants. Half sockets on every new bin come from a saved default instead.
  */
 export function defaultsForNewDesign(): BinParams {
-  const base = loadDefaultParams() ?? DEFAULT_BIN_PARAMS;
-  const halfGridOn = useHalfGridModeStore.getState().halfGridMode;
-  if (!halfGridOn || isSocketlessBase(base.base.style)) {
-    return base;
-  }
-  return {
-    ...base,
-    base: { ...base.base, halfSockets: true },
-  };
+  return loadDefaultParams() ?? DEFAULT_BIN_PARAMS;
 }
 
 /**
@@ -76,6 +66,48 @@ export function paramsNeedHalfGridMode(params: BinParams): boolean {
 }
 
 /** Get the current pending mesh cache. */
+/**
+ * Re-derive `lid.extraHeightMm` from `lid.heightUnits`. Runs after every store
+ * write, because a lid's rise moves with settings nowhere near the lid's height
+ * control: the stack grid, the plate, the hinge, the height unit.
+ */
+export function syncLidHeightUnits(state: Draft<DesignerState>): void {
+  const synced = syncedLidHeight(state.params);
+  if (!synced) return;
+  if (state.params.lid.extraHeightMm !== synced.extraHeightMm) {
+    state.params.lid.extraHeightMm = synced.extraHeightMm;
+  }
+}
+
+/**
+ * A slanted bin has no stacking lip. Runs after every store write, like the lid
+ * height sync, so an edit that clears a slant's blocker drops the lip too.
+ */
+export function syncSlantLip(state: Draft<DesignerState>): void {
+  if (state.params.base.stackingLip && resolveSlant(state.params) !== null) {
+    state.params.base.stackingLip = false;
+  }
+}
+
+/**
+ * Re-derive the depth of every cutout held to its floor or cut through. Runs
+ * after every store write, like the lid height sync: the fill these depths
+ * follow moves with the height, the base, the height unit and the top offset.
+ */
+export function syncCutoutDepths(state: Draft<DesignerState>): void {
+  const { cutouts } = state.params;
+  if (!cutouts.some(followsDepthMode)) return;
+  const frame = cutoutDepthFrame(state.params);
+  for (const cutout of cutouts) {
+    const cutDepth = resolveCutoutDepth(cutout, frame);
+    if (cutout.cutDepth !== cutDepth) cutout.cutDepth = cutDepth;
+    if (cutout.split?.depthMode) {
+      const splitDepth = resolveCutoutDepth(splitSideB(cutout), frame);
+      if (cutout.split.cutDepth !== splitDepth) cutout.split.cutDepth = splitDepth;
+    }
+  }
+}
+
 export function getPendingMeshCache(): CachedMesh | null {
   return pendingMeshCache;
 }
@@ -134,6 +166,11 @@ export function pruneAssemblySelection(state: Draft<DesignerState>): void {
   }
 }
 
+export function snapshotBodyTypeMemory(state: Draft<DesignerState>): BodyTypeMemory | null {
+  const memory = state.ui.bodyTypeMemory;
+  return memory && isDraft(memory) ? current(memory) : memory;
+}
+
 /**
  * Push current params (with pending mesh) to history past array.
  * Skips if inside a transaction (already pushed on transaction start).
@@ -154,6 +191,7 @@ export function pushHistoryEntry(
   const entry: HistoryEntry = {
     params: current(state.params),
     mesh: pendingMeshCache,
+    bodyTypeMemory: snapshotBodyTypeMemory(state),
     ...(state.itemKind !== 'bin'
       ? {
           itemKind: state.itemKind,
@@ -283,6 +321,7 @@ export function planCutoutArrayWrite(
 
 export function restoreHistoryEntry(state: Draft<DesignerState>, entry: HistoryEntry): void {
   state.params = entry.params;
+  state.ui.bodyTypeMemory = castDraft(entry.bodyTypeMemory ?? null);
   if (entry.itemKind !== undefined) {
     state.itemKind = entry.itemKind;
     state.structure = entry.structure ?? null;
@@ -300,6 +339,7 @@ export function restoreHistoryEntry(state: Draft<DesignerState>, entry: HistoryE
   if (entry.mesh) {
     // Cache hit: restore mesh directly, no regeneration needed
     state.generation.mesh = {
+      ...entry.mesh.result,
       vertices: entry.mesh.vertices,
       normals: entry.mesh.normals,
       indices: entry.mesh.indices,

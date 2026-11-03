@@ -44,6 +44,11 @@ import { useSvgImport } from '../panel/CutoutsSection/svgImport';
 import { useSvgExport } from '../panel/CutoutsSection/svgExport';
 import { useStlImport, StlImportDialog } from '../panel/CutoutsSection/stlImport';
 import { ScanWithPhoneDialog } from '../panel/CutoutsSection/scanImport';
+import { ToolThicknessPrompt } from '../panel/CutoutsSection/ToolThicknessPrompt';
+import { useAddFingerAccess } from '../panel/CutoutsSection/useAddFingerAccess';
+import type { RulerMeasurement } from '../panel/CutoutsSection/handlers/rulerHandler';
+import { drawnSplit } from '@/shared/utils/cutoutSplit';
+import { usePocketChecks } from '../panel/CutoutsSection/usePocketChecks';
 import { InspectorDock } from './InspectorDock';
 import { ShapeList } from './ShapeList';
 import type { FitCue } from '../panel/CutoutsSection/cutoutSectionVisibility';
@@ -62,6 +67,7 @@ import { CutoutEmptyState } from '../panel/CutoutsSection/CutoutEmptyState';
 import { useCutoutQuickstart } from '../../hooks/useCutoutQuickstart';
 import { useGroupLevel } from '../../hooks/useGroupLevel';
 import { useTranslation } from '@/i18n';
+import { useLoadedMeshAssets } from '@/shared/hooks/useMeshOutlines';
 import { useCutoutWorkspaceCamera } from './useCutoutWorkspaceCamera';
 import { useCutoutWorkspacePointer } from './useCutoutWorkspacePointer';
 import { buildCutoutContextActions } from './cutoutWorkspaceContextActions';
@@ -184,6 +190,7 @@ export function CutoutWorkspace() {
   // auto-rescaled); on the lid, the window is rounded and a retention magnet's
   // boss is a hole the cut must leave intact. Both are the same question, so
   // both feed one flagged set, one banner and one clamp.
+  const meshAssets = useLoadedMeshAssets(params.meshAssets);
   const cutoutBoard = useMemo(
     () => ({
       width: binWidth,
@@ -191,9 +198,9 @@ export function CutoutWorkspace() {
       mask: boardMask,
       cellSize: maskCellSize,
       lidWindow: lidWindow ?? undefined,
-      meshAssets: params.meshAssets,
+      meshAssets,
     }),
-    [binWidth, binDepth, boardMask, maskCellSize, lidWindow, params.meshAssets]
+    [binWidth, binDepth, boardMask, maskCellSize, lidWindow, meshAssets]
   );
 
   const offBoardIds = useMemo(
@@ -264,6 +271,7 @@ export function CutoutWorkspace() {
   const [gridSize, setGridSize] = useState(0.5);
   const [fitCue, setFitCue] = useState<FitCue>(null);
   const mergeCutoutsIntoArray = useDesignerStore((s) => s.mergeCutoutsIntoArray);
+  const setCutoutSplit = useDesignerStore((s) => s.setCutoutSplit);
   const addToast = useToastStore((s) => s.addToast);
   const { groupContext, handleGroup, handleUngroup } = useGroupLevel({
     cutouts,
@@ -271,6 +279,24 @@ export function CutoutWorkspace() {
   });
 
   const makeRepeatRef = useRef<() => void>(() => {});
+
+  const handleSplitLine = useCallback(
+    (id: string, line: RulerMeasurement) => {
+      const cutout = cutouts.find((c) => c.id === id);
+      if (!cutout) return;
+      const split = drawnSplit(
+        cutout,
+        { x: line.startX, y: line.startY },
+        { x: line.endX, y: line.endY }
+      );
+      if (typeof split === 'string') {
+        addToast(t(`binDesigner.cutouts.split.problem.${split}`), 'error');
+        return;
+      }
+      setCutoutSplit(id, split);
+    },
+    [cutouts, addToast, t, setCutoutSplit]
+  );
 
   const handleFlattenGroupArray = useCallback(
     (id: string) => {
@@ -471,12 +497,47 @@ export function CutoutWorkspace() {
     canRedo,
     onLock: lockCutouts,
     onUnlock: unlockCutouts,
+    onSplitLine: handleSplitLine,
     binWidth,
     binDepth,
     gridSize,
     cellMask: boardMask,
     maskCellSize,
   });
+
+  const splitDrawingId =
+    (mode.type === 'ruler-ready' || mode.type === 'measuring') && mode.splitId !== undefined
+      ? mode.splitId
+      : null;
+  // The line is drawn for the pocket the inspector shows; picking another shape
+  // in the list must not leave the tool armed for the old one.
+  useEffect(() => {
+    if (splitDrawingId !== null && !selection.has(splitDrawingId)) setMode({ type: 'idle' });
+  }, [splitDrawingId, selection, setMode]);
+  const splitTool = useMemo(
+    () =>
+      isLid
+        ? undefined
+        : {
+            drawingId: splitDrawingId,
+            onDraw: (id: string) =>
+              setMode(
+                splitDrawingId === id ? { type: 'idle' } : { type: 'ruler-ready', splitId: id }
+              ),
+            onChange: setCutoutSplit,
+          },
+    [isLid, splitDrawingId, setMode, setCutoutSplit]
+  );
+
+  const handleAddFingerAccess = useAddFingerAccess(cutouts, cutoutBoard, maxCutDepth, selectIds);
+  const pocketChecks = usePocketChecks(
+    cutouts,
+    params,
+    cutoutBoard,
+    !isLid,
+    selectIds,
+    updateCutout
+  );
 
   /**
    * Select a shape-list row, moving the editor into that row's branch first.
@@ -573,7 +634,7 @@ export function CutoutWorkspace() {
 
   const { exportCutoutsAsSvg } = useSvgExport();
   const exportSelectedAsSvg = useCallback(() => {
-    exportCutoutsAsSvg(cutouts.filter((c) => selection.has(c.id)));
+    void exportCutoutsAsSvg(cutouts.filter((c) => selection.has(c.id)));
   }, [exportCutoutsAsSvg, cutouts, selection]);
 
   const contextMenuActions = useMemo(
@@ -686,6 +747,7 @@ export function CutoutWorkspace() {
         <StlImportDialog
           pending={stlImport.pending}
           importing={stlImport.importing}
+          placing={stlImport.placing}
           onRotate={stlImport.setAxisRotation}
           onPlace={stlImport.place}
           onCancel={stlImport.cancel}
@@ -725,6 +787,7 @@ export function CutoutWorkspace() {
                   onScanWithPhone={!isLid ? () => setScanDialogOpen(true) : undefined}
                 />
               )}
+              <ToolThicknessPrompt placement="chip" onFocusTools={(ids) => selectIds(ids, false)} />
               <CutoutCanvas3D
                 cutouts={cutouts}
                 binWidth={binWidth}
@@ -737,6 +800,7 @@ export function CutoutWorkspace() {
                 canvasHeight={canvasHeight}
                 selection={selection}
                 offBoardIds={offBoardIds}
+                issueInstanceIds={pocketChecks.issueInstanceIds}
                 preview={preview}
                 fitCue={fitCue}
                 mode={mode}
@@ -802,11 +866,14 @@ export function CutoutWorkspace() {
           disabled={isInteracting}
           onFitCue={setFitCue}
           onFlattenArray={handleFlattenArray}
+          onAddFingerAccess={isLid ? undefined : handleAddFingerAccess}
+          splitTool={splitTool}
           onFlattenGroupArray={handleFlattenGroupArray}
           offBoardCount={offBoardIds.size}
           onClampOffBoard={offBoardUpdates.size > 0 ? handleClampOffBoard : undefined}
           onCenterOffBoard={centerUpdates.size > 0 ? handleCenterOffBoard : undefined}
           depthShortfallCount={depthShortfallCount}
+          pocketChecks={pocketChecks.view}
           growTarget={growTarget}
           onGrowToFit={handleGrowToFit}
           onDuplicate={duplicateSelected}

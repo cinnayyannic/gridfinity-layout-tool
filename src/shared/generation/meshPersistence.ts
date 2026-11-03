@@ -43,6 +43,10 @@ const META_STORE = 'binMeshMeta';
  * instead, so the other kernel's users keep their warm cache; for one that
  * only moves bins, bump {@link BIN_MESH_REVISION}.
  *
+ * `v29`: a hinged lid that exports on its top face points its pin bores'
+ * teardrop peak down, so the peak is the top of the hole on the print bed.
+ * `v28`: a hinged lid with extra height keeps its side walls whole past the
+ * hinge wall, and its latch-side plug is relieved to an arc about the axis.
  * `v26`: lid text and label plates lay `flat` text flush, where they engraved
  * and debossed it; plate meshes carry face groups for the two-tone preview.
  * `v25`: the `flat` text mode. A client that predates it keeps the mode in
@@ -80,17 +84,42 @@ const META_STORE = 'binMeshMeta';
  * without regenerating, so without this bump a linked design in the layout
  * planner would render its pre-fix bin until the entry was evicted.
  */
-const MESH_CACHE_VERSION = 'v27';
+const MESH_CACHE_VERSION = 'v29';
 
 /**
  * Bumped when only BIN output moves for unchanged params, so the persisted
  * assembly-item previews (their own `item` segment) stay warm. The mirror of
  * {@link itemMeshCacheKey}'s segment.
  *
+ * `bin16`: a funnel wall cutout's top round-over lands tangent to its slope.
+ * `bin15`: a scoop wall cutout's top round-over is no longer held short by a
+ * bottom fillet the scoop never draws.
+ * `bin14`: drainage holes keep clear of a leaning divider's root through the floor.
+ * `bin13`: a detachable foot's pins stop 1mm short of their holes' ends.
+ * `bin12`: a detachable foot's pins stop short of the end of their holes.
+ * `bin11`: a slanted bin's end support stands on the bin's own foot lattice
+ * or half sockets, so it seats beside a bin half a unit off the grid.
+ * `bin10`: a solid bin with a sliding lid carries the lid's channel in the
+ * recess above its fill.
+ * `bin9`: a hinged bin's hinge wall rises to meet a lid with extra height,
+ * whose plate stays at its stock thickness, and both parts' hinges follow a
+ * cavity an overhang moves along the axis.
+ * `bin7`: a chamfered pocket inside a shallower one is chamfered at that floor.
+ * `bin6`: a path pocket with a curve tighter than its clearance plus entry
+ * chamfer keeps both, held back only at that curve, instead of a straight wall.
+ * `bin5`: a flat base's floor follows the wall instead of the spec floor, and a
+ * raised floor under a wall below 1mm no longer reaches past the body's
+ * underside.
+ * `bin4`: a low-profile bin's ridge relief lifts every underside region with
+ * no foot above it, so an overhang or a footless fractional strip sits higher.
+ * `bin3`: a low-profile bin's ridge relief stays off the feet's top faces, so
+ * its outer wall runs flush into the feet with no groove above them.
+ * `bin2`: a full-width label tab's socket counts the walls at its ends, so a
+ * 2u or 3u bin on thick walls cuts a wider plate's pocket.
  * `bin1`: a lipless bin's sliding-lid entry window no longer ramps through the
  * rim, so its entry corners keep their full wall height.
  */
-const BIN_MESH_REVISION = 'bin1';
+const BIN_MESH_REVISION = 'bin16';
 
 /**
  * Per-kernel revision, bumped when only THAT kernel's output moves for
@@ -113,8 +142,8 @@ const BIN_MESH_REVISION = 'bin1';
  * the map is total so a future caller cannot fall through to `undefined`.
  */
 const KERNEL_MESH_REVISION: Record<KernelName, string> = {
-  'occt-wasm': 'r3',
-  brepkit: 'r4',
+  'occt-wasm': 'r4',
+  brepkit: 'r5',
   manifold: 'r1',
 };
 

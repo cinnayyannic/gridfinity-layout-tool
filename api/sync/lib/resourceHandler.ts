@@ -21,6 +21,7 @@ import {
   sendError,
   sendJson,
   ErrorCode,
+  MESH_MISSING_STATUS,
 } from '../../lib/shared.js';
 import { logger } from '../../lib/logger.js';
 import { checkRateLimit, getRedis } from '../../lib/rateLimit.js';
@@ -29,8 +30,11 @@ import { deleteBlob, getJson, putJson } from '../../lib/blobStore.js';
 import { getEntry, tombstone, upsertEntry, type IndexEntry } from '../../lib/userIndex.js';
 import { checkQuota } from '../../lib/quota.js';
 import { compareForTiebreaker } from '../../lib/lwwTiebreaker.js';
+import { unheldMeshes } from '../../lib/meshIndex.js';
 
 type RedisClient = NonNullable<ReturnType<typeof getRedis>>;
+
+export { MESH_MISSING_STATUS };
 
 export type SyncResourceKind = 'layouts' | 'designs' | 'baseplates' | 'designVersions' | 'folders';
 
@@ -47,6 +51,8 @@ export type BuildPutResult<TEnvelope> =
       sizeBytes: number;
       /** Candidate for the equal-ms tiebreaker; must mirror `storedComparable`. */
       tiebreakerCandidate: unknown;
+      /** Mesh files the payload names by hash, each of which the account must hold. */
+      meshHashes?: readonly string[];
     }
   | { ok: false; status: number; error: string; code: string };
 
@@ -59,7 +65,12 @@ export interface SyncResourceConfig<TEnvelope extends SyncEnvelope> {
   /** 410 message when a stale edit hits a newer tombstone. */
   deletedError: string;
   /** Validate the payload and shape the envelope; everything per-resource. */
-  buildPut: (payload: unknown, modifiedAt: number, id: string) => BuildPutResult<TEnvelope>;
+  buildPut: (
+    payload: unknown,
+    modifiedAt: number,
+    id: string,
+    body: Record<string, unknown>
+  ) => BuildPutResult<TEnvelope>;
   /** Stored-side value handed to the equal-ms tiebreaker. */
   storedComparable: (stored: TEnvelope) => unknown;
 }
@@ -113,7 +124,7 @@ export function createSyncResourceHandler<TEnvelope extends SyncEnvelope>(
       return;
     }
 
-    const built = config.buildPut(body[config.payloadKey], modifiedAt, id);
+    const built = config.buildPut(body[config.payloadKey], modifiedAt, id, body);
     if (!built.ok) {
       res.status(built.status).json({ error: built.error, code: built.code });
       return;
@@ -165,6 +176,18 @@ export function createSyncResourceHandler<TEnvelope extends SyncEnvelope>(
         error: config.deletedError,
         code: ErrorCode.NOT_FOUND,
         indexEntry: existing,
+      });
+      return;
+    }
+
+    // After the LWW gates, so a write that loses anyway is never sent off to
+    // upload files first.
+    const missing = await unheldMeshes(redis, userId, built.meshHashes ?? []);
+    if (missing.length > 0) {
+      sendJson(res, MESH_MISSING_STATUS, {
+        error: 'Upload the mesh files this item names, then retry.',
+        code: ErrorCode.MESH_MISSING,
+        missing,
       });
       return;
     }

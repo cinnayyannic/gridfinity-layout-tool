@@ -6,12 +6,13 @@
  * colour sits under the finish picker in the tab text group instead.
  */
 
+import { FieldLabel } from '../shared';
 import { useCallback, useEffect, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useDesignerStore } from '@/features/bin-designer/store';
 import { DEFAULT_FEATURE_COLOR_CONFIG } from '@/features/bin-designer/constants/defaults';
 import { normalizeHex } from '@/features/bin-designer/types/featureColors';
-import { Checkbox } from '@/design-system';
+import { FeatureToggle } from '../FeatureToggle';
 import { useTranslation } from '@/i18n';
 import { useSwapZoneWithToast } from '@/features/bin-designer/hooks/useSwapZoneWithToast';
 import { ColorZoneRow } from '../ColorsSection/ColorZoneRow';
@@ -81,9 +82,7 @@ export function LabelColorControls() {
 
   return (
     <div>
-      <span className="mb-1 block text-xs font-medium text-content-secondary">
-        {t('binDesigner.labelColor')}
-      </span>
+      <FieldLabel>{t('binDesigner.labelColor')}</FieldLabel>
       <div>
         <ColorZoneRow
           zone="labelTab"
@@ -100,16 +99,18 @@ export function LabelColorControls() {
           onClickOverride={swapActive ? () => swapZoneWithToast('labelTab') : undefined}
         />
       </div>
-      <Checkbox
-        className="mt-2"
-        size="sm"
-        checked={featureColors.labelSupportsInLabelColor !== true}
-        onChange={(bodyColor) => updateFeatureColors({ labelSupportsInLabelColor: !bodyColor })}
-        label={t('binDesigner.labelSupportsBodyColor')}
-      />
-      <p className="ml-6 mt-1 text-label leading-relaxed text-content-tertiary">
-        {t('binDesigner.labelSupportsBodyColorHint')}
-      </p>
+      <div className="mt-2">
+        <FeatureToggle
+          label={t('binDesigner.labelSupportsBodyColor')}
+          checked={featureColors.labelSupportsInLabelColor !== true}
+          onChange={() =>
+            updateFeatureColors({
+              labelSupportsInLabelColor: featureColors.labelSupportsInLabelColor !== true,
+            })
+          }
+          info={t('binDesigner.labelSupportsBodyColorHint')}
+        />
+      </div>
     </div>
   );
 }

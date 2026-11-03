@@ -2,7 +2,7 @@
  * Hook managing inline design-name editing state and persistence.
  *
  * Handles click-to-edit, keyboard shortcuts (Enter/Escape), long-press for mobile,
- * initial save (when naming an unsaved design), and rename persistence for existing designs.
+ * initial save (when naming an unsaved bin), and rename persistence for existing designs.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -18,9 +18,11 @@ import {
 import { captureThumbnail } from '@/features/bin-designer/utils/thumbnail';
 import {
   upsertRegistryEntry,
+  renameRegistryEntry,
   registryEdgeFields,
   registryHeightFields,
   registryOverhangFields,
+  registrySlantFields,
   registryKnifeRestFields,
 } from '@/features/bin-designer/store/customBinRegistry';
 import { binId, designId } from '@/core/types';
@@ -47,6 +49,7 @@ export function useDesignNameEditor(): DesignNameEditor {
   const setCurrentDesignId = useDesignerStore((s) => s.setCurrentDesignId);
   const setSaveStatus = useDesignerStore((s) => s.setSaveStatus);
   const params = useDesignerStore((s) => s.params);
+  const itemKind = useDesignerStore((s) => s.itemKind);
   const exportFileNameConfig = useDesignerStore((s) => s.exportFileNameConfig);
   const pendingBinLink = useDesignerStore((s) => s.pendingBinLink);
   const clearPendingBinLink = useDesignerStore((s) => s.clearPendingBinLink);
@@ -76,9 +79,20 @@ export function useDesignNameEditor(): DesignNameEditor {
   }, [designName]);
 
   const handleNameSubmit = useCallback(() => {
-    const name = editNameValue.trim() || 'Untitled Bin';
+    const name = editNameValue.trim() || (itemKind === 'bin' ? 'Untitled Bin' : 'Untitled');
     setDesignName(name);
     setIsEditingName(false);
+
+    // `params` belong to the open design only when it is a bin; other kinds
+    // keep the last bin's, and their own autosave creates their record.
+    if (itemKind !== 'bin') {
+      if (currentDesignId) {
+        void updateDesignName(designId(currentDesignId), name).then((result) => {
+          if (isOk(result)) renameRegistryEntry(result.value.id, result.value.name);
+        });
+      }
+      return;
+    }
 
     // Persist rename for existing designs
     if (currentDesignId) {
@@ -93,6 +107,7 @@ export function useDesignNameEditor(): DesignNameEditor {
             ...registryEdgeFields(params),
             ...registryHeightFields(params),
             ...registryOverhangFields(params),
+            ...registrySlantFields(params),
             ...registryKnifeRestFields(params),
             updatedAt: result.value.updatedAt,
           });
@@ -119,6 +134,7 @@ export function useDesignNameEditor(): DesignNameEditor {
             ...registryEdgeFields(params),
             ...registryHeightFields(params),
             ...registryOverhangFields(params),
+            ...registrySlantFields(params),
             ...registryKnifeRestFields(params),
             updatedAt: result.value.updatedAt,
           });
@@ -146,6 +162,7 @@ export function useDesignNameEditor(): DesignNameEditor {
     editNameValue,
     setDesignName,
     currentDesignId,
+    itemKind,
     params,
     exportFileNameConfig,
     setCurrentDesignId,

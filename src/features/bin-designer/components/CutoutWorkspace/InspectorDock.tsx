@@ -16,7 +16,9 @@ import { useTranslation } from '@/i18n';
 import { ICON_PATHS } from '@/shared/constants/iconPaths';
 import type { FitCue } from '../panel/CutoutsSection/cutoutSectionVisibility';
 import type { GrowTarget } from '../panel/CutoutsSection/growBinToFit';
+import type { PocketChecksView } from '../panel/CutoutsSection/PocketIssueList';
 import { InspectorContent, type BoardSettings } from './InspectorContent';
+import type { SplitTool } from './CutoutSplitControls';
 import { INSPECTOR_MAX_WIDTH, INSPECTOR_MIN_WIDTH } from './inspectorDockStorage';
 
 interface InspectorDockProps {
@@ -33,6 +35,8 @@ interface InspectorDockProps {
   readonly disabled?: boolean;
   readonly onFitCue?: (cue: FitCue) => void;
   readonly onFlattenArray?: (id: string) => void;
+  readonly onAddFingerAccess?: (id: string) => void;
+  readonly splitTool?: SplitTool;
   readonly onFlattenGroupArray?: (id: string) => void;
   /** Count of cutouts stranded past the board after a resize (0 = none). */
   readonly offBoardCount?: number;
@@ -42,6 +46,7 @@ interface InspectorDockProps {
   readonly onCenterOffBoard?: () => void;
   /** Count of cutouts the generator will cut shallower than requested. */
   readonly depthShortfallCount?: number;
+  readonly pocketChecks?: PocketChecksView;
   /** Bin size that would fit every stray, or `null` when growing can't clear it. */
   readonly growTarget?: GrowTarget | null;
   /** Resize the bin to {@link growTarget}. */

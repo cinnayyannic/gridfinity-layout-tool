@@ -12,6 +12,8 @@
  * went non-manifold (GH); see the socket-deferral note below.
  */
 
+import { activePullTab, pullTabInRimShell } from '@/shared/utils/pullTabPlan';
+
 import { unwrap, fuse, cut, translate, withScope, getKernelCapabilities } from 'brepjs';
 import type { DisposalScope, Shape3D, ValidSolid } from 'brepjs';
 import type { PipelineContext, PipelineStage } from '../types';
@@ -23,6 +25,10 @@ import { SOCKET_HEIGHT } from '../../generatorConstants';
 import type { LightweightBase, LightweightOpenDirection } from '../../lightweightBaseBuilder';
 import { buildBinBox, buildTopShape } from '../../boxBuilder';
 import { buildBinBoxWithLip } from '../../integratedLipBuilder';
+import { roundTopRim } from '../../rimFilletBuilder';
+import { buildPullTab } from '../../pullTabBuilder';
+import { buildInteriorFillet, interiorFilletInRimShell } from '../../interiorFilletBuilder';
+import { interiorFilletRadiusMm } from '@/shared/utils/interiorFillet';
 import { maskHasHoles } from '../../maskPolygon';
 import { buildSpanningDividerClipTools, planSpanningDividerClips } from '../../labelTabBuilder';
 import { hasOverhang, overhangKey } from '../../overhang';
@@ -40,7 +46,7 @@ import {
   setShellCache,
 } from '../../shapeCache';
 import { FeatureTag } from '../../featureTags';
-import { collectOrigins } from '../collectOrigins';
+import { collectOrigins, tagUntaggedFaces } from '../collectOrigins';
 import {
   applyPinHoles,
   buildDetachablePinHoles,
@@ -134,7 +140,8 @@ export const shellStage: PipelineStage = {
         params.magnetAnchor,
         dim.floorThickness,
         magnetHoleStyleFrom(params.base),
-        dim.socketHeight
+        dim.socketHeight,
+        dim.cornerHolesOnly
       );
       floorOpenings = liteBase.floorOpenings;
     }
@@ -178,6 +185,7 @@ export const shellStage: PipelineStage = {
       // common case the integrated builder covers; everything else keeps the
       // exact-faithful fuse below. Draft-only: the export path is an exact kernel.
       const integratedLip =
+        !activePullTab(params) &&
         dim.hasLip &&
         !dim.omitLipSolid &&
         !dim.solid &&
@@ -191,11 +199,17 @@ export const shellStage: PipelineStage = {
         // wall too short to carry one has to take the fuse path, where
         // `buildTopShape` can be told to leave it off.
         dim.lipHasSupport &&
+        // Notches come from per-cell pockets the integrated cut tool has no
+        // equivalent for.
+        !dim.lipNotches &&
         // Same reasoning as the taper above: the integrated builder authors its
         // own lip profile and has no peak treatment, so a rounded or chamfered
         // tip would show in the export and not in the draft. Take the fuse path
         // and let `buildTopShape` own the finish for both.
         resolveLipTip(params.base) === 'sharp';
+      const notchGrid = dim.lipNotches
+        ? { fractionalEdgeX: params.fractionalEdgeX, fractionalEdgeY: params.fractionalEdgeY }
+        : undefined;
 
       let built = withScope((scope: DisposalScope) => {
         // Base-only bin: `boxWallHeight` is 0, and extruding a zero-length
@@ -247,7 +261,8 @@ export const shellStage: PipelineStage = {
               pitch,
               params.cellMask,
               dim.overhang,
-              resolveLipTip(params.base)
+              resolveLipTip(params.base),
+              notchGrid
             )
           );
           // Seated ON the slab top: `buildTopShape` hangs its own material
@@ -293,7 +308,10 @@ export const shellStage: PipelineStage = {
           compartmentCavityDrawings,
           compartmentCavityKey,
           dim.overhang,
-          dim.floorThickness
+          dim.floorThickness,
+          activePullTab(params)
+            ? { width: dim.innerW, depth: dim.innerD, x: dim.innerOffsetX, y: dim.innerOffsetY }
+            : undefined
         );
         collectOrigins(binBody, FeatureTag.BASE, originToTag);
 
@@ -312,7 +330,8 @@ export const shellStage: PipelineStage = {
                 pitch,
                 params.cellMask,
                 dim.overhang,
-                resolveLipTip(params.base)
+                resolveLipTip(params.base),
+                notchGrid
               )
             );
             const top = scope.register(translate(lipBase, [0, 0, boxWallHeight]));
@@ -338,6 +357,51 @@ export const shellStage: PipelineStage = {
         built = opened;
         floorOpenings.delete();
         floorOpenings = null;
+      }
+
+      // The interior fillet adds a full-height bonding skin. Fuse it before
+      // rounding or it would fill the rounded wall and divider edges back in.
+      if (interiorFilletInRimShell(params, dim)) {
+        const interior = buildInteriorFillet({
+          params,
+          dimensions: dim,
+          radius: interiorFilletRadiusMm(params),
+        });
+        if (interior) {
+          const positioned = translate(interior, [dim.innerOffsetX, dim.innerOffsetY, 0]);
+          try {
+            tagUntaggedFaces(positioned, FeatureTag.BASE);
+            const combined = unwrap(fuse(built as ValidSolid, positioned as ValidSolid));
+            built.delete();
+            built = combined;
+          } finally {
+            positioned.delete();
+            interior.delete();
+          }
+        }
+      }
+
+      // Round before the label clearance cuts interrupt the divider/rim junction.
+      // The shell key includes the effective radius, so cache hits retain it.
+      built = roundTopRim(built, params, dim);
+
+      // The tab has the same rim radius and short rounded wings that overlap
+      // the wall round. Join these finished surfaces here: rounding a raised
+      // wall and its perpendicular divider junction together can fail in OCCT.
+      if (pullTabInRimShell(params)) {
+        const tab = buildPullTab(ctx);
+        if (tab) {
+          const positioned = translate(tab, [dim.innerOffsetX, dim.innerOffsetY, 0]);
+          try {
+            tagUntaggedFaces(positioned, FeatureTag.BASE);
+            const combined = unwrap(fuse(built as ValidSolid, positioned as ValidSolid));
+            built.delete();
+            built = combined;
+          } finally {
+            positioned.delete();
+            tab.delete();
+          }
+        }
       }
 
       // Dividers baked into the shell by the multi-cavity cut still run to the
@@ -387,7 +451,8 @@ export const shellStage: PipelineStage = {
           params.cellMask,
           pitch,
           dim.socketCellPlan,
-          { x: params.fractionalEdgeX, y: params.fractionalEdgeY }
+          { x: params.fractionalEdgeX, y: params.fractionalEdgeY },
+          dim.overhang
         );
         if (relief) {
           try {
@@ -476,7 +541,8 @@ export const shellStage: PipelineStage = {
           { x: params.fractionalEdgeX, y: params.fractionalEdgeY },
           params.magnetAnchor,
           magnetHoleStyleFrom(params.base),
-          dim.socketHeight
+          dim.socketHeight,
+          dim.cornerHolesOnly
         );
     // `withScope` can't wrap this section (it must yield TWO survivors — body
     // and socket — on the preview path), so dispose manually on any throw to
@@ -540,7 +606,8 @@ export const shellStage: PipelineStage = {
             { x: params.fractionalEdgeX, y: params.fractionalEdgeY },
             params.magnetAnchor,
             magnetHoleStyleFrom(params.base),
-            dim.socketHeight
+            dim.socketHeight,
+            dim.cornerHolesOnly
           )}|${feetFused ? overhangKey(dim.overhang) : 'nofeet'}`;
 
       return { ...ctx, solid: body, deferredSolid: socket, deferredSolidKey };

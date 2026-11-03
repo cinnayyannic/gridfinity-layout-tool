@@ -19,7 +19,9 @@
  * Cell and ghost sub-components live in `CompartmentEditorParts.tsx`.
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { FieldLabel } from '../panel/shared';
+import { MoreDisclosure } from '@/shared/components/MoreDisclosure';
+import { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useDesignerStore } from '@/features/bin-designer/store';
 import { DESIGNER_CONSTRAINTS, WALL_THICKNESS_OPTIONS } from '@/features/bin-designer/constants';
@@ -78,7 +80,6 @@ export function CompartmentEditor() {
   );
 
   // Manual size entry is an advanced opt-in; the grid steppers are the default.
-  const [showSizer, setShowSizer] = useState(false);
 
   const handleColsChange = useCallback(
     (newCols: number) => {
@@ -189,9 +190,7 @@ export function CompartmentEditor() {
       <section className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <span className="mb-1 block text-xs text-content-tertiary">
-              {t('binDesigner.columns')}
-            </span>
+            <FieldLabel>{t('binDesigner.columns')}</FieldLabel>
             <Stepper
               value={cols}
               onChange={handleColsChange}
@@ -204,9 +203,7 @@ export function CompartmentEditor() {
             />
           </div>
           <div>
-            <span className="mb-1 block text-xs text-content-tertiary">
-              {t('binDesigner.rows')}
-            </span>
+            <FieldLabel>{t('binDesigner.rows')}</FieldLabel>
             <Stepper
               value={rows}
               onChange={handleRowsChange}
@@ -236,36 +233,14 @@ export function CompartmentEditor() {
 
         {/* Advanced: set the grid by a minimum compartment size in mm. */}
         <div>
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => setShowSizer((v) => !v)}
-            aria-expanded={showSizer}
-            className="flex items-center gap-1 rounded-none px-0 py-0 hover:bg-transparent text-label font-medium text-content-secondary hover:text-content"
-          >
-            <svg
-              className={`h-3 w-3 transition-transform ${showSizer ? 'rotate-90' : ''}`}
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-              aria-hidden="true"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-            {t('binDesigner.compartmentEditor.setBySize')}
-          </Button>
-
-          {showSizer && (
-            <div className="mt-2 space-y-2 border-l border-stroke-subtle pl-3">
+          <MoreDisclosure label={t('binDesigner.compartmentEditor.setBySize')}>
+            <div className="space-y-2">
               <span className="block text-xs text-content-tertiary">
                 {t('binDesigner.compartmentEditor.smallestOpening')}
               </span>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <span className="mb-1 block text-xs text-content-tertiary">
-                    {t('binDesigner.compartmentEditor.openingWidth')}
-                  </span>
+                  <FieldLabel>{t('binDesigner.compartmentEditor.openingWidth')}</FieldLabel>
                   <DeferredNumberInput
                     value={achievedMinW}
                     onChange={applyTargetWidth}
@@ -278,9 +253,7 @@ export function CompartmentEditor() {
                   />
                 </div>
                 <div>
-                  <span className="mb-1 block text-xs text-content-tertiary">
-                    {t('binDesigner.compartmentEditor.openingDepth')}
-                  </span>
+                  <FieldLabel>{t('binDesigner.compartmentEditor.openingDepth')}</FieldLabel>
                   <DeferredNumberInput
                     value={achievedMinD}
                     onChange={applyTargetDepth}
@@ -299,7 +272,7 @@ export function CompartmentEditor() {
                 {t('binDesigner.compartmentEditor.tileEvenlyNote')}
               </p>
             </div>
-          )}
+          </MoreDisclosure>
         </div>
       </section>
 

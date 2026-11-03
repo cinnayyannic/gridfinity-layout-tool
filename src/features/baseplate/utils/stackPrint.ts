@@ -4,11 +4,14 @@
  */
 
 import type { StackPrintParams } from '@/core/types';
-import { STACK_PRINT_MAX_STACK_HEIGHT } from '@/core/types';
+import { STACK_PRINT_MAX_STACK_HEIGHT, STACK_SEAM_TRIM_MM } from '@/core/types';
 import type { ResolvedBaseplateParams } from '@/shared/types/bin';
 import { effectiveCornerRadii } from '@/shared/generation/baseplateCorners';
+import { plateProfileHeightMm } from '@/shared/printSettings/gridfinityGeometry';
 import type { BaseplateTiling } from '../types/tiling';
 import { groupPiecesByFingerprint } from './pieceFingerprint';
+import { plainRoundingLimit } from './buildFullParams';
+import { turnedPlateOverhangMm } from './plateTurnOverhang';
 
 /** Non-null mesh buffers (xyz-interleaved positions/normals, line-pair edges). */
 export interface StackMeshArrays {
@@ -68,6 +71,14 @@ export function isUnstackedSplit(plan: readonly PhysicalStack[], pieceCount: num
   if (plan.length !== pieceCount) return false;
   if (!plan.every((s) => s.copies === 1)) return false;
   return new Set(plan.map((s) => s.label)).size === plan.length;
+}
+
+/**
+ * A stacked plate's printed height. Stacking strips every floor (magnets, screws,
+ * solid floor), so this is the pocket profile less the seam trim.
+ */
+export function stackedPlateHeightMm(lowProfileBase: boolean | undefined): number {
+  return plateProfileHeightMm(lowProfileBase) - STACK_SEAM_TRIM_MM;
 }
 
 /**
@@ -167,7 +178,16 @@ export interface PlateFlip {
    * extent, the sliver for a fractional one.
    */
   readonly offsetMm: number;
+  /** Turn the bottom plate over too, so every copy shares one orientation. */
+  readonly flipBottom?: boolean;
 }
+
+/**
+ * Deepest a turned shaped plate may reach past the one below it and still
+ * print on it. Clears the few hundredths a mirrored arc flattens differently;
+ * an asymmetric perimeter misses by a cell or a corner cut.
+ */
+const SHAPED_SEAM_OVERHANG_TOLERANCE_MM = 1;
 
 /** Turn about X with no seat — correct for any whole-unit plate. */
 export const DEFAULT_PLATE_FLIP: PlateFlip = { axis: 'x', offsetMm: 0 };
@@ -185,6 +205,8 @@ export type PlateFlipInput = Pick<
   | 'paddingFront'
   | 'paddingBack'
   | 'outline'
+  | 'outlineOverhang'
+  | 'outlineIsCornerRounding'
   | 'cornerRadius'
   | 'cornerRadii'
   | 'edges'
@@ -234,8 +256,11 @@ function turnCost(
  *
  * Rounded corners only break a tie the padding leaves open: a full-width row
  * rounds its two outer corners, which the Y turn swaps with each other and the
- * X turn carries to the far edge. A custom perimeter's mirror symmetry isn't
- * derivable, so a shaped plate is judged on its padding like any other.
+ * X turn carries to the far edge.
+ *
+ * A shaped plate must also be symmetric about the turn: a turned copy is the
+ * plate's mirror image in plan view, so an L turned over is a mirrored L with
+ * cells over air.
  */
 export function planPlateFlip(params: PlateFlipInput): PlateFlip {
   const aboutX = turnCost(
@@ -257,15 +282,46 @@ export function planPlateFlip(params: PlateFlipInput): PlateFlip {
   const roundingY = r.tl === r.tr && r.bl === r.br;
   const tie = Math.abs(aboutY.overhangMm - aboutX.overhangMm) < 1e-9;
   const preferY = tie ? roundingY && !roundingX : aboutY.overhangMm < aboutX.overhangMm;
-  return preferY ? { axis: 'y', offsetMm: aboutY.seatMm } : { axis: 'x', offsetMm: aboutX.seatMm };
+  const x: PlateFlip = { axis: 'x', offsetMm: aboutX.seatMm };
+  const y: PlateFlip = { axis: 'y', offsetMm: aboutY.seatMm };
+  const [first, second] = preferY ? [y, x] : [x, y];
+  if (params.outline === undefined) return first;
+  const lands = (f: PlateFlip): boolean =>
+    turnedPlateOverhangMm(params, f.axis, f.offsetMm, SHAPED_SEAM_OVERHANG_TOLERANCE_MM) <=
+    SHAPED_SEAM_OVERHANG_TOLERANCE_MM;
+  if (lands(first)) return first;
+  if (lands(second)) return second;
+  // A plain-rounded corner, which stops at its cell's center, prints upright
+  // while hanging (√2 − 1)·limit past a square one. A rounding cut as an
+  // outline gets the same allowance on top of the padding the turn already
+  // shifts; a larger radius strips cells and turns the bottom plate.
+  if (params.outlineIsCornerRounding) {
+    const minPadding = Math.min(
+      params.paddingLeft,
+      params.paddingRight,
+      params.paddingFront,
+      params.paddingBack
+    );
+    const corner = (Math.SQRT2 - 1) * plainRoundingLimit(params.gridUnitMm, minPadding);
+    for (const f of [first, second]) {
+      const allowance =
+        SHAPED_SEAM_OVERHANG_TOLERANCE_MM +
+        (f.axis === 'x' ? aboutX.overhangMm : aboutY.overhangMm) +
+        corner;
+      if (turnedPlateOverhangMm(params, f.axis, f.offsetMm, allowance) <= allowance) return f;
+    }
+  }
+  return { ...first, flipBottom: true };
 }
 
 /**
  * Build the meshes for one printed tower of `copies` plates. The bottom plate
- * stays upright (best bed adhesion, no overhang); every plate above it is
- * flipped upside down — community practice that minimizes overhangs while the
- * air gap lets the tower snap apart (see the baseplate README). Every copy's
- * socket lattice lands on the one below it, and the bottom sits at Z=0.
+ * stays upright for bed adhesion unless `flip.flipBottom` turns it too in a
+ * tower of two or more; every
+ * plate above it is flipped upside down, community practice that minimizes
+ * overhangs while the air gap lets the tower snap apart (see the baseplate
+ * README). Every copy's socket lattice lands on the one below it, and the
+ * bottom sits at Z=0.
  *
  * `flip` comes from {@link planPlateFlip}: the turn negates one lateral axis
  * about 0, where the socket lattice is centred, and `flip.offsetMm` seats a
@@ -292,10 +348,11 @@ export function buildTowerLayers(
     flip.axis === 'x' ? flip.offsetMm : 0,
     -b.minZ
   );
+  // A lone plate has no copy to coincide with, so it keeps its flat underside on the bed.
+  const bottom = flip.flipBottom === true && n > 1 ? flipped : upright;
   const layers: StackMeshArrays[] = [];
   for (let i = 0; i < n; i++) {
-    const src = i === 0 ? upright : flipped;
-    layers.push(i === 0 ? src : translateMesh(src, 0, 0, i * strideMm));
+    layers.push(i === 0 ? bottom : translateMesh(flipped, 0, 0, i * strideMm));
   }
   return layers;
 }

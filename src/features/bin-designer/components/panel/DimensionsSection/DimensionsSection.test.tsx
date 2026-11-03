@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { DimensionsSection } from './DimensionsSection';
 import { useDesignerStore } from '@/features/bin-designer/store';
 import { DEFAULT_BIN_PARAMS, DEFAULT_UI_STATE } from '@/features/bin-designer/constants';
@@ -26,6 +26,57 @@ describe('DimensionsSection', () => {
     render(<DimensionsSection />);
     expect(screen.getByLabelText('Extra wall height')).toBeInTheDocument();
     expect(screen.getByText('8 mm')).toBeInTheDocument();
+  });
+
+  it('says what a height unit is in millimetres', () => {
+    render(<DimensionsSection />);
+    expect(
+      screen.getByText((_, el) => el?.tagName === 'SPAN' && el.textContent === '3u · 21 mm')
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /About Height/ }));
+    expect(screen.getByText(/1u is 7 mm/)).toBeVisible();
+  });
+
+  it('tells a touch screen that wall patterns skip the extra wall height', () => {
+    render(<DimensionsSection />);
+    fireEvent.click(screen.getByRole('button', { name: /About Extra wall height/ }));
+    expect(screen.getByText(/raise Height instead/)).toBeVisible();
+  });
+
+  it('shows the inside size under the outside size', () => {
+    render(<DimensionsSection />);
+    expect(screen.getByText('84 × 84 × 21 mm')).toBeInTheDocument();
+    expect(screen.getByText('Inside')).toBeInTheDocument();
+    expect(screen.getByText('81.1 × 81.1 × 14 mm')).toBeInTheDocument();
+  });
+
+  it('explains what the inside size leaves out behind a dot a touch screen can open', () => {
+    render(<DimensionsSection />);
+    expect(screen.queryByText(/before dividers, scoops and label tabs/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /About Inside/ }));
+    expect(screen.getByText(/before dividers, scoops and label tabs/)).toBeVisible();
+  });
+
+  it('gives a flat base more inside height than a socketed one', () => {
+    useDesignerStore.setState({
+      params: {
+        ...DEFAULT_BIN_PARAMS,
+        base: { ...DEFAULT_BIN_PARAMS.base, style: 'flat' },
+      },
+    });
+    render(<DimensionsSection />);
+    expect(screen.getByText('81.1 × 81.1 × 19.8 mm')).toBeInTheDocument();
+  });
+
+  it('hides the inside size for a solid block, which has no cavity', () => {
+    useDesignerStore.setState({
+      params: {
+        ...DEFAULT_BIN_PARAMS,
+        base: { ...DEFAULT_BIN_PARAMS.base, solid: true },
+      },
+    });
+    render(<DimensionsSection />);
+    expect(screen.queryByText('Inside')).not.toBeInTheDocument();
   });
 
   it('hides the half-unit edge controls for whole-unit bins', () => {

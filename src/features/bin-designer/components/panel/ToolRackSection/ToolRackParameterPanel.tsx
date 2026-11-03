@@ -4,7 +4,8 @@
  * store's `updateEnvelope` / `updateStructure` actions.
  */
 import { useShallow } from 'zustand/react/shallow';
-import { Button, Stepper, Switch } from '@/design-system';
+import { Button, Stepper } from '@/design-system';
+import { FeatureToggle } from '../FeatureToggle';
 import { clamp } from '@/shared/utils/math';
 import { useTranslation } from '@/i18n';
 import { useDesignerStore } from '@/features/bin-designer/store';
@@ -12,7 +13,8 @@ import { StickyGroupHeader } from '../StickyGroupHeader';
 import { PanelSection } from '../PanelSection';
 import { MAX_RACK_FIN_ANGLE } from '@/shared/items/toolRack/descriptor';
 import { bridgeManager } from '@/shared/generation/bridge';
-import { triggerDownload } from '@/shared/generation/exportUtils';
+import { deliverExport } from '@/shared/exportDestination/deliverExport';
+import { primeExportFolder } from '@/shared/exportDestination/exportFolder';
 import type { GridfinityItem } from '@/shared/types/item';
 
 type RackExportFormat = 'stl' | 'step';
@@ -60,12 +62,13 @@ export function ToolRackParameterPanel() {
   if (!envelope || structure?.kind !== 'toolRack') return null;
 
   const exportRack = async (format: RackExportFormat): Promise<void> => {
+    primeExportFolder();
     const item: GridfinityItem = { envelope, structure };
     const bridge = await bridgeManager.acquire();
     try {
       const result = await bridge.exportItem(item, format);
       const mime = format === 'step' ? 'application/step' : 'application/sla';
-      triggerDownload(new Blob([result.data], { type: mime }), result.fileName);
+      void deliverExport(new Blob([result.data], { type: mime }), result.fileName);
     } finally {
       bridgeManager.release();
     }
@@ -158,16 +161,15 @@ export function ToolRackParameterPanel() {
               </div>
             </PanelSection>
             <PanelSection>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-content">{t('binDesigner.rack.backRail')}</span>
-                <Switch
-                  checked={structure.backRail.enabled}
-                  onChange={(enabled) =>
-                    updateStructure({ backRail: { ...structure.backRail, enabled } })
-                  }
-                  aria-label={t('binDesigner.rack.backRail')}
-                />
-              </div>
+              <FeatureToggle
+                label={t('binDesigner.rack.backRail')}
+                checked={structure.backRail.enabled}
+                onChange={() =>
+                  updateStructure({
+                    backRail: { ...structure.backRail, enabled: !structure.backRail.enabled },
+                  })
+                }
+              />
               {structure.backRail.enabled && (
                 <div className="mt-3">
                   <NumberField
@@ -184,16 +186,18 @@ export function ToolRackParameterPanel() {
               )}
             </PanelSection>
             <PanelSection>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-content">{t('binDesigner.rack.magnetHoles')}</span>
-                <Switch
-                  checked={envelope.attachment.magnetHoles}
-                  onChange={(magnetHoles) =>
-                    updateEnvelope({ attachment: { ...envelope.attachment, magnetHoles } })
-                  }
-                  aria-label={t('binDesigner.rack.magnetHoles')}
-                />
-              </div>
+              <FeatureToggle
+                label={t('binDesigner.rack.magnetHoles')}
+                checked={envelope.attachment.magnetHoles}
+                onChange={() =>
+                  updateEnvelope({
+                    attachment: {
+                      ...envelope.attachment,
+                      magnetHoles: !envelope.attachment.magnetHoles,
+                    },
+                  })
+                }
+              />
             </PanelSection>
           </div>
         </StickyGroupHeader>

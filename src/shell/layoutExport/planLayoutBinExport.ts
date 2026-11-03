@@ -20,6 +20,7 @@ import { generateFileName } from '@/features/bin-designer';
 // Deep import (not the barrel): the bin-designer barrel is eagerly loaded by App,
 // and this code only runs inside the lazy layout-export chunk.
 import { shouldGenerateLid } from '@/features/bin-designer/utils/lidCompatibility';
+import { sanitizeFileName } from '@/features/bin-designer/utils/fileNaming';
 import { hasDetachableFeet } from '@/shared/types/bin';
 import { shouldGenerateKnifeRest } from '@/shared/utils/knifeRestPlan';
 import { getSplitPieceCount, getSplitPlanePositionsMm } from '@/shared/utils/splitPositions';
@@ -29,7 +30,7 @@ import { withLowProfileBase } from '@/shared/generation/lowProfileBase';
 import { resolveBinOverhang } from '@/shared/utils/drawerMargin';
 import { overhangKey as resolvedOverhangKey, resolveOverhang } from '@/shared/utils/overhang';
 import type { ExportFileFormat, ExportFileNameConfig } from '@/shared/types/bin';
-import type { MeshAsset } from '@/shared/generation/meshAsset';
+import type { MeshAssetEntry } from '@/shared/generation/meshAsset';
 import { hasMeshImprints } from '@/shared/generation/meshAsset';
 import { importedMeshDescriptor } from '@/shared/items/importedMesh/descriptor';
 import { assemblyDescriptor } from '@/shared/items/assembly/descriptor';
@@ -44,6 +45,9 @@ import {
 } from '@/shared/printSettings/standardBinVolume';
 import { dedupeFileNames } from './dedupeFileNames';
 import type { ManifestBinEntry, ManifestSkipped } from './buildLayoutManifest';
+import { normalizeSlant, planSlantSupport } from '@/shared/utils/slantPlan';
+import { isTurnedPlacement, sideInDesign } from '@/shared/utils/placementTurn';
+import { placementCaption, withPlacedTabCaption } from '@/shared/utils/placedCaption';
 
 /** A linked design id resolved against storage; `design` is null when it failed to load. */
 export interface LoadedDesign {
@@ -79,7 +83,7 @@ export interface LayoutExportable {
 /** An imported-mesh design to export: the stored asset IS the geometry —
  *  decoded and re-serialized on the main thread, no worker round-trip. */
 export interface LayoutMeshExportable {
-  readonly asset: MeshAsset;
+  readonly asset: MeshAssetEntry;
   /** ZIP path, e.g. `bins/widget_bin.stl`. */
   readonly path: string;
   readonly quantity: number;
@@ -143,10 +147,15 @@ function binCompanions(params: BinParams): string[] {
   // Same for a knife block's handle rest: a second solid the body-only path
   // cannot produce.
   if (shouldGenerateKnifeRest(params)) companions.push('knife-rest');
+  if (planSlantSupport(params)) companions.push('slant-support');
   if (params.style === 'slotted' && (params.slotConfig.x.enabled || params.slotConfig.y.enabled)) {
     companions.push('dividers');
   }
   return companions;
+}
+
+function placedSlantKey(slant: Bin['slant']): string {
+  return slant ? `${slant.angleDeg}:${slant.side}:${slant.endSupport === true ? 's' : ''}` : '';
 }
 
 /** Stable identity for a resolved overhang so bins with identical extension
@@ -175,16 +184,33 @@ function posToken(value: number): string {
  * `WxDxH` token, so an `x`-prefixed suffix would read as another dimension.
  */
 function withPositionSuffix(name: string, x: number, y: number): string {
+  return withNameSuffix(name, `_pos${posToken(x)}-${posToken(y)}`);
+}
+
+/**
+ * Name a variant after the layout label it prints, which is how the user tells
+ * the files apart. Companion parts are written as `<body>_<part>` and only body
+ * names are deduped, so the label sits in parentheses: no `_<part>` suffix can
+ * end in one, which keeps a bin labelled "lid" off the plain variant's lid file
+ * and "Screws_lid" off the "Screws" variant's.
+ */
+function withCaptionSuffix(name: string, caption: string): string {
+  return withNameSuffix(name, ` (${sanitizeFileName(caption).replace(/[()]/g, '')})`);
+}
+
+function withNameSuffix(name: string, suffix: string): string {
   const dot = name.lastIndexOf('.');
   const base = dot === -1 ? name : name.slice(0, dot);
   const ext = dot === -1 ? '' : name.slice(dot);
-  return `${base}_pos${posToken(x)}-${posToken(y)}${ext}`;
+  return `${base}${suffix}${ext}`;
 }
 
 interface BinExportGroup {
   readonly design: SavedDesign;
   readonly params: BinParams;
   readonly extended: boolean;
+  /** The layout label printed in the design's blank caption; null when it prints its own. */
+  readonly caption: string | null;
   quantity: number;
   /**
    * Every grid position this group's mesh is placed at. A group is keyed by
@@ -264,10 +290,11 @@ export function planLayoutBinExport(input: LayoutBinExportInput): LayoutBinExpor
     designById.set(id, design);
   }
 
-  // Group linked bins by (design, resolved overhang). A bin that carries an
-  // explicit overhang or extends into the drawer margin forms its own group;
-  // identical bins (extended or not) still share one mesh. The overhang
-  // REPLACES the design's own overhang for that instance.
+  // Group linked bins by (design, resolved overhang, placed slant, placed
+  // caption). A bin that carries an explicit overhang or extends into the
+  // drawer margin forms its own group; identical bins (extended or not) still
+  // share one mesh. The overhang REPLACES the design's own overhang for that
+  // instance.
   const groups = new Map<string, BinExportGroup>();
   const usable: BinExportGroup[] = [];
   // Designs a STEP export cannot represent because their pocket is carved out
@@ -292,10 +319,25 @@ export function planLayoutBinExport(input: LayoutBinExportInput): LayoutBinExpor
     // overriding any value saved on the design, so exported bins mate with the
     // baseplate.
     const layoutParams = withLowProfileBase(design.params, lowProfileBase);
-    const params: BinParams = overhang
+    const fitted: BinParams = overhang
       ? { ...layoutParams, overhang, magnetAnchor }
       : { ...layoutParams, magnetAnchor };
-    const key = `${b.linkedDesignId}|${overhangKey(overhang)}`;
+    // A placed slant replaces the design's own, so the last bin of a row can
+    // carry the end support its design does not; then the lip goes, as it
+    // does for any slanted design. It faces the drawer, so a design that
+    // stands turned prints it turned back.
+    const placed =
+      b.slant && isTurnedPlacement(b, design.params)
+        ? { ...b.slant, side: sideInDesign(b.slant.side) }
+        : b.slant;
+    const slanted = normalizeSlant(placed ? { ...fitted, slant: placed } : fitted);
+    const params = withPlacedTabCaption(slanted, b.label);
+    // Keyed only when the label reaches the mesh, so every other design still
+    // ships one file for all its bins.
+    const caption = params === slanted ? null : placementCaption(b.label);
+    const key = `${b.linkedDesignId}|${overhangKey(overhang)}|${placedSlantKey(placed)}${
+      caption === null ? '' : `|${caption}`
+    }`;
     const existing = groups.get(key);
     if (existing) {
       existing.quantity++;
@@ -306,6 +348,7 @@ export function planLayoutBinExport(input: LayoutBinExportInput): LayoutBinExpor
       design,
       params,
       extended: overhang !== null,
+      caption,
       quantity: 1,
       positions: [{ x: b.x, y: b.y }],
     };
@@ -369,12 +412,13 @@ export function planLayoutBinExport(input: LayoutBinExportInput): LayoutBinExpor
   // silently collide with a parametric design of the same stem.
   const fileNames = dedupeFileNames([
     ...usable.map((u) => {
-      const name = generateFileName(
+      const generated = generateFileName(
         u.params,
         format,
         u.design.exportFileNameConfig ?? fileNameConfig,
         u.design.name
       );
+      const name = u.caption === null ? generated : withCaptionSuffix(generated, u.caption);
       return u.extended ? withPositionSuffix(name, u.positions[0].x, u.positions[0].y) : name;
     }),
     ...meshUsable.map(

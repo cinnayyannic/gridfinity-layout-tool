@@ -4,29 +4,24 @@ import {
   useInteractionStore,
   useHalfGridModeStore,
   useToastStore,
+  useLibraryStore,
+  useSharedPreviewStore,
 } from '@/core/store';
 import { useBinExampleGalleryStore } from '@/core/store/binExampleGallery';
 import { useGapFitStore } from '@/core/store/gapFit';
 import { canPlaceBin, getPlacementErrorMessage } from '@/shared/utils/validation';
-import { getLayerZStartResult } from '@/shared/utils/collision';
-import { snapToGrid } from '@/core/constants';
-import { effectiveGridUnitMmY } from '@/core/types';
+import { maxPlaceableHeight } from '@/shared/utils/validationPlacement';
+import { CONSTRAINTS, snapToGrid } from '@/core/constants';
+import { binId, effectiveGridUnitMmY, heightUnits } from '@/core/types';
 import { snapDrawRect } from '@/shared/utils/snap';
 import { capturePointer } from './interaction';
+import { paintSlantedRows } from './paintSlantedRows';
 import { isOk } from '@/core/result';
 import { useTranslation } from '@/i18n';
 import { mlTracking } from '@/shared/analytics/useMLTracking';
 import { trackBinCreated, trackPaintMode } from '@/shared/analytics/posthog';
 import type { InteractionContext, ModeHandlers, DrawStartArgs } from './types';
-import type {
-  BinId,
-  Coord,
-  FitsGapSource,
-  GridUnits,
-  HeightUnits,
-  Bin,
-  ValidationResult,
-} from '@/core/types';
+import type { BinId, Coord, FitsGapSource, GridUnits, Bin, ValidationResult } from '@/core/types';
 
 /**
  * Hook for draw mode interactions: creating new bins by dragging a rectangle.
@@ -57,6 +52,7 @@ export function useDrawInteraction(context: InteractionContext): ModeHandlers<Dr
     activeLayerId,
     activeCategoryId,
     paintSize,
+    paintSlant,
     setInteraction,
     setSelectedBin,
     setSelectedBins,
@@ -86,6 +82,7 @@ export function useDrawInteraction(context: InteractionContext): ModeHandlers<Dr
           paintSize,
           start: coord,
           current: coord,
+          ...(paintSlant ? { slant: paintSlant } : {}),
         });
         return;
       }
@@ -98,7 +95,7 @@ export function useDrawInteraction(context: InteractionContext): ModeHandlers<Dr
         ...(fitsGap !== undefined ? { fitsGap } : {}),
       });
     },
-    [paintSize, setInteraction, activePointerIdRef, capturedPointerRef]
+    [paintSize, paintSlant, setInteraction, activePointerIdRef, capturedPointerRef]
   );
 
   /**
@@ -159,37 +156,48 @@ export function useDrawInteraction(context: InteractionContext): ModeHandlers<Dr
           }
           // Gap selection: hand the drawn empty region to the community
           // gallery instead of creating a bin. Clamp to the empty area first
-          // so dragging across a bin still yields a usable gap.
+          // so dragging across a bin still yields a usable gap. Snapped at the
+          // shortest bin, since the gallery picks a height to fit the gap.
           const snapped = snapDrawRect(
             x1,
             y1,
             width,
             depth,
-            layer.height,
+            heightUnits(CONSTRAINTS.MIN_BIN_HEIGHT),
             activeLayerId,
             layout,
             minSizeNow
           );
-          const zStartResult = getLayerZStartResult(activeLayerId, layout.layers);
-          if (!isOk(zStartResult)) return;
-          const maxHeight = (layout.drawer.height - zStartResult.value) as HeightUnits;
-          // Probe with the full remaining stack budget: confirms the clamped
-          // footprint itself is placeable (blocked zones included) before the
-          // gallery ever opens.
-          const probe: ValidationResult =
-            maxHeight > 0
-              ? canPlaceBin(
-                  {
-                    x: x1 as GridUnits,
-                    y: y1 as GridUnits,
-                    width: snapped.width as GridUnits,
-                    depth: snapped.depth as GridUnits,
-                    height: maxHeight,
-                  },
-                  activeLayerId,
-                  layout
-                )
-              : { valid: false, reason: 'exceeds_height' };
+          const gap = {
+            x: x1 as GridUnits,
+            y: y1 as GridUnits,
+            width: snapped.width as GridUnits,
+            depth: snapped.depth as GridUnits,
+          };
+          // The gallery sizes the bin to fit, so the gap only needs the
+          // tallest height that still places there, clearance included.
+          const maxHeight = heightUnits(
+            maxPlaceableHeight(
+              {
+                ...gap,
+                id: binId('__gap__'),
+                layerId: activeLayerId,
+                height: heightUnits(CONSTRAINTS.MIN_BIN_HEIGHT),
+                category: activeCategoryId,
+                label: '',
+                notes: '',
+              },
+              layout
+            )
+          );
+          const probe: ValidationResult = canPlaceBin(
+            {
+              ...gap,
+              height: heightUnits(Math.max(maxHeight, CONSTRAINTS.MIN_BIN_HEIGHT)),
+            },
+            activeLayerId,
+            layout
+          );
           if (!probe.valid) {
             addToast(getPlacementErrorMessage(t, probe.reason, probe.blockingInfo), 'error');
             return;
@@ -253,6 +261,54 @@ export function useDrawInteraction(context: InteractionContext): ModeHandlers<Dr
       const halfGridModeNow = useHalfGridModeStore.getState().halfGridMode;
       const minSizeNow = halfGridModeNow ? 0.5 : 1;
       const layer = layout.layers.find((l) => l.id === activeLayerId);
+
+      const rowSlant = interaction.slant;
+      if (rowSlant && layer) {
+        const layoutId = useLibraryStore.getState().library.activeLayoutId;
+        const editorLayoutId = useLayoutStore.getState().activeLayoutId;
+        const preview = useSharedPreviewStore.getState().sharedPreview;
+        void paintSlantedRows({
+          layout,
+          layerId: activeLayerId,
+          categoryId: activeCategoryId,
+          size: ps,
+          slant: rowSlant,
+          start,
+          current,
+          minSize: minSizeNow,
+          addBin,
+          execute,
+          onPlaced: (ids) => {
+            setSelectedBins(ids);
+            const byId = new Set(ids);
+            const placed = useLayoutStore.getState().layout.bins.filter((b) => byId.has(b.id));
+            mlTracking.trackBulkCreation(placed, 'paint');
+            trackPaintMode('exited', ids.length);
+          },
+          onFailed: (reason) =>
+            addToast({
+              message: t(`layers.slantedRow.${reason}`),
+              type: reason === 'saveFailed' ? 'error' : 'info',
+            }),
+          // A shared preview swaps the editor's layout without touching the
+          // library, and every preview opens under the same editor id.
+          stillCurrent: () => {
+            const editor = useLayoutStore.getState();
+            return (
+              editor.activeLayoutId === editorLayoutId &&
+              useLibraryStore.getState().library.activeLayoutId === layoutId &&
+              useSharedPreviewStore.getState().sharedPreview === preview &&
+              editor.layout.categories.some((c) => c.id === activeCategoryId)
+            );
+          },
+          designName: (height) =>
+            t('layers.slantedRow.designName', {
+              size: `${ps.width}×${ps.depth}×${height}`,
+              angle: rowSlant.angleDeg,
+            }),
+        });
+        return;
+      }
 
       // Single-click placement: when user clicks without dragging, place one bin
       // centered on the clicked position, clamped to drawer bounds

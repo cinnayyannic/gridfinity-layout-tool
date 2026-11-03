@@ -5,20 +5,31 @@
  * PipelineContext that flows through all pipeline stages.
  */
 
+import {
+  activePullTab,
+  pullTabWallFields,
+  pullTabWallInset,
+  pullTabInRimShell,
+  resolvePullTabWalls,
+} from '@/shared/utils/pullTabPlan';
+
 import type { BinParams } from '@/shared/types/bin';
 import {
   hasDetachableFeet,
-  binFloorMm,
   hasDividerLean,
   isUndersideRelief,
   resolveLipTip,
   resolveTileFloorThickness,
 } from '@/shared/types/bin';
 import { hashMask, isPartialMask } from '@/shared/utils/cellMask';
-import { dividerGrooveDepth } from '@/shared/utils/slotMath';
+import { withResolvedCutoutDepths } from '@/shared/utils/cutoutDepth';
+import { dividerGrooveDepth, resolveBinFloorMm } from '@/shared/utils/slotMath';
 import { isSlottedBody } from '@/shared/utils/slotFreeWalls';
+import { effectiveRimFilletRadius } from '@/shared/utils/rimFillet';
+import { interiorFilletRadiusMm } from '@/shared/utils/interiorFillet';
 import { isFractional } from '@/core/constants';
 import { resolveDetachableFeet } from '@/shared/utils/detachableFeetPlan';
+import { resolveLipNotches } from '@/shared/utils/lipNotchPlan';
 import {
   HEIGHT_UNIT,
   CLEARANCE,
@@ -43,7 +54,7 @@ import { planSpanningDividerClips, spanningDividerClipsKey } from '../labelTabBu
 // callers (or serialized designs) that predate heightUnitMm. The grid-unit
 // fallback now lives in `pitchFromParams` (gridPitch.ts).
 import type { ProgressFn } from '../meshUtils';
-import { buildCacheKey, quantize, compactKey } from '../cacheKeyUtils';
+import { buildCacheKey, quantize, compactKey, stableSerialize } from '../cacheKeyUtils';
 import { resolveSocketCellPlan, socketCellPlanKey } from '../socketBuilder';
 import type { BinDimensions, PipelineContext } from './types';
 import type { PerfCollector } from './perfCollector';
@@ -92,7 +103,7 @@ export function deriveDimensions(
   // is skipped too, and the export is a flat-bottomed box with no feet part.
   const detachableFeet =
     hasDetachableFeet(params.base) && resolveDetachableFeet(params).placements.length > 0;
-  const floorThickness = binFloorMm(params.wallThickness);
+  const floorThickness = resolveBinFloorMm(params);
   // User flag only. When the mask has mixed half-bin detail, the socket
   // builder does a per-cell dispatch using the mask — it splits only
   // those 1u cells that straddle a half-bin boundary into quarter
@@ -195,10 +206,13 @@ export function deriveDimensions(
   const overhang = resolveOverhang(isPartialMask(cellMask) ? undefined : params.overhang);
   const ovhExp = hasOverhang(overhang) ? overhangExpansion(overhang) : null;
 
-  const innerW = outerW + (ovhExp?.addW ?? 0) - 2 * params.wallThickness;
-  const innerD = outerD + (ovhExp?.addD ?? 0) - 2 * params.wallThickness;
-  const innerOffsetX = ovhExp?.offsetX ?? 0;
-  const innerOffsetY = ovhExp?.offsetY ?? 0;
+  const inset = pullTabWallInset(params);
+  const innerW =
+    outerW + (ovhExp?.addW ?? 0) - 2 * params.wallThickness - (inset.left + inset.right);
+  const innerD =
+    outerD + (ovhExp?.addD ?? 0) - 2 * params.wallThickness - (inset.front + inset.back);
+  const innerOffsetX = (ovhExp?.offsetX ?? 0) - (inset.right - inset.left) / 2;
+  const innerOffsetY = (ovhExp?.offsetY ?? 0) + (inset.front - inset.back) / 2;
   const isSlotted = isSlottedBody(params);
   const grooveDepth = liteFloorOpen ? 0 : dividerGrooveDepth(params);
 
@@ -212,6 +226,7 @@ export function deriveDimensions(
     !noAttachment && (params.base.style === 'magnet' || params.base.style === 'magnet_and_screw');
   const withScrew =
     !noAttachment && (params.base.style === 'screw' || params.base.style === 'magnet_and_screw');
+  const cornerHolesOnly = (withMagnet || withScrew) && params.base.cornerHolesOnly === true;
 
   // Nothing under the body once the feet come off. The printed part is
   // SOCKET_HEIGHT shorter than the assembly, which is why `assembledHeight`
@@ -230,6 +245,7 @@ export function deriveDimensions(
   // Resolved once here so the cache key and the builders cannot disagree about
   // which finish this shell carries.
   const lipTip = resolveLipTip(params.base);
+  const lipNotches = resolveLipNotches(params);
   // Material actually under the lip. A base-only bin's lip bears on its floor
   // slab, not on a wall; every other base carries it on the collar-extended wall
   // the box is extruded to. See `lipHasSupport` for what the number decides.
@@ -323,9 +339,50 @@ export function deriveDimensions(
       )
     : '';
 
+  const rimTab = pullTabInRimShell(params) ? activePullTab(params) : null;
+  // In the stored form a front or right tab alone is written, so a center tab
+  // added beside it leaves this key alone.
+  const rimWalls = pullTabWallFields(
+    (rimTab ? resolvePullTabWalls(rimTab) : []).filter((wall) => wall !== 'center')
+  );
   const shellKey = compactKey(
     buildCacheKey(
       'v7',
+      ...(inset.left || inset.right || inset.front || inset.back
+        ? [
+            `pull-wall:${inset.right}:${inset.front}` +
+              (inset.left || inset.back ? `:${inset.left}:${inset.back}` : ''),
+          ]
+        : []),
+      ...(effectiveRimFilletRadius(params) > 0
+        ? [
+            `rim-v7-${quantize(effectiveRimFilletRadius(params))}`,
+            ...(rimTab
+              ? [
+                  stableSerialize([
+                    rimWalls.wall,
+                    ...(rimWalls.walls ? [rimWalls.walls] : []),
+                    rimTab.thickness,
+                    rimTab.width,
+                    rimTab.widthMode,
+                    rimTab.widthPercent,
+                    rimTab.height,
+                    rimTab.topRadius,
+                    rimTab.rootRadius,
+                  ]),
+                ]
+              : []),
+            ...(interiorFilletRadiusMm(params) > 0
+              ? [
+                  quantize(interiorFilletRadiusMm(params)),
+                  params.style,
+                  stableSerialize(params.compartments),
+                  stableSerialize(params.scoop),
+                  stableSerialize(params.walls),
+                ]
+              : []),
+          ]
+        : []),
       quantize(params.width),
       quantize(params.depth),
       quantize(gridUnitX),
@@ -382,6 +439,7 @@ export function deriveDimensions(
       // body, and a 1u body can floor its wall at MIN_BODY_WALL_MM in both
       // profiles. Appended only when set, so standard keys stay byte-identical.
       ...(params.base.lowProfile === true && !socketless ? ['lowprofile'] : []),
+      ...(cornerHolesOnly ? ['corner-holes'] : []),
       // The one thing `omitLipSolid` changes is this shell, so it must not
       // share a cache entry with the lipped shell it is otherwise identical to.
       // Appended only when set, so every ordinary bin keeps a byte-identical
@@ -393,6 +451,8 @@ export function deriveDimensions(
       // does nothing at all from the second render on. Appended only when
       // non-sharp, so every existing v7 key stays byte-identical.
       ...(lipTip !== 'sharp' ? [`liptip${lipTip}`] : []),
+      // Cut into the lip before it is fused, like the tip above.
+      ...(lipNotches ? ['lipnotch'] : []),
       // A solid bin's fill surface is part of its BODY (shellStage folds it into
       // `cutoutTopOffset`), so two bins differing only in the top offset are two
       // different shells. Without this the second one silently reuses the first
@@ -449,12 +509,14 @@ export function deriveDimensions(
     isSlotted,
     hasLip,
     lipHasSupport,
+    lipNotches,
     interiorHeight,
     maxDimension,
     shellKey,
     omitLipSolid: omitsLipSolid,
     withMagnet,
     withScrew,
+    cornerHolesOnly,
     compartmentsBakedIntoShell,
     overhang,
     innerOffsetX,
@@ -471,9 +533,13 @@ export function createInitialContext(
   perfCollector?: PerfCollector,
   omitLipSolid = false
 ): PipelineContext {
+  // The store keeps floored and through depths current, but a params object can
+  // reach the worker without passing through it; resolving here makes the mode,
+  // not the stored number, decide what gets cut.
+  const resolved = withResolvedCutoutDepths(params);
   return {
-    params,
-    dimensions: deriveDimensions(params, forExport, omitLipSolid),
+    params: resolved,
+    dimensions: deriveDimensions(resolved, forExport, omitLipSolid),
     forExport,
     signal,
     onProgress,

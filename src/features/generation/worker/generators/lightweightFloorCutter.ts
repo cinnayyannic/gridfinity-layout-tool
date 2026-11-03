@@ -14,7 +14,10 @@ import { SOCKET_HEIGHT, MAGNET_FLOOR, COPLANAR_MARGIN, FOOT_INSET_BOT } from './
 import { forEachCell } from './cellDecomposition';
 import type { ForEachCellOptions, CellInfo } from './cellDecomposition';
 import { resolvePitch, type GridUnitInput } from './gridPitch';
-import { cellHostsAttachmentHoles, magnetPositionsForCell } from './baseplateMagnets';
+import {
+  cellHostsAttachmentHoles,
+  magnetPositionsForCell,
+} from '@/shared/generation/magnetPositions';
 import { sketch } from './meshUtils';
 import { magnetOuterWallMarginForNozzle, magnetPadMarginForNozzle } from '@/shared/printSettings';
 import type { MagnetAnchor } from '@/core/types';

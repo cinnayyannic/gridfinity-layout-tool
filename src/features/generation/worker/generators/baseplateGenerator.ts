@@ -42,6 +42,7 @@ import {
   booleanPipeline,
   isOk,
   drawRectangle,
+  drawRoundedRectangle,
 } from 'brepjs';
 import type { Shape3D, ValidSolid, BooleanPipelineStep } from 'brepjs';
 import type { ResolvedBaseplateParams } from '@/shared/types/bin';
@@ -55,25 +56,35 @@ import {
   checkCancelled,
   baseplateFloorDepth,
   MIN_PRINTABLE_TILE_MM,
-  resolveCornerRadii,
 } from './generatorTypes';
 import type { ProgressFn, CellInfo, SideMargins } from './generatorTypes';
 import {
   buildLightweightFloorCutters,
   buildPartialCellFloorCutters,
 } from './lightweightFloorCutter';
+import { floorReliefReachesCorners } from '@/shared/generation/magnetPositions';
 import { slabWithPocketsCache } from './baseplateCaches';
 import { slabPocketsCacheKey } from './baseplateCacheKeys';
-import { sanitizeParams, tagOp, buildSlabProfile } from './baseplateSlab';
+import { sanitizeParams, tagOp, buildSlabProfile, cutAboveZ } from './baseplateSlab';
 import { cutInBatches } from './baseplateBatchOps';
 import { getPocketTemplate } from './baseplatePockets';
-import { buildMagnetHoles, buildPartialCellMagnetHoles } from './baseplateMagnets';
-import type { MagnetHoleStyle } from '@/shared/generation/magnetHoleStyle';
 import {
-  buildScrewCutters,
+  buildMagnetPocketCutters,
+  planMagnetPockets,
+  planPartialCellMagnetPockets,
+  type MagnetPocketPlan,
+} from './baseplateMagnets';
+import type { MagnetHoleStyle } from '@/shared/generation/magnetHoleStyle';
+import { buildScrewCutters } from './baseplateScrews';
+import {
+  cellHoldsFloorScrew,
   planBaseplateScrewHoles,
   screwAwareHoleRadius,
-} from './baseplateScrews';
+  screwPlacementFor,
+} from '@/shared/generation/screwHolePlacement';
+import { baseplateCellClassifier, plateCornerRadii } from '@/shared/generation/baseplateFrame';
+import { buildMountMagnetCutters } from './baseplateMountMagnets';
+import { planMountMagnets } from '@/shared/generation/mountMagnetPlan';
 import {
   buildConnectors,
   buildDovetailKey,
@@ -85,12 +96,14 @@ import { creaseEdges } from './utils';
 import { buildBaseplateSTL } from './baseplateSTL';
 import { buildOutlineDrawing } from './baseplateOutline';
 import type { DrawerOutline } from '@/core/types';
-import {
-  classifyRect,
-  insideAreaFraction,
-  type RegionClass,
-} from '@/shared/utils/drawerOutlineGeometry';
+import { insideAreaFraction, type RegionClass } from '@/shared/utils/drawerOutlineGeometry';
 import { EXPORT_ANGULAR_TOLERANCE_RAD, PREVIEW_ANGULAR_TOLERANCE_RAD } from './utils/tolerances';
+import {
+  ecoJointCutouts,
+  ecoKeepOuts,
+  ecoMagnetKeepOuts,
+  ecoScrewKeepOuts,
+} from '@/shared/generation/ecoPlate';
 
 /**
  * Minimum surviving area for an outline-clipped over-tile pocket. Below this
@@ -177,7 +190,7 @@ export function generateBaseplate(
   if (forExport) {
     tolerance = 0.01;
     angularTolerance = EXPORT_ANGULAR_TOLERANCE_RAD;
-  } else if (params.magnetHoles) {
+  } else if (params.magnetHoles || params.mountMagnets?.enabled === true) {
     tolerance = Math.min(0.1, Math.max(0.05, maxDimension / 2500));
     angularTolerance = PREVIEW_ANGULAR_TOLERANCE_RAD;
   } else {
@@ -337,18 +350,10 @@ export function buildBaseplateSolid(
       )
     : [];
 
-  // Shaped plates: classify each cell against the outline. Cell centers live
-  // in the final frame (grid centered on origin, slab offset by padding
-  // asymmetry); the outline is plate-local mm — invert the frame mapping.
+  // Shaped plates: classify each cell against the outline, the same way the
+  // screw plan does.
   const outline = params.outline;
-  const classifyCell = (cell: CellInfo): RegionClass => {
-    if (outline === undefined) return 'inside';
-    const w = cell.widthUnits * gridUnitMm;
-    const d = cell.depthUnits * gridUnitMmY;
-    const x0 = cell.centerX - w / 2 + totalW / 2 - slabOffsetX;
-    const y0 = cell.centerY - d / 2 + totalD / 2 - slabOffsetY;
-    return classifyRect(outline, x0, y0, x0 + w, y0 + d);
-  };
+  const classifyCell: (cell: CellInfo) => RegionClass = baseplateCellClassifier(params);
   // A boundary-clipped cell keeps its (outline-trimmed) pocket only when
   // enough of it survives to be a usable socket — the same sliver philosophy
   // as MIN_PRINTABLE_TILE_MM, expressed as an area fraction. Applies to
@@ -388,20 +393,13 @@ export function buildBaseplateSolid(
     shapedPocketCells = [...nominalCells, ...overTileFrame];
     pocketDecisions = shapedPocketCells.map(pocketDecision);
   }
-  // Corner radii resolved ONCE, up here, because two consumers must agree on
-  // them: the rounding cut below, and the screw plan's containment test — the
-  // check that stops a margin screw being placed in material a large corner
-  // radius has already cut away. Feeding the plan the raw `params.cornerRadii`
-  // (populated only in the unlinked per-corner mode) told it every LINKED
-  // radius was zero, so a uniform 25mm corner shipped its screw hole in air.
-  const minPadding = Math.min(
-    Math.min(paddingLeft, paddingRight),
-    Math.min(paddingFront, paddingBack)
-  );
-  const cellLimit = gridUnitMm / 2 + minPadding;
-  const geomLimit = Math.min(totalW, totalD) / 2 - 0.1;
-  const maxRadius = Math.min(cellLimit, geomLimit);
-  const cornerRadii = resolveCornerRadii(params, maxRadius);
+  // Two consumers must agree on the corner radii: the rounding cut below, and
+  // the screw plan's containment test, the check that stops a margin screw
+  // being placed in material a large corner radius has already cut away. Both
+  // read `plateCornerRadii`. The raw `params.cornerRadii` is populated only in
+  // the unlinked per-corner mode, so reading it told the plan every LINKED
+  // radius was zero, and a uniform 25mm corner shipped its screw hole in air.
+  const cornerRadii = plateCornerRadii(params);
 
   // Mount-down screw holes. Planned here, before the slab is cached,
   // because which cells keep a floor is part of the pocket geometry.
@@ -409,34 +407,9 @@ export function buildBaseplateSolid(
   const screwPadMm = params.screwPadThicknessMm ?? 0;
   const screwHoles =
     screwParams !== undefined
-      ? planBaseplateScrewHoles(screwParams, params, {
-          resolvedCornerRadii: cornerRadii,
-          totalWidthMm: totalW,
-          totalDepthMm: totalD,
-          gridW: width,
-          gridD: depth,
-          pitch,
-          cellOpts,
-          magnetRadius: magnetDiameter / 2,
-          magnetAnchor,
-          cellFilter:
-            outline !== undefined
-              ? (cell: CellInfo): boolean => classifyCell(cell) === 'inside'
-              : undefined,
-        })
+      ? planBaseplateScrewHoles(screwParams, params, screwPlacementFor(screwParams, params))
       : [];
-  /** True when a floor-sited screw lands inside this cell, so it keeps a floor. */
-  const cellHoldsScrew = (cell: CellInfo): boolean => {
-    if (screwHoles.length === 0) return false;
-    const halfW = (cell.widthUnits * gridUnitMm) / 2;
-    const halfD = (cell.depthUnits * gridUnitMmY) / 2;
-    return screwHoles.some(
-      (h) =>
-        h.site === 'floor' &&
-        Math.abs(h.x - cell.centerX) <= halfW &&
-        Math.abs(h.y - cell.centerY) <= halfD
-    );
-  };
+  const cellHoldsScrew = (cell: CellInfo): boolean => cellHoldsFloorScrew(screwHoles, cell, pitch);
 
   const pocketMaskHash = pocketDecisions ? hashPocketDecisions(pocketDecisions) : undefined;
 
@@ -583,51 +556,104 @@ export function buildBaseplateSolid(
     probe?.('cornerIntersected', baseplate);
   }
 
+  // Shaped plates: magnets only in fully-inside cells — a magnet pocket in
+  // an outline-clipped cell could straddle the boundary and leave a floating
+  // half-hole in the wall the intersect produces.
+  const magnetCellFilter =
+    outline !== undefined
+      ? (cell: CellInfo): boolean => classifyCell(cell) === 'inside'
+      : undefined;
+  // A lightweight plate keeps only a thin pad around each bore, too thin for
+  // the chamfer to open into; the ribs still apply there.
+  const magnetStyle: MagnetHoleStyle = {
+    crushRibs: magnetCrushRibs === true,
+    chamfer: magnetChamfer === true && !params.lightweight,
+  };
+  // Over-tile margin tiles get magnets too — the corner magnets that fit, or a
+  // spread/centered magnet for tiles too small for any corner — so the clipped
+  // padding tiles aren't left as solid plastic. Mirrors the pocket frame above.
+  const magnetFrame =
+    magnetCellFilter === undefined ? overTileFrame : overTileFrame.filter(magnetCellFilter);
+  const magnetPockets: MagnetPocketPlan[] = magnetHoles
+    ? [
+        planMagnetPockets(
+          width,
+          depth,
+          magnetDiameter / 2,
+          cellOpts,
+          magnetCellFilter,
+          magnetAnchor,
+          magnetStyle
+        ),
+        planPartialCellMagnetPockets(
+          magnetFrame,
+          magnetDiameter / 2,
+          pitch,
+          magnetAnchor,
+          magnetStyle
+        ),
+      ]
+    : [];
+
+  const mountMagnets = params.mountMagnets;
+  const mountMagnetHoles =
+    mountMagnets?.enabled === true
+      ? planMountMagnets(
+          mountMagnets,
+          width,
+          depth,
+          totalHeight,
+          profileHeight,
+          cellOpts,
+          outline !== undefined
+            ? (cell: CellInfo): boolean => classifyCell(cell) === 'inside'
+            : undefined,
+          (cell: CellInfo): boolean =>
+            floorReliefReachesCorners(
+              params,
+              cell,
+              screwAwareHoleRadius(magnetDiameter / 2, screwParams),
+              gridUnitMm,
+              gridUnitMmY,
+              cellHoldsScrew
+            ),
+          screwHoles.filter((h) => h.site === 'junction')
+        )
+      : [];
+
+  if (params.ecoPlate === true) {
+    // Keep a bottom band so every corner post remains connected, with no
+    // unsupported bridge to print across the relieved straight joints.
+    const bridgeHeight = Math.min(1.6, totalHeight / 2);
+    const cutHeight = totalHeight - bridgeHeight + 0.2;
+    const keepOuts = [
+      ...(screwParams === undefined ? [] : ecoScrewKeepOuts(screwHoles, screwParams)),
+      ...(mountMagnets?.enabled === true
+        ? ecoKeepOuts(mountMagnetHoles, mountMagnets.diameter)
+        : []),
+      ...magnetPockets.flatMap((plan) => ecoMagnetKeepOuts(plan, magnetDiameter)),
+    ];
+    const cutters = ecoJointCutouts(params, overTileFrame, keepOuts).map((slot) => {
+      // Round the four inside corners of each relief so the surviving posts
+      // transition into the thin connecting bridge without sharp notches.
+      const radius = Math.min(2, Math.min(slot.width, slot.depth) / 2 - 0.05);
+      const cutter = drawRoundedRectangle(slot.width, slot.depth, radius)
+        .sketchOnPlane('XY', 0.2)
+        .extrude(-cutHeight);
+      const positioned = translate(cutter, [slot.x, slot.y, 0]);
+      cutter.delete();
+      return positioned;
+    });
+    baseplate = cutInBatches(baseplate, cutters);
+    probe?.('ecoJointsCut', baseplate);
+  }
+
   // Magnet hole cutters — built and cut in batches to limit WASM memory.
   // A 16x16 grid produces 1024 magnet holes; holding all simultaneously can OOM.
   if (magnetHoles) {
-    // Shaped plates: magnets only in fully-inside cells — a magnet pocket in
-    // an outline-clipped cell could straddle the boundary and leave a floating
-    // half-hole in the wall the intersect produces.
-    const magnetCellFilter =
-      outline !== undefined
-        ? (cell: CellInfo): boolean => classifyCell(cell) === 'inside'
-        : undefined;
-    // A lightweight plate keeps only a thin pad around each bore, too thin for
-    // the chamfer to open into; the ribs still apply there.
-    const magnetStyle: MagnetHoleStyle = {
-      crushRibs: magnetCrushRibs === true,
-      chamfer: magnetChamfer === true && !params.lightweight,
-    };
-    const holes = buildMagnetHoles(
-      width,
-      depth,
-      magnetDiameter / 2,
-      magnetDepth,
-      cellOpts,
-      magnetCellFilter,
-      magnetAnchor,
-      magnetStyle,
-      profileHeight
+    const holes = magnetPockets.flatMap((plan) =>
+      buildMagnetPocketCutters(plan, magnetDiameter / 2, magnetDepth, magnetStyle, profileHeight)
     );
-    // Over-tile margin tiles get magnets too — the corner magnets that fit, or a
-    // spread/centered magnet for tiles too small for any corner — so the clipped
-    // padding tiles aren't left as solid plastic. Mirrors the pocket frame above.
-    const magnetFrame =
-      magnetCellFilter === undefined ? overTileFrame : overTileFrame.filter(magnetCellFilter);
-    if (magnetFrame.length > 0) {
-      holes.push(
-        ...buildPartialCellMagnetHoles(
-          magnetFrame,
-          magnetDiameter / 2,
-          magnetDepth,
-          pitch,
-          magnetAnchor,
-          magnetStyle,
-          profileHeight
-        )
-      );
-    }
     baseplate = cutInBatches(baseplate, holes);
     probe?.('magnetHolesCut', baseplate);
   }
@@ -726,6 +752,19 @@ export function buildBaseplateSolid(
     probe?.('screwHolesCut', baseplate);
   }
 
+  if (mountMagnets?.enabled === true) {
+    const cutters = buildMountMagnetCutters(
+      mountMagnetHoles,
+      mountMagnets.diameter,
+      mountMagnets.depth,
+      totalHeight
+    );
+    if (cutters.length > 0) {
+      baseplate = cutInBatches(baseplate, cutters);
+      probe?.('mountMagnetsCut', baseplate);
+    }
+  }
+
   onProgress?.(0.4);
 
   // Connector groove cutters (small count — no batching needed)
@@ -772,6 +811,15 @@ export function buildBaseplateSolid(
   }
 
   onProgress?.(0.6);
+
+  const seamTrim = params.stackSeamTrimMm ?? 0;
+  if (seamTrim > 0) {
+    const untrimmed = baseplate;
+    baseplate = tagOp('stackSeamTrim', () => cutAboveZ(untrimmed, -seamTrim));
+    untrimmed.delete();
+    probe?.('stackSeamTrim', baseplate);
+  }
+
   onProgress?.(0.8);
 
   // Probe before the final translate: the +Z shift preserves topology,
@@ -843,10 +891,16 @@ export async function exportConnectorKey(
   const params = sanitizeParams(rawParams);
   const totalHeight = plateProfileHeightMm(params.lowProfileBase) + baseplateFloorDepth(params);
   // Snap clip ships its own bed-flat part; dovetail key is the legacy default.
-  const key =
+  const fullKey =
     params.connectorStyle === 'snapClip'
       ? buildSnapClipForPrint(totalHeight, params.gridUnitMm, params.nozzleSizeMm)
       : buildDovetailKey(totalHeight, params.gridUnitMm, socketHeightMm(params.lowProfileBase));
+  const seamTrim = params.stackSeamTrimMm ?? 0;
+  let key = fullKey;
+  if (seamTrim > 0) {
+    key = cutAboveZ(fullKey, totalHeight - seamTrim);
+    fullKey.delete();
+  }
   try {
     const name = 'connector_key';
     if (format === 'step') {

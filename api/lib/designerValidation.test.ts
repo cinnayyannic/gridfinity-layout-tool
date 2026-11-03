@@ -13,7 +13,11 @@ import {
   DESIGN_TAG_MAX_LENGTH,
 } from './designerValidation.js';
 import { CONSTRAINTS, VALID_LABEL_PLATE_ICONS } from './designerValidationConstants.js';
+import { meshRefHashes } from './designerCutoutValidation.js';
+import { MAX_MESH_UPLOAD_BYTES } from './meshFile.js';
 import { LABEL_PLATE_ICONS } from '../../src/shared/constants/labelPlates.js';
+
+import { DEFAULT_PULL_TAB } from '../../src/shared/utils/pullTabPlan.js';
 
 function validPayload() {
   return {
@@ -49,6 +53,164 @@ function validPayload() {
     },
   };
 }
+
+describe('overhang through the share allowlist', () => {
+  const check = (overhang: unknown) => {
+    const p = validPayload();
+    const payload = { ...p, params: { ...p.params, overhang } };
+    return validateDesignerShare(payload, Buffer.byteLength(JSON.stringify(payload), 'utf8'));
+  };
+
+  it('keeps a design’s overhang, wall taper included', () => {
+    const overhang = {
+      enabled: true,
+      left: 0,
+      right: 14,
+      front: 0,
+      back: 0,
+      feet: true,
+      taper: { profile: 'chamfer', bandHeight: 6, left: 0, right: 3, front: 0, back: 0 },
+    };
+    const result = check(overhang);
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.payload.params.overhang).toEqual(overhang);
+  });
+
+  it('keeps a base overhang plus flare past one grid unit, as the designer stores it', () => {
+    const overhang = {
+      left: 0,
+      right: 60,
+      front: 0,
+      back: 0,
+      taper: {
+        enabled: true,
+        profile: 'fillet',
+        bandHeight: 9,
+        left: 0,
+        right: 30,
+        front: 0,
+        back: 0,
+      },
+    };
+    const result = check(overhang);
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.payload.params.overhang).toEqual(overhang);
+  });
+
+  it('drops a malformed overhang and keeps the design', () => {
+    const result = check({ left: 0, right: 99, front: 0, back: 0 });
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.payload.params).not.toHaveProperty('overhang');
+  });
+});
+
+describe('pull-tab validation', () => {
+  const check = (pullTab: Record<string, unknown>) => {
+    const p = validPayload();
+    const payload = { ...p, params: { ...p.params, pullTab } };
+    return validateDesignerShare(payload, Buffer.byteLength(JSON.stringify(payload), 'utf8'));
+  };
+  it('preserves every pull-tab setting through the share allowlist', () => {
+    const tab = {
+      ...DEFAULT_PULL_TAB,
+      enabled: true,
+      backRecess: true,
+      widthMode: 'percent',
+      widthPercent: 80,
+    };
+    const result = check(JSON.parse(JSON.stringify(tab)) as Record<string, unknown>);
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.payload.params.pullTab).toEqual(tab);
+  });
+  it('preserves the walls a tab stands on', () => {
+    const tab = {
+      ...DEFAULT_PULL_TAB,
+      enabled: true,
+      walls: ['front', 'back', 'left', 'right', 'center'],
+      centerAxis: 'depth',
+    };
+    const result = check(JSON.parse(JSON.stringify(tab)) as Record<string, unknown>);
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.payload.params.pullTab).toEqual(tab);
+  });
+  it.each<Record<string, unknown>>([
+    { walls: [] },
+    { walls: 'front' },
+    { walls: ['front', 'front'] },
+    { walls: ['roof'] },
+    { walls: ['front', 'back', 'left', 'right', 'center', 'front'] },
+    { walls: ['center'], centerAxis: 'diagonal' },
+    { wall: ['width'] },
+    { wall: 'back' },
+    { enabled: 'yes' },
+    { thickness: Infinity },
+    { height: NaN },
+    { recessDepth: 3.3 },
+    { unexpected: true },
+    { constructor: 1 },
+    { toString: 1 },
+  ])('rejects malformed or unsupported settings: %j', (patch) => {
+    expect(check({ ...DEFAULT_PULL_TAB, ...patch }).valid).toBe(false);
+  });
+  it('accepts the new border and older designs without that setting', () => {
+    expect(check({ ...DEFAULT_PULL_TAB, recessBorder: 2 }).valid).toBe(true);
+    expect(
+      check(
+        Object.fromEntries(
+          Object.entries(DEFAULT_PULL_TAB).filter(([key]) => key !== 'recessBorder')
+        )
+      ).valid
+    ).toBe(true);
+  });
+  it('rejects a border outside the supported range', () => {
+    expect(check({ ...DEFAULT_PULL_TAB, recessBorder: -1 }).valid).toBe(false);
+    expect(check({ ...DEFAULT_PULL_TAB, recessBorder: 30 }).valid).toBe(false);
+  });
+  it('accepts an optional inside fillet and rejects invalid radii', () => {
+    expect(check({ ...DEFAULT_PULL_TAB, recessInsideRadius: 0 }).valid).toBe(true);
+    expect(
+      check(
+        Object.fromEntries(
+          Object.entries(DEFAULT_PULL_TAB).filter(([key]) => key !== 'recessInsideRadius')
+        )
+      ).valid
+    ).toBe(true);
+    expect(check({ ...DEFAULT_PULL_TAB, recessInsideRadius: -1 }).valid).toBe(false);
+    expect(check({ ...DEFAULT_PULL_TAB, recessInsideRadius: 10 }).valid).toBe(false);
+  });
+  it('accepts back recesses and older settings, and rejects non-boolean values', () => {
+    expect(check({ ...DEFAULT_PULL_TAB, backRecess: true }).valid).toBe(true);
+    expect(
+      check(
+        Object.fromEntries(Object.entries(DEFAULT_PULL_TAB).filter(([key]) => key !== 'backRecess'))
+      ).valid
+    ).toBe(true);
+    expect(check({ ...DEFAULT_PULL_TAB, backRecess: 'yes' }).valid).toBe(false);
+  });
+  it('accepts broad blends and percentage widths, but rejects invalid values', () => {
+    expect(
+      check({
+        ...DEFAULT_PULL_TAB,
+        recessEdgeRadius: 6,
+        recessInsideRadius: 6,
+        widthMode: 'percent',
+        widthPercent: 80,
+      }).valid
+    ).toBe(true);
+    expect(check({ ...DEFAULT_PULL_TAB, recessEdgeRadius: 6.1 }).valid).toBe(false);
+    expect(check({ ...DEFAULT_PULL_TAB, widthPercent: 101 }).valid).toBe(false);
+    expect(check({ ...DEFAULT_PULL_TAB, widthMode: 'unknown' }).valid).toBe(false);
+    expect(
+      check(
+        Object.fromEntries(
+          Object.entries(DEFAULT_PULL_TAB).filter(
+            ([key]) => key !== 'widthMode' && key !== 'widthPercent'
+          )
+        )
+      ).valid
+    ).toBe(true);
+  });
+});
 
 // Corner radii drive a blend the generator has to build, so an unbounded one is
 // a crafted payload that turns into an unbounded boolean. Null is a real value
@@ -1317,6 +1479,27 @@ describe('validateDesignerShare', () => {
       }
     });
 
+    it('round-trips a quarter-turn lid text rotation', () => {
+      const payload = validPayload() as ReturnType<typeof validPayload> & {
+        params: { surfaceText?: unknown };
+      };
+      payload.params.surfaceText = { lidText: 'Cables', lidTextRotation: 270 };
+      const result = validateDesignerShare(payload, JSON.stringify(payload).length);
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        expect((result.payload.params as { surfaceText?: unknown }).surfaceText).toEqual({
+          lidText: 'Cables',
+          lidTextRotation: 270,
+        });
+      }
+    });
+
+    it.each([45, -90, 360, '90', null])('rejects lidTextRotation %s', (rotation) => {
+      const result = withSurfaceText({ lidText: 'Cables', lidTextRotation: rotation });
+      expect(result.valid).toBe(false);
+      if (!result.valid) expect(result.error.message).toMatch(/lidTextRotation/);
+    });
+
     it('rejects non-object', () => {
       expect(withSurfaceText('Cables').valid).toBe(false);
     });
@@ -1422,6 +1605,26 @@ describe('validateDesignerShare', () => {
       expect(
         withSurfaceText({ walls: { front: 'ok' }, wallStyles: { front: { anchor: 'top' } } }).valid
       ).toBe(true);
+    });
+
+    it('validates wall faces and the inside style', () => {
+      expect(
+        withSurfaceText({
+          walls: { back: 'ok' },
+          wallFaces: { back: 'inside', front: 'outside' },
+          insideStyle: { anchor: 'top-left' },
+        }).valid
+      ).toBe(true);
+      expect(withSurfaceText({ walls: { back: 'ok' }, wallFaces: { back: 'inner' } }).valid).toBe(
+        false
+      );
+      expect(withSurfaceText({ walls: { back: 'ok' }, wallFaces: { lid: 'inside' } }).valid).toBe(
+        false
+      );
+      expect(withSurfaceText({ walls: { back: 'ok' }, wallFaces: 'inside' }).valid).toBe(false);
+      expect(withSurfaceText({ walls: { back: 'ok' }, insideStyle: { depth: -1 } }).valid).toBe(
+        false
+      );
     });
 
     it('rejects an invalid wallAlign', () => {
@@ -1611,6 +1814,129 @@ describe('validateDesignerShare', () => {
       expect(withCutouts([{ id: 'a', leanDeg: -90 }]).valid).toBe(false);
       expect(withCutouts([{ id: 'a', leanDeg: Number.NaN }]).valid).toBe(false);
       expect(withCutouts([{ id: 'a', leanDeg: '30' }]).valid).toBe(false);
+    });
+  });
+
+  describe('cutout entry profile validation', () => {
+    const withCutouts = (cutouts: unknown) => {
+      const payload = validPayload();
+      (payload.params as Record<string, unknown>).cutouts = cutouts;
+      return validateDesignerShare(payload, JSON.stringify(payload).length);
+    };
+
+    it('accepts a chamfer or a round and keeps it in the payload', () => {
+      const result = withCutouts([
+        { id: 'a', entryProfile: 'round' },
+        { id: 'b', entryProfile: 'chamfer' },
+      ]);
+      expect(result.valid).toBe(true);
+      if (!result.valid) return;
+      const cutouts = (result.payload.params as { cutouts: Record<string, unknown>[] }).cutouts;
+      expect(cutouts.map((c) => c.entryProfile)).toEqual(['round', 'chamfer']);
+    });
+
+    it('rejects a profile the generator does not know', () => {
+      expect(withCutouts([{ id: 'a', entryProfile: 'ogee' }]).valid).toBe(false);
+    });
+  });
+
+  describe('cutout finger access validation', () => {
+    const withCutouts = (cutouts: unknown) => {
+      const payload = validPayload();
+      (payload.params as Record<string, unknown>).cutouts = cutouts;
+      return validateDesignerShare(payload, JSON.stringify(payload).length);
+    };
+
+    it('keeps a curved or flat finger cut in the payload', () => {
+      const result = withCutouts([
+        { id: 'a', shape: 'slot', finger: { bottom: 'curved' } },
+        { id: 'b', shape: 'circle', finger: { bottom: 'flat' } },
+      ]);
+      expect(result.valid).toBe(true);
+      if (!result.valid) return;
+      const cutouts = (result.payload.params as { cutouts: Record<string, unknown>[] }).cutouts;
+      expect(cutouts.map((c) => c.finger)).toEqual([{ bottom: 'curved' }, { bottom: 'flat' }]);
+    });
+
+    it.each([
+      ['an unknown bottom', { bottom: 'pointed' }],
+      ['a missing bottom', {}],
+      ['a bare string', 'curved'],
+    ])('rejects %s', (_name, finger) => {
+      expect(withCutouts([{ id: 'a', shape: 'slot', finger }]).valid).toBe(false);
+    });
+  });
+
+  describe('cutout split validation', () => {
+    const withCutouts = (cutouts: unknown) => {
+      const payload = validPayload();
+      (payload.params as Record<string, unknown>).cutouts = cutouts;
+      return validateDesignerShare(payload, JSON.stringify(payload).length);
+    };
+    const split = { a: { x: -5, y: -10 }, b: { x: -5, y: 10 }, cutDepth: 8 };
+
+    it('keeps side B deeper than any fixed ceiling, as a tall bin can need', () => {
+      expect(withCutouts([{ id: 'a', split: { ...split, cutDepth: 398 } }]).valid).toBe(true);
+    });
+
+    it('keeps a split, fixed or held to its floor', () => {
+      const result = withCutouts([
+        { id: 'a', split },
+        { id: 'b', split: { ...split, depthMode: 'floor', floorMm: 3 } },
+      ]);
+      expect(result.valid).toBe(true);
+      if (!result.valid) return;
+      const cutouts = (result.payload.params as { cutouts: Record<string, unknown>[] }).cutouts;
+      expect(cutouts.map((c) => c.split)).toEqual([
+        split,
+        { ...split, depthMode: 'floor', floorMm: 3 },
+      ]);
+    });
+
+    it.each([
+      ['a bare string', 'line'],
+      ['a missing point', { b: split.b, cutDepth: 8 }],
+      ['a point far off', { ...split, a: { x: 5000, y: 0 } }],
+      ['a negative depth', { ...split, cutDepth: -1 }],
+      ['a zero depth', { ...split, cutDepth: 0 }],
+      ['a through side', { ...split, depthMode: 'through' }],
+      ['a floor out of range', { ...split, depthMode: 'floor', floorMm: 900 }],
+    ])('rejects %s', (_name, bad) => {
+      expect(withCutouts([{ id: 'a', split: bad }]).valid).toBe(false);
+    });
+  });
+
+  describe('cutout depth mode validation', () => {
+    const withCutouts = (cutouts: unknown) => {
+      const payload = validPayload();
+      (payload.params as Record<string, unknown>).cutouts = cutouts;
+      return validateDesignerShare(payload, JSON.stringify(payload).length);
+    };
+
+    it('accepts a floored or through mode and keeps it in the payload', () => {
+      const result = withCutouts([
+        { id: 'a', depthMode: 'floor', floorMm: 4.75 },
+        { id: 'b', depthMode: 'through' },
+      ]);
+      expect(result.valid).toBe(true);
+      if (!result.valid) return;
+      const cutouts = (result.payload.params as { cutouts: Record<string, unknown>[] }).cutouts;
+      expect(cutouts.map((c) => [c.depthMode, c.floorMm])).toEqual([
+        ['floor', 4.75],
+        ['through', undefined],
+      ]);
+    });
+
+    it('rejects a mode the generator does not know, including an explicit fixed', () => {
+      expect(withCutouts([{ id: 'a', depthMode: 'deep' }]).valid).toBe(false);
+      expect(withCutouts([{ id: 'a', depthMode: 'fixed' }]).valid).toBe(false);
+    });
+
+    it('rejects a negative, oversized, or non-numeric floor', () => {
+      expect(withCutouts([{ id: 'a', floorMm: -1 }]).valid).toBe(false);
+      expect(withCutouts([{ id: 'a', floorMm: 351 }]).valid).toBe(false);
+      expect(withCutouts([{ id: 'a', floorMm: Number.NaN }]).valid).toBe(false);
+      expect(withCutouts([{ id: 'a', floorMm: '4' }]).valid).toBe(false);
     });
   });
 
@@ -1815,10 +2141,33 @@ describe('validateDesignerShare', () => {
       expect(result.error.code).toBe('SIZE_EXCEEDED');
     });
 
-    it('rejects more than the asset cap', () => {
+    function denseDesign(count: number, triangleCount: number) {
       const assets: Record<string, unknown> = {};
-      for (let i = 0; i <= CONSTRAINTS.MAX_MESH_ASSETS; i++) assets[`asset-${i}`] = validAsset();
-      expect(withMesh(assets, []).valid).toBe(false);
+      const cutouts: unknown[] = [];
+      for (let i = 0; i < count; i++) {
+        assets[`asset-${i}`] = { ...validAsset(), triangleCount };
+        cutouts.push({ id: `c${i}`, shape: 'mesh', meshId: `asset-${i}` });
+      }
+      return withMesh(assets, cutouts);
+    }
+
+    it('accepts assets that declare the whole triangle budget', () => {
+      const perAsset = CONSTRAINTS.MAX_MESH_ASSET_TRIANGLES;
+      const fit = CONSTRAINTS.MAX_MESH_TRIANGLES_TOTAL / perAsset;
+      expect(denseDesign(fit, perAsset).valid).toBe(true);
+    });
+
+    it('rejects assets that declare more than the triangle budget', () => {
+      const perAsset = CONSTRAINTS.MAX_MESH_ASSET_TRIANGLES;
+      const fit = CONSTRAINTS.MAX_MESH_TRIANGLES_TOTAL / perAsset;
+      const result = denseDesign(fit + 1, perAsset);
+      expect(result.valid).toBe(false);
+      if (result.valid) return;
+      expect(result.error.message).toMatch(/triangles in total/);
+    });
+
+    it('accepts more than 8 small assets', () => {
+      expect(denseDesign(20, 12).valid).toBe(true);
     });
 
     it('keeps the 100KB cap for designs without mesh assets', () => {
@@ -1834,6 +2183,60 @@ describe('validateDesignerShare', () => {
       ];
       expect(validateDesignerShare(payload, 150_000).valid).toBe(true);
       expect(validateDesignerShare(payload, 2_000_001).valid).toBe(false);
+    });
+
+    describe('refs', () => {
+      function validRef() {
+        return {
+          name: 'wrench',
+          hash: 'a'.repeat(64),
+          triangleCount: 12,
+          sizeMm: { x: 20, y: 10, z: 5 },
+          bytes: 4_000,
+        };
+      }
+
+      function withRefs(meshAssets: unknown, sizeBytes = 500) {
+        const payload = validPayload();
+        (payload.params as Record<string, unknown>).meshAssets = meshAssets;
+        (payload.params as Record<string, unknown>).cutouts = [
+          { id: 'c1', shape: 'mesh', meshId: 'asset-1' },
+        ];
+        return validateDesignerShare(payload, sizeBytes, { meshRefs: true });
+      }
+
+      it('refuses a ref unless the caller takes them', () => {
+        expect(withMesh({ 'asset-1': validRef() }).valid).toBe(false);
+        const result = withRefs({ 'asset-1': validRef() });
+        expect(result.valid).toBe(true);
+        if (!result.valid) return;
+        expect(result.payload.params.meshAssets).toEqual({ 'asset-1': validRef() });
+      });
+
+      it('still takes an inline asset', () => {
+        expect(withRefs({ 'asset-1': validAsset() }).valid).toBe(true);
+      });
+
+      it('rejects a ref with a malformed hash, size or key', () => {
+        for (const hash of ['A'.repeat(64), 'a'.repeat(63), 42]) {
+          expect(withRefs({ 'asset-1': { ...validRef(), hash } }).valid).toBe(false);
+        }
+        for (const bytes of [0, 1.5, MAX_MESH_UPLOAD_BYTES + 1, '4000']) {
+          expect(withRefs({ 'asset-1': { ...validRef(), bytes } }).valid).toBe(false);
+        }
+        expect(withRefs({ 'asset-1': { ...validRef(), data: 'QUFBQQ==' } }).valid).toBe(false);
+        expect(withRefs({ 'asset-1': { ...validRef(), triangleCount: 0 } }).valid).toBe(false);
+      });
+
+      it('holds a design of refs to the 100KB cap', () => {
+        expect(withRefs({ 'asset-1': validRef() }, 150_000).valid).toBe(false);
+        expect(withRefs({ 'asset-1': validAsset() }, 150_000).valid).toBe(true);
+      });
+
+      it('lists the hash of each ref', () => {
+        expect(meshRefHashes({ a: validRef(), b: validAsset() })).toEqual(['a'.repeat(64)]);
+        expect(meshRefHashes(undefined)).toEqual([]);
+      });
     });
   });
 
@@ -2027,6 +2430,17 @@ describe('validateDesignerShare', () => {
       expect(validateDesignerShare(withLid({ topThicknessMm: 500 }), 1000).valid).toBe(false);
       expect(validateDesignerShare(withLid({ topThicknessMm: -1 }), 1000).valid).toBe(false);
       expect(validateDesignerShare(withLid({ topThicknessMm: 'thick' }), 1000).valid).toBe(false);
+    });
+
+    it('keeps a whole-unit lid height and rejects one out of range or fractional', () => {
+      const kept = validateDesignerShare(withLid({ heightUnits: 2 }), 1000);
+      expect(kept.valid).toBe(true);
+      if (kept.valid) {
+        expect((kept.payload.params.lid as Record<string, unknown>).heightUnits).toBe(2);
+      }
+      for (const heightUnits of [0, 51, 1.5, 'two']) {
+        expect(validateDesignerShare(withLid({ heightUnits }), 1000).valid).toBe(false);
+      }
     });
 
     // A fractional count is not merely untidy: the placement loop divides the
@@ -2284,6 +2698,21 @@ describe('validateDesignerShare — lid.slide', () => {
     expect(
       validateDesignerShare(payload, Buffer.byteLength(JSON.stringify(payload), 'utf8')).valid
     ).toBe(true);
+  });
+
+  it('accepts a boolean fill and refuses anything else', () => {
+    const p = validPayload();
+    const withFill = (fill: unknown) => {
+      const payload = { ...p, params: { ...p.params, lid: { enabled: true, fill } } };
+      return validateDesignerShare(payload, Buffer.byteLength(JSON.stringify(payload), 'utf8'));
+    };
+    const filled = withFill(true);
+    expect(filled.valid).toBe(true);
+    if (filled.valid) {
+      expect((filled.payload.params.lid as Record<string, unknown>).fill).toBe(true);
+    }
+    expect(withFill(false).valid).toBe(true);
+    expect(withFill('yes').valid).toBe(false);
   });
 
   it('accepts the new attachment on the lid', () => {

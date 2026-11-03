@@ -109,7 +109,7 @@ above `STEEP_CARD_SKEW`), the phone cautions that sizing accuracy degrades and t
 shoot flatter.
 
 **Classical-path limit.** Only DETECTED reference cells are excluded from the
-Otsu tool mask, and a cell the tool half-covers is never detected — it merges
+colour segmenter, and a cell the tool half-covers is never detected — it merges
 with the tool, and its uncovered sliver reads as part of the silhouette. This
 bites hardest on a baseplate, where the tool necessarily sits on the sockets;
 they cannot be blanked wholesale either, because the tool occupies the same
@@ -118,23 +118,27 @@ sheet asks you to lay the tool inside the marker frame partly for this reason.
 
 ## Segmentation
 
-The tool is isolated with MediaPipe's **Interactive Segmenter** ("Magic Touch", on-device).
-On capture an auto-seed (the largest non-reference blob's centroid, via `computeAutoSeed`) drives
-a first pass; the user can **tap the tool** to re-segment around that point. This replaced
-the old global Otsu threshold + "adjust outline" slider, which had no notion of _which_
-object was the tool and frequently traced the background, the card, or a sub-region.
+Every tool in the photo is found by the classical colour segmenter (`colorSegment.ts`;
+its header holds the method), searched inside a lattice's hull when one sized the photo, so
+the table around a sheet never reads as a tool. MediaPipe's **Interactive Segmenter**
+("Magic Touch", on-device) then redraws each tool from a seed inside it (`interiorSeed`),
+and `refineScene.ts` keeps a redraw only where it agrees with the colour outline. A tap
+redraws, or adds, the tool under it. `@/shared/scanReview` runs these passes for the phone and the desktop alike. Holes are found from the
+same mask (background regions that never reach the frame's edge) and shown only
+while the review's Keep holes switch is on; a tool lying in a hole is flagged
+`inHole` and hidden with them.
 
 The model + WASM runtime are **lazy-imported** in `interactiveSegment.ts` (dynamic
 `import('@mediapipe/tasks-vision')`), so they never enter the eager scan bundle. Assets are
 self-hosted under `/models/` — the model `magic_touch.tflite` is committed; the
 tasks-vision WASM is copied from the pinned npm package at build by
-`scripts/vite-plugin-mediapipe-assets.ts`. If the model can't load, `ScanPage` silently
-falls back to the classical `traceScene` (Otsu) path so the feature still works.
+`scripts/vite-plugin-mediapipe-assets.ts`. If the model can't load, `ScanPage` keeps the
+colour outlines and turns tapping off, so the feature still works.
 
 Card detection, homography, and the contour/simplify tail are shared by both paths
 (`detectCard` + the `finishTrace` tail in `traceScene.ts`). The ML path traces the segmenter's
 **soft confidence mask** sub-pixel via marching squares (`softContour.ts`); the classical path
-boundary-traces a binary mask. The faceted outline is then **smoothed by Bézier curve fitting**
+boundary-traces each piece of a binary mask (`toolBlobs.ts`). The faceted outline is then **smoothed by Bézier curve fitting**
 (`curveFit.ts`, via `fit-curve`) into clean arcs with crisp corners, and a symmetric tool's outline
 is **auto-symmetrized** when it scores high enough (`symmetry.ts`). Both are `smooth`-gated — tests
 pass `smooth: false` to assert exact card-scale geometry.
@@ -146,18 +150,29 @@ parametric cutouts: scanned outlines import with a default `clearance` + `chamfe
 clearance/chamfer and fillets its bottom edges for the scoop. This keeps the phone pipeline simple
 and the fit fully tunable on the desktop.
 
+## Desktop
+
+The bin designer's trace view (`components/TraceView/`) runs the same passes on a photo
+dropped in on the computer and hands the scan dialog the millimetre SVG a phone uploads.
+With no reference in frame, `manualReference.ts` builds one from a drawn ruler or four
+marked paper corners; marked paper also bounds the search, like a lattice's hull.
+
 ## Pieces
 
 - `scanRouting.ts` — pure `/scan/:token` path helpers (`isScanPath`, `getScanToken`).
   Imported by `main.tsx` (cheap route detection) and `shell/scanBoot.tsx`.
 - `components/ScanPage.tsx` — the capture UI: guided capture → segment → review (tap to
-  redo) → upload. App-like full-bleed layout with safe-area handling and a fixed action bar.
+  redo, remove a tool) → upload, one SVG path per tool. App-like full-bleed layout with
+  safe-area handling and a fixed action bar.
+
+In `@/shared/scanReview`, shared with the desktop's trace view:
+
 - `cardSize.ts` — the reference card's real dimensions (long/short, not width/height,
   because that is what `cardHomography` consumes), validated and remembered per device.
   The sheet and the baseplate have no equivalent: their sizes are printed or moulded in,
   so `withCardSize` is a no-op on a lattice-sized scene.
-- `components/CardSizeEditor/` — collapsed readout + caliper entry for that size, shown on
-  the review screen only when a card was actually detected.
+- `CardSizeEditor` — collapsed readout + caliper entry for that size, shown on the review
+  screen only when a card was actually detected.
 
 In `@/shared/scanTrace`, for the lattice references:
 
@@ -182,7 +197,7 @@ scan bundle.
 
 ## Dependencies
 
-- Segmentation: `@/shared/scanTrace` (`decodeImageToCanvas` + `computeAutoSeed` +
-  `segmentAt` + `traceSceneSegmented`, classical `traceScene` fallback).
+- Segmentation: `@/shared/scanTrace` (`decodeImageToCanvas` + `traceScene` +
+  `segmentAt` + `traceSceneSegmented` + `withRefinedShape`).
 - Handoff endpoint: `POST /api/scan-session/:token` (see `api/scan-session/[token].ts`).
 - A Vercel rewrite maps `/scan/:token` → `/` (`vercel.json`).

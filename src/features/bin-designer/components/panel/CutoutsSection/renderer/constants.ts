@@ -65,6 +65,14 @@ export const HANDLE_STROKE_COLOR = '#ffffff';
 /** Off-board warning frame — red to stay distinct from the amber selection. */
 export const OFF_BOARD_COLOR = '#ef4444'; // --color-error
 /**
+ * Pocket check frame: orange and drawn dashed, so it reads apart from both the
+ * solid amber selection and the solid red off-board frame.
+ */
+export const ISSUE_COLOR = '#fb923c';
+
+/** A split pocket's dividing line: distinct from the warning frames and the selection. */
+export const SPLIT_COLOR = '#38bdf8';
+/**
  * Taper band — slate rather than a warning colour. Nothing is wrong when it
  * shows; it marks where a deep cutout gets trimmed, and it must not compete
  * with the amber selection or the red off-board frame.
@@ -85,9 +93,6 @@ export const EDGE_HANDLE_HEIGHT = 4;
 /** Hover scale factor for handles */
 export const HANDLE_HOVER_SCALE = 1.3;
 
-/** Grid dot radius in screen pixels (constant size regardless of zoom) */
-export const DOT_RADIUS_PX = 1.2;
-
 /** SDF stroke width in screen pixels */
 export const STROKE_WIDTH_SELECTED_PX = 1.5;
 export const STROKE_WIDTH_DEFAULT_PX = 0.75;
@@ -97,6 +102,3 @@ export const STROKE_WIDTH_GROUPED_PX = 0.75;
 /** Rotation handle offset in screen pixels above the shape */
 export const ROTATION_HANDLE_OFFSET_PX = 15;
 export const ROTATION_HANDLE_RADIUS_PX = 4;
-
-/** Dot grid threshold — bins larger than this use 2mm spacing */
-export const LARGE_BIN_THRESHOLD = 10000;

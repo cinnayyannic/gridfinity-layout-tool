@@ -214,6 +214,17 @@ function isPartialCellMask(value: unknown): boolean {
 }
 
 /**
+ * The sanitized params a published design keeps. Card metrics and the
+ * drawer-fit verdict measure the nominal footprint, so a published design goes
+ * without its overhang until they count it. The example-duplicate fingerprints
+ * are computed over this same shape.
+ */
+export function publishableParams(params: Record<string, unknown>): Record<string, unknown> {
+  const { overhang: _overhang, ...rest } = params;
+  return rest;
+}
+
+/**
  * Derive technique tags from validated, sanitized params.
  *
  * Each predicate is the same gate the generation pipeline itself checks before
@@ -542,11 +553,12 @@ export function validateCommunityPublish(body: unknown): CommunityValidationResu
       JSON.stringify({ name, description, category, ...designerPayload }),
       'utf8'
     );
-    const designResult = validateDesignerShare(designerPayload, sizeBytes);
+    // Refs are checked for shape here; the handler checks the caller holds each file.
+    const designResult = validateDesignerShare(designerPayload, sizeBytes, { meshRefs: true });
     if (!designResult.valid) {
       return { valid: false, error: designResult.error };
     }
-    params = designResult.payload.params;
+    params = publishableParams(designResult.payload.params);
 
     // Sweeps engraved/label text nested inside the sanitized params, a
     // separate channel from the envelope strings checked above.

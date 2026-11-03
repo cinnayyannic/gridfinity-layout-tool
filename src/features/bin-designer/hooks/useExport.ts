@@ -34,9 +34,10 @@ import { withSocketNozzle } from '@/shared/generation/socketNozzle';
 import { generateFileName } from '@/features/bin-designer/utils/fileNaming';
 import { estimatePrint } from '@/features/bin-designer/utils/printEstimates';
 import { getSplitPieceCount, getSplitPlanePositionsMm } from '@/shared/utils/splitPositions';
-import { getErrorCode } from '@/shared/utils/errors';
+import { getErrorCauses, getErrorCode } from '@/shared/utils/errors';
 import { packagePiecesAsZip } from '@/shared/generation/zipExport';
-import { triggerDownload } from '@/shared/generation/exportUtils';
+import { deliverExport } from '@/shared/exportDestination/deliverExport';
+import { primeExportFolder } from '@/shared/exportDestination/exportFolder';
 import { DEFAULT_SPLIT_CONNECTOR_CONFIG } from '@/features/bin-designer/constants/defaults';
 import type { ExportFileNameConfig, ExportFileFormat } from '@/features/bin-designer/types';
 import type { PrintEstimate } from '@/features/bin-designer/utils/printEstimates';
@@ -61,6 +62,7 @@ import { recordCommunityExport } from '@/shared/api/communityAttribution';
 import { isMultiColorDesign } from '@/features/bin-designer/utils/multiColorDesign';
 import { useTranslation } from '@/i18n';
 import { usePlannerBridge } from './usePlannerBridge';
+import { useLayoutPrintBed } from './useLayoutPrintBed';
 
 interface UseExportReturn {
   /** Whether a main bin or split export is currently in progress */
@@ -128,13 +130,8 @@ export function useExport(): UseExportReturn {
     }))
   );
 
-  const { printSettings, defaultPrintBedSize, defaultPrintBedDepth } = useSettingsStore(
-    useShallow((s) => ({
-      printSettings: s.settings.printSettings,
-      defaultPrintBedSize: s.settings.defaultPrintBedSize,
-      defaultPrintBedDepth: s.settings.defaultPrintBedDepth,
-    }))
-  );
+  const printSettings = useSettingsStore((s) => s.settings.printSettings);
+  const { printBedSize, printBedDepth } = useLayoutPrintBed();
 
   const addToast = useToastStore((s) => s.addToast);
 
@@ -168,8 +165,8 @@ export function useExport(): UseExportReturn {
   // defaultGridUnitMm from settings, which may be stale, and charges the bin's
   // overhang against the bed.
   const chunkLimit = useMemo(
-    () => binSplitChunkUnits(params, defaultPrintBedSize, defaultPrintBedDepth),
-    [defaultPrintBedSize, defaultPrintBedDepth, params]
+    () => binSplitChunkUnits(params, printBedSize, printBedDepth),
+    [printBedSize, printBedDepth, params]
   );
 
   const needsSplit = params.width > chunkLimit.width || params.depth > chunkLimit.depth;
@@ -227,6 +224,7 @@ export function useExport(): UseExportReturn {
       has_lid: hasLid,
       needs_split: isSplit,
       multi_color_enabled: isMultiColorDesign(params),
+      has_floor_text: (params.surfaceText?.floorText?.trim() ?? '') !== '',
     }),
     [params, hasDividers, hasLid]
   );
@@ -287,10 +285,7 @@ export function useExport(): UseExportReturn {
         handles_enabled: params.handles.enabled,
         cutout_count: params.cutouts.length,
         insert_count: params.inserts.length,
-        // Original error chain — binExporter's retry path attaches `cause`
-        // to the first-attempt error, which is invaluable when the surfaced
-        // error masks a more diagnostic earlier failure.
-        first_attempt_message: error.cause instanceof Error ? error.cause.message : undefined,
+        error_causes: getErrorCauses(error),
         retry_count: retryCount,
         restart_count: restartCount,
       });
@@ -352,6 +347,7 @@ export function useExport(): UseExportReturn {
       config: ExportFileNameConfig,
       designName?: string
     ): Promise<boolean> => {
+      primeExportFolder();
       // Engine not ready: queue the click and bail. The readiness effect above
       // will replay it once `engineReady` flips. Returning `false` lets the
       // caller (ExportDialog) skip its success path; the queued replay will
@@ -420,7 +416,7 @@ export function useExport(): UseExportReturn {
           fileName,
           threeMFContext
         );
-        triggerDownload(blob, downloadName);
+        void deliverExport(blob, downloadName);
 
         trackBinExportSucceeded(
           buildExportTelemetry(
@@ -478,6 +474,7 @@ export function useExport(): UseExportReturn {
       config: ExportFileNameConfig,
       designName?: string
     ): Promise<boolean> => {
+      primeExportFolder();
       if (!engineReady || !getActiveBridge()) {
         pendingExportRef.current = { kind: 'split', format, config, designName };
         return false;
@@ -590,7 +587,7 @@ export function useExport(): UseExportReturn {
           );
 
           const zip = packagePiecesAsZip(convertedPieces, baseName, '.3mf');
-          triggerDownload(zip, `${baseName}_split.zip`);
+          void deliverExport(zip, `${baseName}_split.zip`);
         } else {
           const allPieces = [
             ...result.pieces.map((p) => ({ data: p.data, label: p.label })),
@@ -601,7 +598,7 @@ export function useExport(): UseExportReturn {
             baseName,
             format === 'step' ? '.step' : '.stl'
           );
-          triggerDownload(blob, `${baseName}_split.zip`);
+          void deliverExport(blob, `${baseName}_split.zip`);
         }
 
         trackBinExportSucceeded(

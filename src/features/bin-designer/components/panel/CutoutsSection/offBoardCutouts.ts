@@ -24,12 +24,13 @@
  */
 
 import type { Cutout } from '@/features/bin-designer/types';
-import type { MeshAsset } from '@/shared/generation/meshAsset';
+import type { MeshAssetEntry } from '@/shared/generation/meshAsset';
 import type { CellMask } from '@/shared/utils/cellMask';
 import type { LidCutoutWindow } from '@/shared/utils/lidCutoutPlan';
 import { expandCutoutArray } from '@/shared/utils/cutoutArray';
 import { translateCutout } from './cutoutHelpers';
 import { translatePathPoints } from './pathGeometry';
+import { mapPathRings } from '@/features/bin-designer/utils/pathTransforms';
 import { getCutoutBounds, cutoutFitsInMask, type MaskCellSize } from './maskFit';
 import { cutoutFitsInLidWindow, lidWindowOffset } from './lidWindowFit';
 import { MIN_CUTOUT_SIZE } from './geometryResize';
@@ -48,7 +49,7 @@ export interface CutoutBoard {
   readonly mask?: CellMask;
   readonly cellSize?: MaskCellSize;
   readonly lidWindow?: LidCutoutWindow;
-  readonly meshAssets?: Readonly<Record<string, MeshAsset>>;
+  readonly meshAssets?: Readonly<Record<string, MeshAssetEntry>>;
 }
 
 /**
@@ -195,7 +196,7 @@ function maskOffset(
   instances: readonly Cutout[],
   mask: CellMask,
   cellSize: MaskCellSize,
-  meshAssets: Readonly<Record<string, MeshAsset>> | undefined
+  meshAssets: Readonly<Record<string, MeshAssetEntry>> | undefined
 ): { dx: number; dy: number } | null {
   const u = unionBounds(instances.map(getCutoutBounds));
   let best: { dx: number; dy: number } | null = null;
@@ -248,7 +249,7 @@ export function clampCutoutToBoard(cutout: Cutout, board: CutoutBoard): Partial<
   if (Math.abs(dx) < EPSILON && Math.abs(dy) < EPSILON) return resized;
   const moved: Partial<Cutout> = { ...resized, x: base.x + dx, y: base.y + dy };
   if (base.shape === 'path' && base.path) {
-    return { ...moved, path: translatePathPoints(base.path, dx, dy) };
+    return { ...moved, ...mapPathRings(base, (ring) => translatePathPoints(ring, dx, dy)) };
   }
   return moved;
 }
@@ -309,6 +310,7 @@ export function centerOffBoardCutouts(
       x: moved.x,
       y: moved.y,
       ...(moved.path ? { path: moved.path } : {}),
+      ...(moved.holes ? { holes: moved.holes } : {}),
     });
   }
   return updates;

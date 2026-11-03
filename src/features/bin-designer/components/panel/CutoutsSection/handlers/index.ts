@@ -12,7 +12,7 @@ export { handleRotateMove } from './rotateHandler';
 export { handleGroupRotateMove } from './groupRotateHandler';
 export { handleGroupScaleMove } from './groupScaleHandler';
 export { handleDrawMove } from './drawHandler';
-export { handleCutoutKeyDown } from './keyboardHandler';
+export { focusOwnsKeys, handleCutoutKeyDown } from './keyboardHandler';
 export type { KeyboardHandlerContext } from './keyboardHandler';
 export {
   handlePathDrawingPointerDown,
@@ -30,6 +30,8 @@ export {
   handleVertexEditPointerMove,
   handleVertexEditPointerUp,
   handleVertexEditKeyDown,
+  dragSource,
+  nearestPoint,
 } from './pathEditHandler';
 export type { VertexEditMode, VertexEditSetters, SegmentHoverInfo } from './pathEditHandler';
 

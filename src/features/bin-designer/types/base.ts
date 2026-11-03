@@ -338,7 +338,10 @@ export const DETACHABLE_PIN_MEMBRANE_MM = 0.4;
  */
 export const DETACHABLE_PIN_MIN_ENGAGEMENT_MM = 0.6;
 
-/** How deep a pin reaches into a floor of `floorThicknessMm`, in mm. */
+/**
+ * How deep a pin's hole reaches into a floor of `floorThicknessMm`, in mm. The
+ * pin itself stops {@link DETACHABLE_PIN_END_CLEARANCE_MM} short of it.
+ */
 export function detachablePinEngagementMm(floorThicknessMm: number): number {
   return floorThicknessMm - DETACHABLE_PIN_MEMBRANE_MM;
 }
@@ -354,8 +357,20 @@ export function detachablePinEngagementMm(floorThicknessMm: number): number {
  *
  * A wall thicker than the remainder keeps its own floor: thinning it back to
  * spec would put less material under the cavity than beside it.
+ *
+ * A flat base has no socket, so that dead space has nothing to describe: its
+ * floor lies on the bed and its height already counts from there. The spec
+ * floor there is a slab of solid infill the bin never needed, so it takes the
+ * wall instead, thickened by any divider groove cut into it so the membrane
+ * under the groove is still a wall thick. A tray keeps the spec floor, because
+ * it spans the open skirt beneath it.
  */
-export function binFloorMm(wallThicknessMm: number): number {
+export function binFloorMm(
+  wallThicknessMm: number,
+  style: BaseStyle,
+  grooveDepthMm: number
+): number {
+  if (style === 'flat') return wallThicknessMm + grooveDepthMm;
   return Math.max(wallThicknessMm, GRIDFINITY.BASE_HEIGHT - GRIDFINITY.SOCKET_HEIGHT);
 }
 
@@ -369,6 +384,15 @@ export const DETACHABLE_PIN_TARGET_ENGAGEMENT_MM =
  * the other two land on floor.
  */
 export const DETACHABLE_PIN_LEAD_IN_MM = 0.4;
+
+/**
+ * How far a pin's tip stops short of the end of its hole, in mm. The hole ends
+ * at the membrane, which prints as a bridge that sags into it by up to 0.4mm,
+ * and the pin and the hole each round to the layer grid, which can eat another
+ * layer. A pin that reaches the sag bottoms out and holds the foot off the
+ * floor, so the gap has to cover all three.
+ */
+export const DETACHABLE_PIN_END_CLEARANCE_MM = 1;
 
 /**
  * Largest gap allowed between adjacent feet, in mm.
@@ -475,6 +499,13 @@ export interface BaseConfig {
    * bosses, feet), where the plain mouth stays. Absent means off.
    */
   readonly magnetChamfer?: boolean;
+  /**
+   * Drill the magnet and screw holes at the bin's outer corners only, instead
+   * of under every foot (`outerCornerHoleFilter`). Absent means every foot, for
+   * the same fingerprint reason as {@link magnetCrushRibs}. Inert without magnet
+   * or screw holes.
+   */
+  readonly cornerHolesOnly?: boolean;
   readonly screwDiameter: number;
   readonly stackingLip: boolean;
   /**
@@ -488,6 +519,17 @@ export interface BaseConfig {
    * Inert while {@link stackingLip} is off: there is no peak to finish.
    */
   readonly lipTip?: LipTipStyle;
+  /**
+   * A notch on the stacking lip at every internal grid line, so a smaller bin
+   * stacked on top registers to a cell instead of sliding along the rim. Absent
+   * means off, for the same fingerprint reason as {@link lipTip}.
+   * `resolveLipNotches` (`@/shared/utils/lipNotchPlan`) decides whether it is
+   * actually built.
+   */
+  readonly lipNotches?: boolean;
+  /** Optional rounding of the plain wall rim, independent of the stacking lip. */
+  readonly rimFillet?: boolean;
+  readonly rimFilletRadius?: number;
   /** When true, the bin body is a solid block (no cavity). Used by cutouts feature. */
   readonly solid: boolean;
   /** When true, subdivides the base into 0.5u half sockets per {@link halfSocketMode}. */

@@ -16,6 +16,7 @@ import {
   TEXT_FONT_FAMILIES,
   TEXT_MODES,
   WALL_ALIGN_TO_ANCHOR,
+  isTextQuarterTurn,
   normalizeTextInput,
   WALL_TEXT_ALIGNS,
   WALL_TEXT_SIDES,
@@ -101,18 +102,43 @@ function migrateTextStyleOverride(raw: unknown): TextStyleOverride | undefined {
 
 export function migrateSurfaceText(raw: unknown): SurfaceTextConfig | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
-  const { lidText, walls, wallAlign, style, lidStyle, wallStyles } = raw as {
+  const {
+    lidText,
+    lidTextRotation,
+    floorText,
+    floorTextRotation,
+    walls,
+    wallAlign,
+    style,
+    lidStyle,
+    floorStyle,
+    wallStyles,
+    wallFaces,
+    insideStyle,
+  } = raw as {
     lidText?: unknown;
+    lidTextRotation?: unknown;
+    floorText?: unknown;
+    floorTextRotation?: unknown;
     walls?: unknown;
     wallAlign?: unknown;
     style?: unknown;
     lidStyle?: unknown;
+    floorStyle?: unknown;
     wallStyles?: unknown;
+    wallFaces?: unknown;
+    insideStyle?: unknown;
   };
   // Trimmed on write (store setters) — trim again here so the worker (which
   // trims before generating) and persisted state can't disagree.
   const text = typeof lidText === 'string' ? normalizeTextInput(lidText).trim() : undefined;
   const hasText = text !== undefined && text !== '';
+  // 0 is the absent state, so it collapses like every other default here.
+  const rotation =
+    isTextQuarterTurn(lidTextRotation) && lidTextRotation !== 0 ? lidTextRotation : undefined;
+  const floor = typeof floorText === 'string' ? normalizeTextInput(floorText).trim() : '';
+  const floorRotation =
+    isTextQuarterTurn(floorTextRotation) && floorTextRotation !== 0 ? floorTextRotation : undefined;
 
   // Per-wall strings: keep only known sides with non-empty values, clamped
   // and trimmed like the lid text.
@@ -149,6 +175,7 @@ export function migrateSurfaceText(raw: unknown): SurfaceTextConfig | undefined 
       : baseStyle;
 
   const migratedLidStyle = migrateTextStyleOverride(lidStyle);
+  const migratedFloorStyle = migrateTextStyleOverride(floorStyle);
   const migratedWallStyles: Partial<Record<WallTextSide, TextStyleOverride>> = {};
   if (isObj(wallStyles)) {
     for (const side of WALL_TEXT_SIDES) {
@@ -158,21 +185,41 @@ export function migrateSurfaceText(raw: unknown): SurfaceTextConfig | undefined 
   }
   const hasWallStyles = Object.keys(migratedWallStyles).length > 0;
 
+  const migratedFaces: Partial<Record<WallTextSide, 'inside'>> = {};
+  if (isObj(wallFaces)) {
+    for (const side of WALL_TEXT_SIDES) {
+      if (wallFaces[side] === 'inside') migratedFaces[side] = 'inside';
+    }
+  }
+  const hasFaces = Object.keys(migratedFaces).length > 0;
+  const migratedInsideStyle = hasFaces ? migrateTextStyleOverride(insideStyle) : undefined;
+
   if (
     !hasText &&
+    rotation === undefined &&
+    floor === '' &&
+    floorRotation === undefined &&
     !hasWalls &&
     migratedStyle === undefined &&
     migratedLidStyle === undefined &&
-    !hasWallStyles
+    migratedFloorStyle === undefined &&
+    !hasWallStyles &&
+    !hasFaces
   ) {
     return undefined;
   }
   return {
     ...(hasText ? { lidText: text } : {}),
+    ...(rotation !== undefined ? { lidTextRotation: rotation } : {}),
+    ...(floor !== '' ? { floorText: floor } : {}),
+    ...(floorRotation !== undefined ? { floorTextRotation: floorRotation } : {}),
     ...(hasWalls ? { walls: migratedWalls } : {}),
     ...(migratedStyle !== undefined ? { style: migratedStyle } : {}),
     ...(migratedLidStyle !== undefined ? { lidStyle: migratedLidStyle } : {}),
+    ...(migratedFloorStyle !== undefined ? { floorStyle: migratedFloorStyle } : {}),
     ...(hasWallStyles ? { wallStyles: migratedWallStyles } : {}),
+    ...(hasFaces ? { wallFaces: migratedFaces } : {}),
+    ...(migratedInsideStyle !== undefined ? { insideStyle: migratedInsideStyle } : {}),
   };
 }
 

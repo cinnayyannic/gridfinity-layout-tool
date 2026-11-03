@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { SingleBinInspector } from '@/features/bin-inspector';
 import type { UseBinInspectorReturn } from '@/features/bin-inspector';
 import { createTestBin, createTestLayout, resetAllStores } from '@/test/testUtils';
-import { useHalfGridModeStore } from '@/core/store';
+import { useHalfGridModeStore, useLabsStore } from '@/core/store';
 import { STAGING_ID } from '@/core/constants';
 import { binId, categoryId, gridUnits, heightUnits, layerId } from '@/core/types';
 import type { Category, Layer } from '@/core/types';
@@ -63,17 +63,17 @@ describe('SingleBinInspector', () => {
     layout: mockLayout,
     categories: mockLayout.categories,
     constraints: {
-      minHeight: 3,
+      minHeight: 2,
       maxHeight: 12,
       maxClearance: 5,
       maxGridUnits: { width: 6, depth: 6 },
       needsSplit: false,
-      heightRange: '3-12u',
-      minHeightReason: 'layer_height',
+      heightRange: '2-12u',
       maxHeightReason: 'remaining_space',
     },
     updateField: vi.fn(),
     updateCustomProperties: vi.fn(),
+    updateItems: vi.fn(),
     updateMultiCustomProperty: vi.fn(),
     updateMultiCategory: vi.fn(),
     updateMultiHeight: vi.fn(),
@@ -98,6 +98,82 @@ describe('SingleBinInspector', () => {
   beforeEach(() => {
     resetAllStores();
     vi.clearAllMocks();
+  });
+
+  describe('contents', () => {
+    it('lists what the bin holds while the places flag is on', () => {
+      useLabsStore.getState().enableFeature('places');
+      const bin = { ...mockBin, items: [{ id: 'i1', name: 'M3 nuts' }] };
+      const updateItems = vi.fn();
+      render(
+        <SingleBinInspector
+          inspector={createMockInspector({ bin, updateItems })}
+          variant="desktop"
+        />
+      );
+      expect(screen.getByText('Contents')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Remove M3 nuts' }));
+      expect(updateItems).toHaveBeenCalledWith([]);
+    });
+
+    it('keeps an unsaved item with the bin it was typed for', () => {
+      useLabsStore.getState().enableFeature('places');
+      const updateItems = vi.fn();
+      const { rerender } = render(
+        <SingleBinInspector
+          inspector={createMockInspector({ bin: mockBin, updateItems })}
+          variant="desktop"
+        />
+      );
+      fireEvent.change(screen.getByLabelText('Add an item'), { target: { value: 'Washers' } });
+      rerender(
+        <SingleBinInspector
+          inspector={createMockInspector({ bin: { ...mockBin, id: binId('other') }, updateItems })}
+          variant="desktop"
+        />
+      );
+      expect(screen.getByLabelText('Add an item')).toHaveValue('');
+    });
+
+    it('saves an edited item to its own bin when another bin is pressed', () => {
+      useLabsStore.getState().enableFeature('places');
+      const bin = { ...mockBin, items: [{ id: 'i1', name: 'Nuts' }] };
+      const updateItems = vi.fn();
+      render(
+        <SingleBinInspector
+          inspector={createMockInspector({ bin, updateItems })}
+          variant="desktop"
+        />
+      );
+      fireEvent.change(screen.getByLabelText('Nuts'), { target: { value: 'Wing nuts' } });
+      fireEvent.pointerDown(document.body);
+      expect(updateItems).toHaveBeenCalledWith([{ id: 'i1', name: 'Wing nuts' }]);
+    });
+
+    it('leaves the section out while the flag is off', () => {
+      useLabsStore.getState().disableFeature('places');
+      render(<SingleBinInspector inspector={createMockInspector()} variant="desktop" />);
+      expect(screen.queryByText('Contents')).toBeNull();
+    });
+  });
+
+  describe('slant', () => {
+    it('offers a slant with the labs flag on, on desktop and mobile', () => {
+      useLabsStore.getState().enableFeature('slant');
+      for (const variant of ['desktop', 'mobile'] as const) {
+        const { unmount } = render(
+          <SingleBinInspector inspector={createMockInspector()} variant={variant} />
+        );
+        expect(screen.getByRole('checkbox', { name: 'Slant' })).toBeInTheDocument();
+        unmount();
+      }
+    });
+
+    it('leaves it out with the flag off and nothing slanted', () => {
+      useLabsStore.getState().disableFeature('slant');
+      render(<SingleBinInspector inspector={createMockInspector()} variant="desktop" />);
+      expect(screen.queryByRole('checkbox', { name: 'Slant' })).toBeNull();
+    });
   });
 
   describe('rendering', () => {
@@ -145,8 +221,8 @@ describe('SingleBinInspector', () => {
       const inspector = createMockInspector();
       const { container } = render(<SingleBinInspector inspector={inspector} variant="desktop" />);
 
-      // min 3u * 7mm = 21mm, max 12u * 7mm = 84mm on one full-width line.
-      const limits = screen.getByText(/Min 21mm: layer height · Max 84mm: remaining space/);
+      // min 2u * 7mm = 14mm, max 12u * 7mm = 84mm on one full-width line.
+      const limits = screen.getByText(/Min 14mm · Max 84mm: remaining space/);
       expect(limits).toBeInTheDocument();
 
       // Keeping these out of the grid is what stops the Clearance cell from
@@ -154,6 +230,31 @@ describe('SingleBinInspector', () => {
       const grid = container.querySelector('.grid-cols-2');
       expect(grid).toBeInTheDocument();
       expect(grid).not.toContainElement(limits);
+    });
+
+    it('says where a stacked bin rests and when part of its base is unsupported', () => {
+      const upper = { ...mockBin, layerId: layerId('layer2') };
+      const support = createTestBin({
+        id: binId('support'),
+        width: gridUnits(1),
+        depth: gridUnits(3),
+        height: heightUnits(3),
+      });
+      const layout = { ...mockLayout, bins: [support, upper] };
+      render(
+        <SingleBinInspector
+          inspector={createMockInspector({ bin: upper, selectedBins: [upper], layout })}
+          variant="desktop"
+        />
+      );
+
+      expect(screen.getByText('Rests 3u above the plate')).toBeInTheDocument();
+      expect(screen.getByText('Part of its base is unsupported')).toBeInTheDocument();
+    });
+
+    it('says nothing about resting for a bin on the plate', () => {
+      render(<SingleBinInspector inspector={createMockInspector()} variant="desktop" />);
+      expect(screen.queryByText(/above the plate/)).not.toBeInTheDocument();
     });
 
     it('renders clearance control in mm when maxClearance > 0', () => {
@@ -168,13 +269,12 @@ describe('SingleBinInspector', () => {
     it('hides clearance control when maxClearance is 0', () => {
       const inspector = createMockInspector({
         constraints: {
-          minHeight: 3,
+          minHeight: 2,
           maxHeight: 12,
           maxClearance: 0,
           maxGridUnits: { width: 6, depth: 6 },
           needsSplit: false,
-          heightRange: '3-12u',
-          minHeightReason: 'layer_height' as const,
+          heightRange: '2-12u',
           maxHeightReason: 'remaining_space' as const,
         },
       });
@@ -310,7 +410,7 @@ describe('SingleBinInspector', () => {
 
     it('disables height decrease at min', () => {
       const inspector = createMockInspector({
-        bin: { ...mockBin, height: heightUnits(3) },
+        bin: { ...mockBin, height: heightUnits(2) },
       });
       render(<SingleBinInspector inspector={inspector} variant="desktop" />);
 

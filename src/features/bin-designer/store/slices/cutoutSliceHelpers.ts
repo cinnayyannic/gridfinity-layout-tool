@@ -4,15 +4,11 @@
  */
 
 import type { Draft } from 'immer';
-import type {
-  DesignerState,
-  Cutout,
-  CutoutTarget,
-  CutoutToggleProperties,
-  PathPoint,
-} from '../../types';
+import type { DesignerState, Cutout, CutoutTarget, CutoutToggleProperties } from '../../types';
 import { MAX_LID_CUTOUTS } from '../../types';
-import { scalePathPoints, translatePathPoints } from '../../utils/pathTransforms';
+import { FINGER_SHAPES } from '@/shared/utils/fingerAccess';
+import { splitBlockedReason } from '@/shared/utils/cutoutSplit';
+import { mapPathRings, scalePathPoints, translatePathPoints } from '../../utils/pathTransforms';
 import {
   groupChain,
   referencedGroupIds,
@@ -60,8 +56,12 @@ export function cutoutOwner(state: Draft<DesignerState>): { cutouts: Cutout[] } 
 }
 
 // Points are absolute, handles are relative — scale around the old origin
-// first so the bounds end up flush with the new x/y, then translate.
-export function applyPathTransform(c: Cutout, updates: Partial<Cutout>): PathPoint[] | undefined {
+// first so the bounds end up flush with the new x/y, then translate. Islands
+// go the same way as the outline they sit in.
+export function applyPathTransform(
+  c: Cutout,
+  updates: Partial<Cutout>
+): Pick<Cutout, 'path' | 'holes'> | undefined {
   if (!c.path || c.path.length === 0 || updates.path) return undefined;
   const newX = updates.x ?? c.x;
   const newY = updates.y ?? c.y;
@@ -74,8 +74,62 @@ export function applyPathTransform(c: Cutout, updates: Partial<Cutout>): PathPoi
   const dy = newY - c.y;
   const translated = dx !== 0 || dy !== 0;
   if (!scaled && !translated) return undefined;
-  const scaledPoints = scaled ? scalePathPoints(c.path, scaleX, scaleY, c.x, c.y) : c.path;
-  return translated ? translatePathPoints(scaledPoints, dx, dy) : [...scaledPoints];
+  return mapPathRings(c, (ring) => {
+    const scaledPoints = scaled ? scalePathPoints(ring, scaleX, scaleY, c.x, c.y) : ring;
+    return translated ? translatePathPoints(scaledPoints, dx, dy) : [...scaledPoints];
+  });
+}
+
+/**
+ * Merge `updates` into `c`. A depth typed without a mode means a fixed depth:
+ * `floor` and `through` re-derive `cutDepth` after every write, so leaving the
+ * mode in place would quietly overwrite the number the user just entered.
+ */
+export function mergeCutoutUpdate(c: Cutout, updates: Partial<Cutout>): Cutout {
+  const transformedRings = applyPathTransform(c, updates);
+  const merged = withScaledSplit(
+    c,
+    withoutStrayFinger(
+      transformedRings ? { ...c, ...updates, ...transformedRings } : { ...c, ...updates }
+    )
+  );
+  const typedDepth = updates.cutDepth !== undefined && !('depthMode' in updates);
+  if (!typedDepth && merged.depthMode !== undefined) return merged;
+  if (!('depthMode' in merged) && !('floorMm' in merged)) return merged;
+  const { depthMode: _mode, floorMm: _floor, ...fixed } = merged;
+  return fixed;
+}
+
+/**
+ * Carry a split line through a resize, so it divides the pocket where it did.
+ * A shape that cannot be split drops it; a group, a lean or a through cut only
+ * pause it, so undoing them brings it back.
+ */
+function withScaledSplit(before: Cutout, c: Cutout): Cutout {
+  const { split } = c;
+  if (!split) return c;
+  if (splitBlockedReason(c) === 'shape') {
+    const { split: _split, ...rest } = c;
+    return rest;
+  }
+  if (split !== before.split) return c;
+  const sx = before.width !== 0 ? c.width / before.width : 1;
+  const sy = before.depth !== 0 ? c.depth / before.depth : 1;
+  if (sx === 1 && sy === 1) return c;
+  return {
+    ...c,
+    split: {
+      ...split,
+      a: { x: split.a.x * sx, y: split.a.y * sy },
+      b: { x: split.b.x * sx, y: split.b.y * sy },
+    },
+  };
+}
+
+function withoutStrayFinger(c: Cutout): Cutout {
+  if (!('finger' in c) || (c.finger !== undefined && FINGER_SHAPES.includes(c.shape))) return c;
+  const { finger: _finger, ...rest } = c;
+  return rest;
 }
 
 // Expand a target id set to include every member of any group those ids touch,

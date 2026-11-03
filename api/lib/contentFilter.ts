@@ -57,7 +57,12 @@ export interface ContentFilterResult {
  */
 export function filterLayoutContent(layout: {
   name: string;
-  bins: Array<{ label?: string; notes?: string; customProperties?: Record<string, string> }>;
+  bins: Array<{
+    label?: string;
+    notes?: string;
+    customProperties?: Record<string, string>;
+    items?: Array<{ name: string; note?: string }>;
+  }>;
   categories: Array<{ name: string }>;
 }): ContentFilterResult {
   const nameResult = checkText(layout.name);
@@ -96,6 +101,15 @@ export function filterLayoutContent(layout: {
         const valueResult = checkText(value);
         if (!valueResult.passed) {
           return { passed: false, reason: `Custom property value: ${valueResult.reason}` };
+        }
+      }
+    }
+    for (const item of bin.items ?? []) {
+      for (const text of [item.name, item.note]) {
+        if (!text) continue;
+        const itemResult = checkText(text);
+        if (!itemResult.passed) {
+          return { passed: false, reason: `Bin item: ${itemResult.reason}` };
         }
       }
     }
@@ -227,8 +241,9 @@ const TEXT_BEARING_KEYS = new Set([
   'text',
   'label',
   'name',
-  // surfaceText.lidText, surfaceText.walls.{front,back,left,right}
+  // surfaceText.lidText, surfaceText.floorText, surfaceText.walls.{front,back,left,right}
   'lidText',
+  'floorText',
   'front',
   'back',
   'left',
@@ -325,8 +340,9 @@ export function filterDesignParamsContent(params: unknown): ContentFilterResult 
   // with benign strings and park the blocked content past the cutoff — the
   // filter would report "passed" on text it never looked at. No legitimate
   // design comes close: the engraved-text fields are individually bounded
-  // (MAX_COMPARTMENT_GRID, MAX_INSERTS, MAX_MESH_ASSETS, five surfaceText
-  // fields), so reaching the cap means the params were built to reach it.
+  // (MAX_COMPARTMENT_GRID, MAX_INSERTS, six surfaceText fields). Mesh names
+  // and labels have no count cap of their own: a design needs a couple of
+  // hundred meshes, each far below the import detail, to reach this one.
   if (texts.length > MAX_TEXT_FIELDS) {
     return { passed: false, reason: 'contains too many text fields to moderate' };
   }

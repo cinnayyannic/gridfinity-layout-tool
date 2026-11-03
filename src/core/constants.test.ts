@@ -15,10 +15,15 @@ import {
   getDefaultDrawerSize,
 } from '@/core/constants';
 import {
+  DEFAULT_BASEPLATE_PARAMS,
   migrateBaseplateParams,
+  MOUNT_MAGNET_DEFAULT_DEPTH_MM,
+  MOUNT_MAGNET_MAX_DIAMETER_MM,
   SOLID_FLOOR_MIN_MM,
   SOLID_FLOOR_MAX_MM,
 } from '@/core/baseplateDefaults';
+import { gridUnits, mm } from '@/core/types';
+import type { StoredBaseplateParams } from '@/core/types';
 
 describe('calcMaxGridUnits', () => {
   it('calculates max units for typical print bed', () => {
@@ -362,6 +367,83 @@ describe('getCellSizeY', () => {
 });
 
 describe('migrateBaseplateParams', () => {
+  it('preserves eco plate mode only for boolean stored values', () => {
+    const base = { ...DEFAULT_BASEPLATE_PARAMS };
+    expect(migrateBaseplateParams({ ...base, ecoPlate: true }).ecoPlate).toBe(true);
+    expect(migrateBaseplateParams({ ...base, ecoPlate: 'true' }).ecoPlate).toBeUndefined();
+  });
+
+  it('keeps crush ribs and the chamfered mouth through a reload', () => {
+    const base = { ...DEFAULT_BASEPLATE_PARAMS, magnetHoles: true };
+    const result = migrateBaseplateParams({ ...base, magnetCrushRibs: true, magnetChamfer: true });
+    expect(result.magnetCrushRibs).toBe(true);
+    expect(result.magnetChamfer).toBe(true);
+    expect(migrateBaseplateParams(base)).not.toHaveProperty('magnetCrushRibs');
+    expect(migrateBaseplateParams(base)).not.toHaveProperty('magnetChamfer');
+    const malformed = migrateBaseplateParams({
+      ...base,
+      magnetCrushRibs: 'true',
+      magnetChamfer: 1,
+    });
+    expect(malformed).not.toHaveProperty('magnetCrushRibs');
+    expect(malformed).not.toHaveProperty('magnetChamfer');
+  });
+
+  it('carries every stored field through a reload', () => {
+    // Typed Required so a new StoredBaseplateParams field fails typecheck here
+    // until it is added, and then fails the assertion until the migration
+    // names it: a field the migration does not name is lost on every load.
+    const stored: Required<StoredBaseplateParams> = {
+      magnetHoles: true,
+      magnetDiameter: mm(6.5),
+      magnetDepth: mm(2),
+      magnetCrushRibs: true,
+      magnetChamfer: true,
+      paddingLeft: mm(1),
+      paddingRight: mm(2),
+      paddingFront: mm(3),
+      paddingBack: mm(4),
+      paddingAnchor: 'c',
+      overTile: true,
+      overTileHalfGrid: true,
+      overTileHalfGridSolidLeftover: true,
+      wholeCellsOnly: true,
+      connectorNubs: true,
+      lightweight: true,
+      ecoPlate: true,
+      solidFloor: true,
+      solidFloorThickness: mm(1.2),
+      syncWithLayout: false,
+      baseplateWidth: gridUnits(5),
+      baseplateDepth: gridUnits(4),
+      invertDovetails: true,
+      preferIdenticalPieces: true,
+      connectorStyle: 'puzzle',
+      connectorSlotsAllEdges: true,
+      connectorFitOffset: 0.1,
+      cornerRadius: mm(4),
+      cornerRadii: { tl: mm(1), tr: mm(2), bl: mm(3), br: mm(4) },
+      fractionalEdgeX: 'start',
+      fractionalEdgeY: 'start',
+      detachMargins: true,
+      detachMarginConnector: true,
+      stackPrint: { enabled: true, gapMm: mm(0.2), copies: 3 },
+      splitOverride: { cols: [gridUnits(2), gridUnits(3)], rows: [gridUnits(4)] },
+      screwHoles: {
+        enabled: true,
+        diameter: mm(3.5),
+        headStyle: 'countersink',
+        headDiameter: mm(7),
+        counterboreDepth: mm(2),
+        screwsPerPiece: 4,
+        edgeInsetCells: 1,
+        cellCorner: 'inner',
+      },
+      mountMagnets: { enabled: true, diameter: mm(6), depth: mm(2), perPiece: 4, chamfer: true },
+    };
+    expect(migrateBaseplateParams(stored)).toEqual(stored);
+  });
+
   it('preserves connectorNubs when true', () => {
     const stored = {
       magnetHoles: true,
@@ -700,6 +782,25 @@ describe('migrateBaseplateParams', () => {
     ).toBeUndefined();
   });
 
+  it('preserves mountMagnets across a save/load round-trip', () => {
+    const full = { enabled: true, diameter: 6, depth: 2, perPiece: 6, chamfer: true };
+    expect(
+      migrateBaseplateParams({ ...currentShapeBase, mountMagnets: full }).mountMagnets
+    ).toEqual(full);
+  });
+
+  it('clamps mountMagnets, fills a missing depth and drops an invalid object', () => {
+    const clamped = migrateBaseplateParams({
+      ...currentShapeBase,
+      mountMagnets: { enabled: true, diameter: 99 },
+    }).mountMagnets;
+    expect(clamped?.diameter).toBe(MOUNT_MAGNET_MAX_DIAMETER_MM);
+    expect(clamped?.depth).toBe(MOUNT_MAGNET_DEFAULT_DEPTH_MM);
+    expect(
+      migrateBaseplateParams({ ...currentShapeBase, mountMagnets: { diameter: 6 } }).mountMagnets
+    ).toBeUndefined();
+  });
+
   it('preserves screwHoles across a save/load round-trip', () => {
     const full = {
       enabled: true,
@@ -708,6 +809,8 @@ describe('migrateBaseplateParams', () => {
       headDiameter: 5.5,
       counterboreDepth: 3,
       screwsPerPiece: 6,
+      edgeInsetCells: 1,
+      cellCorner: 'inner',
     };
     expect(migrateBaseplateParams({ ...currentShapeBase, screwHoles: full }).screwHoles).toEqual(
       full
@@ -730,6 +833,8 @@ describe('migrateBaseplateParams', () => {
         headStyle: 'counterbore',
         counterboreDepth: 99,
         screwsPerPiece: 0,
+        edgeInsetCells: 99,
+        cellCorner: 'diagonal',
       },
     });
     expect(result.screwHoles).toEqual({
@@ -738,6 +843,7 @@ describe('migrateBaseplateParams', () => {
       headStyle: 'counterbore',
       counterboreDepth: 6,
       screwsPerPiece: 1,
+      edgeInsetCells: 4,
     });
     expect(
       migrateBaseplateParams({

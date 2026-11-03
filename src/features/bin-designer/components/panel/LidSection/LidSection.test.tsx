@@ -6,6 +6,7 @@ import { DEFAULT_BIN_PARAMS, DEFAULT_UI_STATE } from '@/features/bin-designer/co
 import { LID_TOP_THICKNESS_MAX_MM } from '@/features/bin-designer/types';
 import { DEFAULT_LID_SLIDE_CONFIG } from '@/features/bin-designer/types/lid';
 import { slideLidPlanForParams } from '@/features/bin-designer/utils/slideLidPlanForParams';
+import en from '@/i18n/locales/en';
 
 function resetStore(overrides: Partial<typeof DEFAULT_BIN_PARAMS> = {}) {
   useDesignerStore.setState({
@@ -32,6 +33,22 @@ describe('LidSection', () => {
     expect(screen.getByText('Requires stacking lip')).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: ENABLE })).toBeDisabled();
   });
+
+  it.each(['clickRails', 'slide'] as const)(
+    'says a slanted bin has no lid, with no lip to enable (%s)',
+    (attachment) => {
+      resetStore({
+        slant: { angleDeg: 45, side: 'back' },
+        base: { ...DEFAULT_BIN_PARAMS.base, stackingLip: false },
+        lid: { ...DEFAULT_BIN_PARAMS.lid, attachment },
+      });
+      render(<LidSection />);
+      expect(screen.getByText('A slanted bin has no lid.')).toBeInTheDocument();
+      expect(screen.queryByText('Requires stacking lip')).toBeNull();
+      expect(screen.queryByRole('button', { name: /stacking lip/i })).toBeNull();
+      expect(screen.getByRole('switch', { name: ENABLE })).toBeDisabled();
+    }
+  );
 
   it('toggles lid enabled', () => {
     render(<LidSection />);
@@ -62,6 +79,13 @@ describe('LidSection', () => {
     render(<LidSection />);
     fireEvent.click(screen.getByRole('switch', { name: ENABLE }));
     expect(useDesignerStore.getState().params.lid.magnetHoles).toBe(false);
+  });
+
+  it('plays a clip of the lid types from the dot, with the print note under it', () => {
+    render(<LidSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'Watch a clip: Lid' }));
+    expect(screen.getByText(en['binDesigner.featureTip.lids'])).toBeInTheDocument();
+    expect(screen.getByText(en['binDesigner.lid.printNote'])).toBeInTheDocument();
   });
 
   describe('attachment picker', () => {
@@ -125,6 +149,39 @@ describe('LidSection', () => {
       });
       render(<LidSection />);
       expect(screen.queryByRole('switch', { name: 'Back' })).not.toBeInTheDocument();
+    });
+
+    it('offers the lid fill on friction lids and stores it as true', () => {
+      resetStore({
+        lid: { ...DEFAULT_BIN_PARAMS.lid, enabled: true, attachment: 'friction' },
+      });
+      render(<LidSection />);
+      fireEvent.click(screen.getByRole('switch', { name: 'Lid fill' }));
+      expect(useDesignerStore.getState().params.lid.fill).toBe(true);
+    });
+
+    it('replaces the relief hint with the reason it is off while the lid is filled', () => {
+      resetStore({
+        lid: {
+          ...DEFAULT_BIN_PARAMS.lid,
+          enabled: true,
+          attachment: 'friction',
+          fill: true,
+          relieveInterior: true,
+        },
+      });
+      render(<LidSection />);
+      fireEvent.click(screen.getByRole('button', { name: 'Fine tuning' }));
+      expect(screen.getByText(/Not used while the lid fill is on/)).toBeInTheDocument();
+      expect(screen.queryByText(/click rails run unbroken/)).not.toBeInTheDocument();
+    });
+
+    it('does not offer the lid fill on click-rail lids', () => {
+      resetStore({
+        lid: { ...DEFAULT_BIN_PARAMS.lid, enabled: true, attachment: 'clickRails' },
+      });
+      render(<LidSection />);
+      expect(screen.queryByRole('switch', { name: 'Lid fill' })).not.toBeInTheDocument();
     });
 
     it('reveals magnet dimensions under Advanced in magnetic mode', () => {
@@ -299,6 +356,9 @@ describe('LidSection', () => {
         lid: { ...DEFAULT_BIN_PARAMS.lid, enabled: true, attachment: 'magnetic' },
       });
       render(<LidSection />);
+      const magnetLine = screen.getByText(/magnet into each corner/).closest('p');
+      if (!magnetLine) throw new Error('expected the magnet line');
+      fireEvent.click(within(magnetLine).getByRole('button'));
       expect(screen.getByText(/relieved 0\.15mm per side/)).toBeInTheDocument();
     });
 
@@ -372,6 +432,7 @@ describe('LidSection', () => {
       render(<LidSection />);
       fireEvent.click(screen.getByRole('switch', { name: 'Separate baseplate (glue-on)' }));
       expect(useDesignerStore.getState().params.lid.separateStackPlate).toBe(true);
+      fireEvent.click(screen.getByRole('button', { name: 'About Separate baseplate (glue-on)' }));
       expect(screen.getByText(/Glue it onto the lid/i)).toBeInTheDocument();
     });
 
@@ -431,6 +492,8 @@ describe('LidSection', () => {
       expect(screen.getByText(/full grid of sockets/i)).toBeInTheDocument();
       fireEvent.click(screen.getByRole('switch', { name: 'Stacking lip only' }));
       expect(useDesignerStore.getState().params.lid.stackLipOnly).toBe(true);
+      expect(screen.queryByText(/full grid of sockets/i)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'About Stacking lip only' }));
       expect(screen.getByText(/One lip around the edge/i)).toBeInTheDocument();
     });
 
@@ -497,6 +560,21 @@ describe('LidSection', () => {
       });
       render(<LidSection />);
       expect(screen.getByRole('textbox', { name: 'Lid text' })).toBeInTheDocument();
+    });
+
+    it('offers rotation only once there is a caption to turn', () => {
+      resetStore({ lid: { ...DEFAULT_BIN_PARAMS.lid, enabled: true } });
+      const { unmount } = render(<LidSection />);
+      fireEvent.click(screen.getByRole('switch', { name: 'Lid text' }));
+      expect(screen.queryByRole('radiogroup', { name: 'Rotation' })).not.toBeInTheDocument();
+      unmount();
+
+      resetStore({
+        lid: { ...DEFAULT_BIN_PARAMS.lid, enabled: true },
+        surfaceText: { lidText: 'Cables' },
+      });
+      render(<LidSection />);
+      expect(screen.getByRole('radiogroup', { name: 'Rotation' })).toBeInTheDocument();
     });
 
     it('commits the typed text to surfaceText.lidText on blur', () => {
@@ -688,6 +766,81 @@ describe('LidSection', () => {
       expect(screen.getByRole('switch', { name: ENABLE })).toBeEnabled();
     });
 
+    it('offers a one-click Fix that lowers a solid bin’s fill just enough for a sliding lid', () => {
+      resetStore({
+        width: 1,
+        depth: 2,
+        height: 5,
+        style: 'solid',
+        base: { ...DEFAULT_BIN_PARAMS.base, solid: true },
+        lid: {
+          ...DEFAULT_BIN_PARAMS.lid,
+          enabled: true,
+          attachment: 'slide',
+          slide: DEFAULT_LID_SLIDE_CONFIG,
+        },
+      });
+      render(<LidSection />);
+      expect(
+        screen.getByText('Resolve the conflict to enable lid: lower the solid fill')
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /^Fix: The solid fill/ }));
+      const { params } = useDesignerStore.getState();
+      expect(params.cutoutConfig.topOffset).toBeGreaterThan(0);
+      expect(slideLidPlanForParams(params).geometry).not.toBeNull();
+      expect(screen.getByRole('switch', { name: ENABLE })).toBeEnabled();
+    });
+
+    it('leaves lowering the fill to the user when it would cut a pocket short', () => {
+      resetStore({
+        width: 1,
+        depth: 2,
+        height: 5,
+        style: 'solid',
+        base: { ...DEFAULT_BIN_PARAMS.base, solid: true },
+        cutouts: [
+          {
+            id: 'deep',
+            shape: 'rectangle',
+            x: 5,
+            y: 25,
+            width: 20,
+            depth: 20,
+            cutDepth: 28,
+            rotation: 0,
+            cornerRadius: 0,
+            label: '',
+            groupId: null,
+          },
+        ],
+        lid: {
+          ...DEFAULT_BIN_PARAMS.lid,
+          enabled: true,
+          attachment: 'slide',
+          slide: DEFAULT_LID_SLIDE_CONFIG,
+        },
+      });
+      render(<LidSection />);
+      expect(screen.getByText(/The solid fill sits too close to the rim/)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^Fix: The solid fill/ })).toBeNull();
+    });
+
+    it('names a way out for a sliding lid the bin cannot take at all', () => {
+      resetStore({
+        height: 1,
+        lid: {
+          ...DEFAULT_BIN_PARAMS.lid,
+          enabled: true,
+          attachment: 'slide',
+          slide: DEFAULT_LID_SLIDE_CONFIG,
+        },
+      });
+      render(<LidSection />);
+      expect(
+        screen.getByText('Resolve the conflict to enable lid: pick another attachment')
+      ).toBeInTheDocument();
+    });
+
     it('lets the attachment be changed away from a blocked hinge', () => {
       resetStore({
         lid: { ...DEFAULT_BIN_PARAMS.lid, enabled: true, attachment: 'hinge', stackableTop: true },
@@ -808,8 +961,8 @@ describe('LidSection grip relief (#3272)', () => {
   it('toggles a wall', () => {
     enabled({ mode: 'scallop' });
     render(<LidSection />);
-    const gripWalls = screen.getByText('Walls').parentElement;
-    const left = within(gripWalls as HTMLElement).getByRole('switch', { name: 'Left' });
+    const gripWalls = screen.getByRole('group', { name: 'Walls' });
+    const left = within(gripWalls).getByRole('switch', { name: 'Left' });
     fireEvent.click(left);
     expect(useDesignerStore.getState().params.lid.grip.sides.left).toBe(true);
   });
@@ -852,10 +1005,12 @@ describe('LidSection grip relief (#3272)', () => {
   it('toggles the bin lip dip and states what it costs', () => {
     enabled({ mode: 'scallop' });
     render(<LidSection />);
-    const dip = screen.getByRole('checkbox', { name: /dip the bin/i });
+    const dip = screen.getByRole('switch', { name: /dip the bin/i });
     fireEvent.click(dip);
     expect(useDesignerStore.getState().params.lid.grip.binDip).toBe(true);
     expect(screen.getByText(/nothing to locate against/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /About .*dip the bin/i }));
+    expect(screen.getByText(/so a fingertip gets under the lid/)).toBeInTheDocument();
   });
 });
 

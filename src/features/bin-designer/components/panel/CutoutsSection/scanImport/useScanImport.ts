@@ -10,10 +10,13 @@ import { useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useDesignerStore, remainingCutoutCapacity } from '@/features/bin-designer/store';
 import { defaultEntryChamfer } from '@/features/bin-designer/types';
+import type { BinParams, Cutout } from '@/features/bin-designer/types';
+import { cutoutInterior } from '@/features/bin-designer/utils/binDimensions';
 import { specToCutout, DEFAULT_CUT_DEPTH } from '../svgImport/specToCutout';
 import type { ParsedCutoutSpec } from '../svgImport/types';
 import { byDescendingArea } from '../importStackOrder';
-import { generateUUID } from '@/shared/utils/uuid';
+import { centerOffBoardCutouts, type CutoutBoard } from '../offBoardCutouts';
+import { generateLayoutId, generateUUID } from '@/shared/utils/uuid';
 
 /** Default insertion clearance (mm) applied to a scanned tool outline. */
 const SCAN_DEFAULT_CLEARANCE_MM = 0.4;
@@ -23,12 +26,39 @@ export interface UseScanImportReturn {
   readonly addScanCutouts: (specs: readonly ParsedCutoutSpec[], cutDepth?: number) => number;
 }
 
+// The bin's floor, as CutoutWorkspace builds it. The scan entry point is hidden
+// while the lid is the target, so a scan always lands on the bin.
+function binBoard(params: BinParams): CutoutBoard {
+  const { innerW, innerD } = cutoutInterior(params);
+  const mask = params.cellMask;
+  return {
+    width: innerW,
+    depth: innerD,
+    mask,
+    cellSize: mask ? { cellMmX: innerW / mask.cols, cellMmY: innerD / mask.rows } : undefined,
+  };
+}
+
+function withScanFit(cutout: Cutout, cutDepth: number): Cutout {
+  // Scanned outlines default to a fit clearance + self-centering entry
+  // chamfer (both applied at generation time, like parametric cutouts, and
+  // adjustable via the Fit controls). The traced outline itself stays the
+  // tool's exact silhouette.
+  if (cutout.shape !== 'path') return cutout;
+  return {
+    ...cutout,
+    clearance: SCAN_DEFAULT_CLEARANCE_MM,
+    chamferWidth: defaultEntryChamfer(Math.min(cutout.width, cutout.depth), cutDepth),
+  };
+}
+
 export function useScanImport(): UseScanImportReturn {
-  const { addCutout, startTransaction, commitTransaction } = useDesignerStore(
+  const { addCutout, startTransaction, commitTransaction, queueDepthPrompt } = useDesignerStore(
     useShallow((s) => ({
       addCutout: s.addCutout,
       startTransaction: s.startTransaction,
       commitTransaction: s.commitTransaction,
+      queueDepthPrompt: s.queueDepthPrompt,
     }))
   );
 
@@ -42,30 +72,41 @@ export function useScanImport(): UseScanImportReturn {
       const { ui, params } = useDesignerStore.getState();
       if (remainingCutoutCapacity(ui.cutoutTarget, params.lid.cutouts) < 1) return 0;
 
-      let added = 0;
+      // Same stacking rule as the SVG path: a scan can trace an
+      // outer silhouette around smaller detail.
+      const hydrated = byDescendingArea(specs).map((spec) =>
+        withScanFit(specToCutout(spec, hydrationOptions), cutDepth)
+      );
+      // Several tools from one photo arrive in one arrange-only container,
+      // so the batch moves as a block and Auto-arrange inside it packs the
+      // tools. A container leaves every cut as it was.
+      const containerId = hydrated.length > 1 ? generateLayoutId() : null;
+      const cutouts = containerId
+        ? hydrated.map((c) => ({ ...c, parentGroups: [containerId] }))
+        : hydrated;
+      // Unlike an SVG, a scan has no layout to keep: its coordinates are the
+      // outline's own frame, corner at the origin, which sits flush in the bin's
+      // corner and a rounding hair past it. One scan moves to the middle as a
+      // block; a scan the bin cannot hold stays put and keeps its warning.
+      const moves = centerOffBoardCutouts(
+        cutouts,
+        binBoard(params),
+        new Set(cutouts.map((c) => c.id))
+      );
+
+      const addedIds: string[] = [];
       startTransaction();
       try {
-        // Same stacking rule as the SVG path: a scan can trace an
-        // outer silhouette around smaller detail.
-        for (const spec of byDescendingArea(specs)) {
-          const cutout = specToCutout(spec, hydrationOptions);
-          // Scanned outlines default to a fit clearance + self-centering entry
-          // chamfer (both applied at generation time, like parametric cutouts, and
-          // adjustable via the Fit controls). The traced outline itself stays the
-          // tool's exact silhouette.
-          const stored =
-            cutout.shape === 'path'
-              ? addCutout({
-                  ...cutout,
-                  clearance: SCAN_DEFAULT_CLEARANCE_MM,
-                  chamferWidth: defaultEntryChamfer(Math.min(cutout.width, cutout.depth), cutDepth),
-                })
-              : addCutout(cutout);
-          if (stored) added += 1;
+        for (const cutout of cutouts) {
+          if (addCutout({ ...cutout, ...moves.get(cutout.id) })) addedIds.push(cutout.id);
         }
       } finally {
         commitTransaction();
       }
+      // A traced outline says nothing about how thick the tool is. A lid plate
+      // is cut clean through, so only a bin has a depth to ask for.
+      if (ui.cutoutTarget === 'bin') queueDepthPrompt(addedIds);
+      const added = addedIds.length;
 
       // The count STORED, not the count asked for. The scan entry point is
       // hidden while the lid is the target, so nothing refuses today, but a
@@ -73,7 +114,7 @@ export function useScanImport(): UseScanImportReturn {
       // remember why it happened to be right.
       return added;
     },
-    [addCutout, startTransaction, commitTransaction]
+    [addCutout, startTransaction, commitTransaction, queueDepthPrompt]
   );
 
   return { addScanCutouts };

@@ -14,9 +14,14 @@ import { binId, layerId, categoryId, designId, gridUnits, heightUnits } from '@/
 import { STAGING_ID } from '@/core/constants';
 import { DEFAULT_PRINT_SETTINGS } from '@/shared/printSettings';
 import type { OverhangConfig } from '@/shared/types/bin';
+import { slantPlanFor } from '@/shared/utils/slantPlan';
 
 /** A print-bed fit expressed as "N grid units fit each axis". */
-function fitAt(maxUnits: number, overhangFor?: PrintSplitFit['overhangFor']): PrintSplitFit {
+function fitAt(
+  maxUnits: number,
+  overhangFor?: PrintSplitFit['overhangFor'],
+  slantFor?: PrintSplitFit['slantFor']
+): PrintSplitFit {
   const gridUnitMm = 42;
   return {
     bedWidthMm: maxUnits * gridUnitMm,
@@ -24,6 +29,7 @@ function fitAt(maxUnits: number, overhangFor?: PrintSplitFit['overhangFor']): Pr
     gridUnitMm,
     gridUnitMmY: gridUnitMm,
     ...(overhangFor ? { overhangFor } : {}),
+    ...(slantFor ? { slantFor } : {}),
   };
 }
 
@@ -152,6 +158,39 @@ describe('generatePrintList', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].binCount).toBe(2);
     expect(rows[0].totalPieces).toBe(2);
+  });
+
+  it('never splits a slanted bin, and lists it apart from an upright one', () => {
+    const bin = (id: string, x: number, extra: Partial<Bin> = {}): Bin => ({
+      id: binId(id),
+      layerId: layerId('l1'),
+      x: gridUnits(x),
+      y: gridUnits(0),
+      width: gridUnits(6),
+      depth: gridUnits(2),
+      height: heightUnits(6),
+      category: categoryId('c1'),
+      label: '',
+      notes: '',
+      ...extra,
+    });
+    const slantFor = (b: Bin) => slantPlanFor(b.slant);
+    const rows = generatePrintList(
+      [bin('1', 0), bin('2', 6, { slant: { angleDeg: 40, side: 'back' } })],
+      fitAt(4, undefined, slantFor)
+    );
+    expect(rows).toHaveLength(2);
+    const slanted = rows.find((r) => r.totalPieces === 1);
+    const upright = rows.find((r) => r.totalPieces > 1);
+    expect(slanted?.binCount).toBe(1);
+    expect(upright?.binCount).toBe(1);
+
+    // A slant the export does not apply leaves the bin to split.
+    const kept = generatePrintList(
+      [bin('2', 6, { slant: { angleDeg: 40, side: 'back' } })],
+      fitAt(4, undefined, () => null)
+    );
+    expect(kept[0].totalPieces).toBeGreaterThan(1);
   });
 
   it('does not merge bins linked to different designs even with identical dims', () => {

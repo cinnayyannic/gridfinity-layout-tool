@@ -195,6 +195,10 @@ export interface KnifeSlotExit {
   readonly centre: number;
   /** Opening width along the wall: the slot's thickness (mm). */
   readonly width: number;
+  /** The slot's centre on the exit axis, same frame; the breach runs from here out. */
+  readonly start: number;
+  /** Where the slot itself ends on the exit axis, same frame. */
+  readonly edge: number;
   /** The knife the slot was sized for — drives the rest's saddle derivation. */
   readonly knife: KnifeSpec;
 }
@@ -223,11 +227,19 @@ export function knifeSlotWallExits(
     for (const inst of instances) {
       if (inst.rotation % 90 !== 0) continue;
       const side = knifeExitSide(inst.rotation, knife.openEnd);
-      const centre =
-        side === 'left' || side === 'right'
-          ? inst.y + inst.depth / 2 - innerD / 2
-          : inst.x + inst.width / 2 - innerW / 2;
-      out.push({ side, centre, width: inst.depth, knife });
+      const cx = inst.x + inst.width / 2 - innerW / 2;
+      const cy = inst.y + inst.depth / 2 - innerD / 2;
+      const alongX = side === 'left' || side === 'right';
+      const start = alongX ? cx : cy;
+      const outward = side === 'right' || side === 'back' ? 1 : -1;
+      out.push({
+        side,
+        centre: alongX ? cy : cx,
+        start,
+        edge: start + (outward * inst.width) / 2,
+        width: inst.depth,
+        knife,
+      });
     }
   }
   return out;
@@ -283,7 +295,9 @@ function wallGaps(
       // The opening AT THE LIP, not the nominal span. A rounded shoulder is a
       // flare that reaches its full radius exactly at the rim, so the stretch
       // with no lip is wider than the cut the user set — per end, since one
-      // end can sit flush against the wall and take no round at all.
+      // end can sit flush against the wall and take no round at all. A
+      // funnel's leaning side reaches less (`shoulderBlend`), so for it this
+      // is a bound that costs a rail a little length, never its grip.
       const round = safeCutoutCornerRadii(
         resolveCutoutCornerRadii(params.walls, cfg, cutWidth),
         cutWidth,

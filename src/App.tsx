@@ -26,7 +26,7 @@ import {
   useCollabMode,
 } from '@/shared/hooks';
 import { useKeyboard } from '@/shell/keyboard';
-import { useLayoutRouting } from '@/features/layout-library';
+import { useDrawerLinkImport, useLayoutRouting } from '@/features/layout-library';
 import { useOwnedShareSync } from '@/features/cloud-share/hooks/useOwnedShareSync';
 import { reconcileLibraryAsync, isShareURL } from '@/core/storage';
 import {
@@ -84,12 +84,13 @@ import {
   remixCommunityDesign,
 } from '@/shell/Modals/DesignGalleryModal/communityDesignerBridge';
 import { usePlaceBinFromURL } from '@/features/bin-designer/hooks/usePlaceBinInLayout';
-import { useBackgroundThumbnailRegen } from '@/features/bin-designer';
+import { useBackgroundThumbnailRegen, useMeshFileMaintenance } from '@/features/bin-designer';
 import { useFeatureFlag } from '@/shared/hooks/useFeatureFlag';
 import { useSpaceMouseDevice } from '@/shared/spacemouse/useSpaceMouseDevice';
 import { useCommunityPublishReturn } from '@/shared/hooks/useCommunityPublishReturn';
 import { useCommunityLikeReturn } from '@/shell/hooks/useCommunityLikeReturn';
 import { useCommunityDigestCheck } from '@/shell/hooks/useCommunityDigestCheck';
+import { usePlacesFindResults } from '@/shell/hooks/usePlacesFindResults';
 
 let hasRenderedInitialLayout = false;
 
@@ -125,6 +126,7 @@ export default function App() {
   const closeBinExampleGallery = useBinExampleGalleryStore((s) => s.close);
   const communityPublishOpen = useCommunityPublishStore((s) => s.isOpen);
   const communityShowcaseEnabled = useFeatureFlag('community_showcase');
+  const placesFindResults = usePlacesFindResults(!isNonLayoutRoute);
   const [commandPaletteInitialQuery, setCommandPaletteInitialQuery] = useState('');
 
   useRouteMeta({
@@ -147,6 +149,10 @@ export default function App() {
   const hasSharedLayoutPreview = useSharedPreviewStore((state) => state.sharedPreview !== null);
 
   const [hasShareUrl] = useState(isShareURL);
+  const hasDrawerLink = useDrawerLinkImport({
+    disabled: hasShareUrl || isCollaborative || (isNonLayoutRoute && !isBaseplateRoute),
+    syncLayoutUrl: !isNonLayoutRoute,
+  });
 
   usePlaceBinFromURL();
   useOwnedShareSync();
@@ -216,6 +222,7 @@ export default function App() {
   useWhatsNewAutoOpen({
     allowed:
       !hasShareUrl &&
+      !hasDrawerLink &&
       !isCollaborative &&
       !isCommunityRoute &&
       !isSupportersRoute &&
@@ -225,6 +232,7 @@ export default function App() {
   useStorageMigration();
   useSnapshotAutoSave();
   useLocalStorageCleanup();
+  useMeshFileMaintenance();
   usePrefetchChunks();
 
   const entranceClass = hasRenderedInitialLayout ? '' : 'animate-fade-in';
@@ -535,6 +543,7 @@ export default function App() {
               if (!open) setCommandPaletteInitialQuery('');
             }}
             initialQuery={commandPaletteInitialQuery}
+            extraResults={placesFindResults}
           />
         </Suspense>
       )}

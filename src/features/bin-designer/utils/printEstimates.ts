@@ -12,13 +12,25 @@
 
 import type { BinParams } from '@/features/bin-designer/types';
 import {
-  binFloorMm,
+  isNestingBase,
   isSocketlessBase,
   isUndersideRelief,
+  resolveTrayBottomConfig,
 } from '@/features/bin-designer/types/base';
+import { retentionBossRadius, retentionMagnetInset } from '@/features/bin-designer/types/lid';
+import { retentionMagnetPositions } from '@/shared/utils/retentionMagnetPlacement';
+import {
+  hasOverhang,
+  overhangExpansion,
+  resolveOverhang,
+  taperInsetAt,
+  type ResolvedOverhang,
+} from '@/shared/utils/overhang';
+import { maskFootprint, rectFootprint, type ShellFootprint } from './printFootprint';
+import { resolveBinFloorMm } from '@/shared/utils/slotMath';
 import { baseWallHeight } from './binDimensions';
 import { maxCompartmentFloorRaiseMm } from './compartmentFloorRaise';
-import { GRIDFINITY, STYLE_WALL_THICKNESS } from '@/features/bin-designer/constants/gridfinity';
+import { GRIDFINITY } from '@/features/bin-designer/constants/gridfinity';
 import { getCompartmentBounds } from '@/features/bin-designer/utils/compartments';
 import { isFeatureActive } from '@/shared/constraints';
 import {
@@ -54,6 +66,13 @@ import { countFilled, isPartialMask } from '@/shared/utils/cellMask';
 import { cutoutDisplacementMm3 } from '@/shared/utils/fitTestPlan';
 import { computeLabelTabVolume, lipSupportArea } from './printLabelTabVolume';
 import { computeInteriorFilletVolume } from './printInteriorFilletVolume';
+import {
+  flatShellVolume,
+  nestingPlugFillVolume,
+  stackingLipVolume,
+  traySkirtVolume,
+  wallThicknessDelta,
+} from './printShellVolume';
 import {
   computeWallPatternReduction,
   computeFloorPatternReduction,
@@ -136,6 +155,100 @@ export function formatFilament(meters: number): string {
   if (meters < 1) return `${Math.round(meters * 100)}cm`;
   return `${meters.toFixed(1)}m`;
 }
+
+/**
+ * The outline a socketless bin's shell is built on. A custom shape keeps its
+ * mask and takes no overhang, in the body and lid builders alike; a rectangle
+ * grows by the overhang.
+ */
+function socketlessFootprint(
+  params: BinParams,
+  outerW: number,
+  outerD: number,
+  overhang: ResolvedOverhang
+): ShellFootprint {
+  if (isPartialMask(params.cellMask)) {
+    return maskFootprint(
+      params.cellMask,
+      params.gridUnitMm,
+      params.gridUnitMmY ?? params.gridUnitMm
+    );
+  }
+  const growth = overhangExpansion(overhang);
+  return rectFootprint(outerW + growth.addW, outerD + growth.addD);
+}
+
+/**
+ * The overhang the body is built with: none on a custom shape, as
+ * `deriveDimensions` and `resolveLidInputs` resolve it.
+ */
+function estimateOverhang(params: BinParams): ResolvedOverhang {
+  return isPartialMask(params.cellMask)
+    ? resolveOverhang(undefined)
+    : resolveOverhang(params.overhang);
+}
+
+/**
+ * Material a tapered overhang takes back between `z0` and `z1` above the body
+ * bottom. The whole body follows the taper in, so at each height a `w` by `d`
+ * section is narrowed on both axes before the two are multiplied: two adjacent
+ * tapered walls share their corner rather than each taking it.
+ */
+function taperRelief(
+  overhang: ResolvedOverhang,
+  w: number,
+  d: number,
+  z0: number,
+  z1: number,
+  wallHeight: number
+): number {
+  const taper = overhang.taper;
+  if (!taper || z1 <= z0) return 0;
+  const steps = 16;
+  const dz = (z1 - z0) / steps;
+  let relief = 0;
+  for (let i = 0; i < steps; i++) {
+    const z = z0 + (i + 0.5) * dz;
+    const inset = (side: number): number => taperInsetAt(taper, side, z, wallHeight);
+    const narrowW = Math.max(0, w - inset(taper.left) - inset(taper.right));
+    const narrowD = Math.max(0, d - inset(taper.front) - inset(taper.back));
+    relief += (w * d - narrowW * narrowD) * dz;
+  }
+  return relief;
+}
+
+/**
+ * A tray bin's lid skirt, with its retention magnets counted where the
+ * generator places them, so an edge-magnet setting that a short wall cannot
+ * take adds nothing here either. A solid nesting tray also keeps its plug's
+ * interior.
+ */
+function trayBottomSkirt(
+  params: BinParams,
+  footprint: ShellFootprint,
+  overhang: ResolvedOverhang
+): number {
+  const tray = resolveTrayBottomConfig(params.base.trayBottom, params.lid.retentionMagnet);
+  const { diameter, edgeMagnets } = tray.retentionMagnet;
+  const magnets =
+    tray.attachment === 'magnetic' && !footprint.polygon
+      ? retentionMagnetPositions(
+          params.width,
+          params.depth,
+          params.gridUnitMm,
+          params.gridUnitMmY ?? params.gridUnitMm,
+          retentionMagnetInset(diameter),
+          edgeMagnets,
+          retentionBossRadius(diameter),
+          hasOverhang(overhang) ? overhangExpansion(overhang) : null
+        ).length
+      : 0;
+  const skirt = traySkirtVolume(footprint, tray, magnets, params.heightUnitMm);
+  return params.base.solid && isNestingBase(params.base)
+    ? skirt + nestingPlugFillVolume(footprint, tray, params.heightUnitMm)
+    : skirt;
+}
+
 /**
  * Computes total material volume analytically from bin parameters.
  *
@@ -153,7 +266,10 @@ export function formatFilament(meters: number): string {
  * over-reporting standard bins by ~3–6×.)
  */
 function computeBinVolume(params: BinParams): number {
-  const wallThickness = STYLE_WALL_THICKNESS[params.style] ?? GRIDFINITY.WALL_THICKNESS;
+  const wallThickness =
+    Number.isFinite(params.wallThickness) && params.wallThickness > 0
+      ? params.wallThickness
+      : GRIDFINITY.WALL_THICKNESS;
   // Y axis uses gridUnitMmY when set (non-square grid); otherwise it equals the
   // X pitch, so square bins are unchanged.
   const gridUnitMmY = params.gridUnitMmY ?? params.gridUnitMm;
@@ -176,7 +292,33 @@ function computeBinVolume(params: BinParams): number {
     params.heightUnitMm,
     gridUnitMmY
   );
-  let volume = shell.walls + shell.base + (params.base.stackingLip ? shell.lip : 0);
+  const floorThickness = resolveBinFloorMm({ ...params, wallThickness });
+  const socketless = isSocketlessBase(params.base.style);
+  let volume: number;
+  if (socketless) {
+    const overhang = estimateOverhang(params);
+    const footprint = socketlessFootprint(params, outerW, outerD, overhang);
+    const wallHeight = baseWallHeight(params.base, totalH);
+    volume = flatShellVolume(
+      footprint,
+      wallHeight,
+      wallThickness,
+      floorThickness,
+      params.base.stackingLip
+    );
+    const growth = overhangExpansion(overhang);
+    volume -= taperRelief(
+      overhang,
+      outerW + growth.addW,
+      outerD + growth.addD,
+      0,
+      floorThickness,
+      wallHeight
+    );
+    if (params.base.style === 'lid') volume += trayBottomSkirt(params, footprint, overhang);
+  } else {
+    volume = shell.walls + shell.base + (params.base.stackingLip ? shell.lip : 0);
+  }
 
   // The geometry follows the PLAN, not the flag: with detachable feet
   // requested but no pocket-aligned whole cell to anchor one (a half-lattice
@@ -257,6 +399,18 @@ function computeBinVolume(params: BinParams): number {
     return volume - shell.walls;
   }
 
+  if (!socketless) {
+    if (!params.base.stackingLip) volume -= stackingLipVolume(outerW, outerD) - shell.lip;
+    volume += wallThicknessDelta(
+      outerW,
+      outerD,
+      baseWallHeight(params.base, totalH),
+      wallThickness,
+      floorThickness,
+      params.base.stackingLip
+    );
+  }
+
   // A solid bin fills the cavity the shell model leaves empty. Without this
   // term every solid bin was priced as the hollow one it is not — measured at
   // 3.1x to 5.3x low across sizes, and completely unmoved by cutouts, so a
@@ -289,7 +443,13 @@ function computeBinVolume(params: BinParams): number {
   }
 
   // Floor pattern: drainage holes remove floor slab AND foot material.
-  volume -= computeFloorPatternReduction(params, wallThickness, shell.base, feetDetach);
+  volume -= computeFloorPatternReduction(
+    params,
+    wallThickness,
+    floorThickness,
+    shell.base,
+    feetDetach
+  );
 
   // Exterior-wall collar: a walled ring raised above the nominal
   // body — perimeter wall material only, no floor/interior. Ring cross-section
@@ -335,10 +495,10 @@ function solidFillVolume(
   outerD: number,
   wallThickness: number
 ): number {
-  // `style` is kept in lockstep with `base.solid` by the constraint engine, but
-  // a crafted payload can carry one without the other; the generator fills on
-  // `base.solid`, so either flag is enough to price it as filled.
-  if (!params.base.solid && params.style !== 'solid') return 0;
+  // `base.solid` alone, as `deriveDimensions` reads it. The constraint engine
+  // keeps `style` in lockstep, but a crafted design can carry `style: 'solid'`
+  // without it, and that one exports hollow.
+  if (!params.base.solid) return 0;
 
   const wallHeight = baseWallHeight(params.base, params.height * params.heightUnitMm);
   // From the FLOOR's top, not the wall's: the `base` component already prices
@@ -346,19 +506,32 @@ function solidFillVolume(
   // the difference twice. Resolved from `params.wallThickness` rather than the
   // style constant above, because that is what the pipeline resolves it from —
   // they part company once a wall exceeds the spec floor.
-  const floorThickness = binFloorMm(params.wallThickness);
+  const floorThickness = resolveBinFloorMm(params);
   const fillHeight = wallHeight - floorThickness - Math.max(0, params.cutoutConfig.topOffset);
   if (fillHeight <= 0) return 0;
 
-  const innerW = Math.max(0, outerW - 2 * wallThickness);
-  const innerD = Math.max(0, outerD - 2 * wallThickness);
-  let fill = innerW * innerD * fillHeight * SOLID_FILL_EFFICIENCY;
+  // Out to the overhang's walls on every base: the body grows above a socket
+  // as it does on a flat bin, and the fill follows a taper's walls in.
+  const overhang = estimateOverhang(params);
+  const growth = overhangExpansion(overhang);
+  const innerW = Math.max(0, outerW + growth.addW - 2 * wallThickness);
+  const innerD = Math.max(0, outerD + growth.addD - 2 * wallThickness);
+  // Sampled over the band only: above it the inset is zero.
+  const taperTop = Math.min(
+    floorThickness + fillHeight,
+    overhang.taper?.bandHeight ?? 0,
+    wallHeight
+  );
+  let fill =
+    (innerW * innerD * fillHeight -
+      taperRelief(overhang, innerW, innerD, floorThickness, taperTop, wallHeight)) *
+    SOLID_FILL_EFFICIENCY;
 
   // A partial mask carves whole cells out of the footprint, so the fill shrinks
   // with the cell count rather than with the bounding box.
   if (isPartialMask(params.cellMask)) {
-    const cells = params.width * params.depth;
-    if (cells > 0) fill *= countFilled(params.cellMask) / cells;
+    const { cols, rows } = params.cellMask;
+    if (cols * rows > 0) fill *= countFilled(params.cellMask) / (cols * rows);
   }
 
   return Math.max(0, fill - cutoutDisplacementMm3(params, fillHeight));
@@ -434,7 +607,7 @@ function computeScoopVolume(params: BinParams, outerW: number, outerD: number): 
   const frame = scoopFrameHeights(
     boxWallHeight,
     computeInteriorHeight(boxWallHeight, hasLip, GRIDFINITY.LIP_SMALL_TAPER),
-    binFloorMm(wall)
+    resolveBinFloorMm(params)
   );
   const lipTaperWidth = GRIDFINITY.LIP_SMALL_TAPER + GRIDFINITY.LIP_BIG_TAPER;
   const sides = resolveScoopSides(params.scoop);

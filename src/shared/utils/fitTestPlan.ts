@@ -23,14 +23,19 @@ import {
 } from '@/shared/types/bin';
 import { regularPolygonPoints } from '@/shared/utils/cutoutPolygon';
 import { expandCutoutArray } from '@/shared/utils/cutoutArray';
+import { deeperDepth, sideBShare } from '@/shared/utils/cutoutSplit';
+import { pathCutoutCut } from '@/shared/utils/pathCutoutOutline';
 import { GRIDFINITY_SPEC } from '@/shared/printSettings/gridfinityGeometry';
 import { overhangExpansion, resolveOverhang } from '@/shared/utils/overhang';
 import { countFilled, isPartialMask } from '@/shared/utils/cellMask';
 import { binDimensions, cutoutInterior } from '@/features/bin-designer/utils/binDimensions';
 
-/** Thinnest card the field accepts (mm). Below this a chamfered rim has no
- *  straight wall under it and the card tears off the plate. */
-export const FIT_TEST_MIN_THICKNESS_MM = 1;
+/** One layer. A chamfered design's floor sits higher, see {@link fitTestThicknessRangeMm}. */
+export const FIT_TEST_MIN_THICKNESS_MM = 0.2;
+
+/** Thinnest card that carries the underside stamp (mm). The deboss is 0.4mm,
+ *  and under this there are too few layers over it to bridge the glyphs. */
+export const FIT_TEST_STAMP_MIN_THICKNESS_MM = 1;
 
 /** Band the default thickness is clamped into (mm). The floor keeps a straight
  *  wall under the deepest entry chamfer the editor allows; the cap stops a
@@ -74,7 +79,7 @@ export function canBuildFitTest(params: BinParams): boolean {
 
 /** Deepest cut the card would have to reach to keep every pocket's floor (mm). */
 export function deepestCutoutDepthMm(params: BinParams): number {
-  return fitTestCutouts(params).reduce((deepest, c) => Math.max(deepest, c.cutDepth), 0);
+  return fitTestCutouts(params).reduce((deepest, c) => Math.max(deepest, deeperDepth(c)), 0);
 }
 
 /**
@@ -102,7 +107,14 @@ export function fitTestThicknessRangeMm(params: BinParams): { min: number; max: 
     FIT_TEST_MIN_THICKNESS_MM,
     Math.min(usable, Math.min(deepestCutoutDepthMm(params), usable) + params.wallThickness)
   );
-  return { min: FIT_TEST_MIN_THICKNESS_MM, max };
+  // The band is taken down from the opening, so a card no deeper than an entry
+  // chamfer is bevel all the way through and every hole reads loose. One layer
+  // of straight wall under the deepest bevel is the least that measures a fit.
+  const deepestChamfer = fitTestCutouts(params).reduce(
+    (deepest, c) => Math.max(deepest, openingGrowthMm(c).chamfer),
+    0
+  );
+  return { min: Math.min(max, FIT_TEST_MIN_THICKNESS_MM + deepestChamfer), max };
 }
 
 /** Clamp an arbitrary thickness into the range this design allows. */
@@ -117,14 +129,15 @@ export function clampFitTestThicknessMm(params: BinParams, thicknessMm: number):
 }
 
 /**
- * Per-side growth of a cutout's opening, split by cause, matching
- * `buildCutoutCuts`' own arithmetic:
- * - `clearance` grows each DIMENSION by the whole value (half per side); a
- *   polygon scales anisotropically so it stays a regular N-gon, which grows
- *   its width by `width·clearance/depth` instead.
- * - the entry chamfer flares each SIDE by its own width at the rim, clamped so
- *   a straight wall survives below the bevel, and is skipped entirely under
- *   the builder's 0.05mm floor.
+ * Per-side growth of a cutout's opening, split by cause, matching what the
+ * builders cut:
+ * - circle, polygon and slot grow each DIMENSION by the whole clearance (half
+ *   per side); a polygon scales anisotropically so it stays a regular N-gon,
+ *   which grows its width by `width·clearance/depth` instead. A path's outline
+ *   and a mesh's silhouette are offset by the whole clearance on every SIDE.
+ * - the entry chamfer flares each SIDE by its own width at the rim. The BREP
+ *   builder clamps it so a straight wall survives below the bevel and skips it
+ *   under 0.05mm; the mesh imprint sweeps it whole, up to the cut depth.
  *
  * Gated exactly as the builder gates them: a cutout switched from circle to
  * rectangle keeps its stale `clearance`, and the builder ignores it —
@@ -139,14 +152,40 @@ function openingGrowthMm(cutout: Cutout): {
   const clearance = CLEARANCE_SHAPES.includes(cutout.shape)
     ? Math.max(0, cutout.clearance ?? 0)
     : 0;
+  const perSide = cutout.shape === 'path' || cutout.shape === 'mesh';
+  const clearanceD = perSide ? clearance : clearance / 2;
   const clearanceW =
     cutout.shape === 'polygon' && cutout.depth > 0
       ? (cutout.width * clearance) / cutout.depth / 2
-      : clearance / 2;
-  const clearanceD = clearance / 2;
-  const chamferRaw = CHAMFER_SHAPES.includes(cutout.shape) ? (cutout.chamferWidth ?? 0) : 0;
+      : clearanceD;
+  const chamferRaw = CHAMFER_SHAPES.includes(cutout.shape)
+    ? Math.max(0, cutout.chamferWidth ?? 0)
+    : 0;
+  if (cutout.shape === 'mesh') {
+    return { clearanceW, clearanceD, chamfer: Math.min(chamferRaw, Math.max(0, cutout.cutDepth)) };
+  }
   const chamferClamped = Math.max(0, Math.min(chamferRaw, cutout.cutDepth - 0.2));
   return { clearanceW, clearanceD, chamfer: chamferClamped > 0.05 ? chamferClamped : 0 };
+}
+
+/**
+ * A path's opening at its rim, as `buildUnrotatedCutoutShape` cuts it
+ * ({@link pathCutoutCut}). The offset's miter joins reach past the clearance
+ * at sharp corners, so a plain per-side growth under-reads it.
+ */
+function pathRimHalfExtents(
+  cutout: Cutout,
+  grow: { clearanceD: number; chamfer: number }
+): { hw: number; hd: number } {
+  const sections = pathCutoutCut(cutout, grow.clearanceD, grow.chamfer);
+  if (!sections) return { hw: cutout.width / 2, hd: cutout.depth / 2 };
+  let hw = 0;
+  let hd = 0;
+  for (const p of sections.rim) {
+    hw = Math.max(hw, Math.abs(p.x));
+    hd = Math.max(hd, Math.abs(p.y));
+  }
+  return { hw, hd };
 }
 
 /**
@@ -157,8 +196,15 @@ function openingGrowthMm(cutout: Cutout): {
  */
 function openingHalfExtents(cutout: Cutout, usableDepthMm: number): { hx: number; hy: number } {
   const grow = openingGrowthMm(cutout);
-  const hw = cutout.width / 2 + grow.clearanceW + grow.chamfer;
-  let hd = cutout.depth / 2 + grow.clearanceD + grow.chamfer;
+  const rim =
+    cutout.shape === 'path'
+      ? pathRimHalfExtents(cutout, grow)
+      : {
+          hw: cutout.width / 2 + grow.clearanceW + grow.chamfer,
+          hd: cutout.depth / 2 + grow.clearanceD + grow.chamfer,
+        };
+  const hw = rim.hw;
+  let hd = rim.hd;
   // A leaned pocket sweeps past its drawn footprint along the local depth
   // axis: the mouth stretches by 1/cos(lean) and the floor travels a further
   // depth·sin(lean) to one side, at the depth the builder actually cuts
@@ -271,7 +317,7 @@ export function planFitTestStampArea(
   split?: Pick<FitTestSplitPlan, 'planesX' | 'planesY'>
 ): StampArea | null {
   const { width, depth } = fitTestFootprintMm(params);
-  if (neededDepthMm <= 0) return null;
+  if (neededDepthMm <= 0 || thicknessMm < FIT_TEST_STAMP_MIN_THICKNESS_MM) return null;
 
   // Asymmetric overhang shifts the card body off the model origin — the same
   // offsets the cutout boxes below already carry — so the windows and the
@@ -301,7 +347,7 @@ export function planFitTestStampArea(
   const cutouts = fitTestCutouts(params);
   const boxes = fitTestCutoutBoxes(params);
   const floorLimit = thicknessMm - stampDepthMm;
-  const throughBoxes = boxes.filter((_, i) => cutouts[i].cutDepth >= floorLimit);
+  const throughBoxes = boxes.filter((_, i) => deeperDepth(cutouts[i]) >= floorLimit);
   // A horizontal seam blocks a strip the same way a through-hole does: glyphs
   // cut across the kerf are lost on both pieces.
   const seamBoxes = (split?.planesY ?? []).map((plane) => ({ minY: plane, maxY: plane }));
@@ -444,6 +490,20 @@ export function fitTestFootprintMm(params: BinParams): { width: number; depth: n
   return { width: outerW + addW, depth: outerD + addD };
 }
 
+/** The card's footprint placed in the bin-centred frame, where asymmetric overhang shifts it. */
+export function fitTestFootprintBox(params: BinParams): CutoutBox2D {
+  const { width, depth } = fitTestFootprintMm(params);
+  const { offsetX, offsetY } = overhangExpansion(
+    resolveOverhang(isPartialMask(params.cellMask) ? undefined : params.overhang)
+  );
+  return {
+    minX: -width / 2 + offsetX,
+    maxX: width / 2 + offsetX,
+    minY: -depth / 2 + offsetY,
+    maxY: depth / 2 + offsetY,
+  };
+}
+
 /**
  * Where the card gets cut for a given bed, seams nudged clear of the openings.
  *
@@ -452,12 +512,15 @@ export function fitTestFootprintMm(params: BinParams): { width: number; depth: n
  * quiet about a seam through the hole being measured.
  *
  * `splitPlanes` is injected rather than imported so this stays free of the
- * generation feature; callers pass `getSplitPlanePositionsMm`.
+ * generation feature; callers pass `getSplitPlanePositionsMm`. `avoid` replaces
+ * the card's openings as what the seams must miss, for a print that carries
+ * material elsewhere.
  */
 export function planFitTestSplit(
   params: BinParams,
   bed: BedSize | undefined,
-  splitPlanes: (sizeUnits: number, maxUnits: number, pitchMm: number) => number[]
+  splitPlanes: (sizeUnits: number, maxUnits: number, pitchMm: number) => number[],
+  avoid?: { readonly x: readonly AxisSpan[]; readonly y: readonly AxisSpan[] }
 ): FitTestSplitPlan {
   const whole: FitTestSplitPlan = { planesX: [], planesY: [], pieceCount: 1, blockedSeams: 0 };
   if (!bed) return whole;
@@ -481,7 +544,7 @@ export function planFitTestSplit(
   // card's REAL bounds follow the overhang offset (the body spans
   // [-outerW/2 - left, outerW/2 + right]); symmetric bounds would let a nudged
   // seam step past one edge and build a cutter that intersects nothing.
-  const spans = fitTestCutoutSpans(params);
+  const spans = avoid ?? fitTestCutoutSpans(params);
   const { offsetX, offsetY } = overhangExpansion(
     resolveOverhang(isPartialMask(params.cellMask) ? undefined : params.overhang)
   );
@@ -560,6 +623,50 @@ function openingAreaMm2(cutout: Cutout): number {
   }
 }
 
+function polygonPerimeter(points: readonly { readonly x: number; readonly y: number }[]): number {
+  let length = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    length += Math.hypot(b.x - a.x, b.y - a.y);
+  }
+  return length;
+}
+
+/** Measured at the straight wall: the entry chamfer's flare is left out. */
+export function openingPerimeterMm(cutout: Cutout): number {
+  const grow = openingGrowthMm(cutout);
+  const w = cutout.width + 2 * grow.clearanceW;
+  const d = cutout.depth + 2 * grow.clearanceD;
+  switch (cutout.shape) {
+    case 'circle': {
+      const a = w / 2;
+      const b = d / 2;
+      return Math.PI * (3 * (a + b) - Math.sqrt((3 * a + b) * (a + 3 * b)));
+    }
+    case 'polygon':
+      return polygonPerimeter(regularPolygonPoints(cutout.sides ?? DEFAULT_POLYGON_SIDES, w, d));
+    case 'slot':
+    case 'knifeSlot': {
+      const r = Math.min(w, d) / 2;
+      return 2 * (Math.max(w, d) - 2 * r) + 2 * Math.PI * r;
+    }
+    case 'rectangle': {
+      const r = Math.min(cutout.cornerRadius, Math.min(w, d) / 2);
+      return 2 * (w + d) - (8 - 2 * Math.PI) * r;
+    }
+    case 'path': {
+      const cut = pathCutoutCut(cutout, grow.clearanceD, grow.chamfer);
+      return cut ? polygonPerimeter(cut.base) : 2 * (cutout.width + cutout.depth);
+    }
+    // A scan has no outline here, only its footprint; the box over-reads it.
+    case 'mesh':
+      return 2 * (w + d);
+    case 'text':
+      return 0;
+  }
+}
+
 /**
  * Material (mm³) the openings remove, counted no deeper than `maxDepthMm`.
  *
@@ -568,22 +675,35 @@ function openingAreaMm2(cutout: Cutout): number {
  * disagree about how much a pocket takes out.
  */
 export function cutoutDisplacementMm3(params: BinParams, maxDepthMm = Infinity): number {
-  const volumeOf = (cutout: Cutout): number =>
-    openingAreaMm2(cutout) * Math.min(cutout.cutDepth, maxDepthMm);
+  return sumOverCutouts(params, (cutout) => {
+    const shareB = sideBShare(cutout);
+    const depthB = cutout.split?.cutDepth ?? 0;
+    return (
+      openingAreaMm2(cutout) *
+      ((1 - shareB) * Math.min(cutout.cutDepth, maxDepthMm) + shareB * Math.min(depthB, maxDepthMm))
+    );
+  });
+}
 
-  // Members of a pathfinder group are NOT additive: `subtract`, `intersect` and
-  // `exclude` all put material back, so summing them removes more than the
-  // group ever cuts and can drive a dense board's estimate to zero. The group's
-  // largest member is the honest bound for those; only `union` accumulates.
+/**
+ * Total of a per-cutout quantity over the card's cutouts, counting each
+ * pathfinder group once.
+ *
+ * Members of a group are NOT additive: `subtract`, `intersect` and `exclude`
+ * all put material back, so summing them removes more than the group ever cuts
+ * and can drive a dense board's estimate to zero. The group's largest member is
+ * the honest bound for those; only `union` accumulates.
+ */
+export function sumOverCutouts(params: BinParams, valueOf: (cutout: Cutout) => number): number {
   let total = 0;
   const groups = new Map<string, number>();
   for (const cutout of fitTestCutouts(params)) {
-    const volume = volumeOf(cutout);
+    const value = valueOf(cutout);
     if (cutout.groupId === null || (cutout.groupOp ?? 'union') === 'union') {
-      total += volume;
+      total += value;
       continue;
     }
-    groups.set(cutout.groupId, Math.max(groups.get(cutout.groupId) ?? 0, volume));
+    groups.set(cutout.groupId, Math.max(groups.get(cutout.groupId) ?? 0, value));
   }
   for (const largest of groups.values()) total += largest;
   return total;

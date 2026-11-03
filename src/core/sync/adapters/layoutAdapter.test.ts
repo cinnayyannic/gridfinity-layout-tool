@@ -5,7 +5,7 @@
  * PR 4b's engine tests, where the integration is meaningful.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useLibraryStore } from '@/core/store';
 import type { LayoutEntry, LayoutId, LayoutLibrary } from '@/core/types';
 
@@ -24,8 +24,9 @@ vi.mock('@/core/storage', () => ({
 }));
 
 import { layoutAdapter, normalizeIncomingLayout } from './layoutAdapter';
+import { LAYOUT_SCHEMA_VERSION } from '../payloadKey';
 import type { Bin, Layout } from '@/core/types';
-import { gridUnits, categoryId } from '@/core/types';
+import { gridUnits, categoryId, heightUnits } from '@/core/types';
 import type { AdapterChange } from './types';
 
 const minimalLayout = (name: string): { name: string } => ({ name });
@@ -104,10 +105,325 @@ describe('layoutAdapter placement', () => {
         folderId: 'folder_1_abc',
       } as unknown as Layout,
       modifiedAt: 2000,
+      schemaVersion: LAYOUT_SCHEMA_VERSION,
     });
     const saved = useLibraryStore.getState().library.entries.find((e) => e.id === 'lay-1');
     expect(saved?.folderId).toBe('folder_1_abc');
     expect(saveLayoutAsyncMock.mock.calls[0][1]).not.toHaveProperty('folderId');
+  });
+});
+
+describe('layoutAdapter.applyRemote — copies the server stored before schema 2', () => {
+  const plate = { magnetHoles: false, magnetDiameter: 6, magnetDepth: 2, paddingBack: 21 };
+  const local = {
+    ...minimalLayout('Mine'),
+    bins: [],
+    drawer: {
+      width: 12.5,
+      depth: 11.5,
+      height: 12.57,
+      measuredMm: { width: 541, depth: 496, height: 88 },
+    },
+    baseplateParams: plate,
+    activeBaseplateId: 'baseplate_1700000000000_ab12cd',
+  };
+  const stripped = {
+    ...minimalLayout('Renamed elsewhere'),
+    bins: [],
+    drawer: { width: 12.5, depth: 11.5, height: 12.57 },
+  };
+
+  beforeEach(() => {
+    computePreviewMock.mockReturnValue({ binCount: 0 });
+    saveLayoutAsyncMock.mockResolvedValue({ ok: true });
+    saveLibraryMock.mockResolvedValue({ ok: true });
+  });
+
+  const savedLayout = (): Record<string, unknown> =>
+    saveLayoutAsyncMock.mock.calls[0][1] as Record<string, unknown>;
+
+  it('keeps this device’s measurement, plate settings and link that an older copy lost', async () => {
+    loadLayoutAsyncMock.mockResolvedValue(local);
+    await layoutAdapter.applyRemote({
+      id: 'lay-1',
+      payload: stripped as unknown as Layout,
+      modifiedAt: 2000,
+      schemaVersion: 1,
+    });
+
+    expect(savedLayout()).toMatchObject({
+      name: 'Renamed elsewhere',
+      drawer: { width: 12.5, measuredMm: { width: 541, depth: 496, height: 88 } },
+      baseplateParams: plate,
+      activeBaseplateId: 'baseplate_1700000000000_ab12cd',
+    });
+  });
+
+  it('restores the measurement before clipping the drawer outline to it', async () => {
+    const outline = {
+      vertices: [
+        { x: 0, y: 0 },
+        { x: 110, y: 0 },
+        { x: 110, y: 110 },
+        { x: 0, y: 110 },
+      ],
+    };
+    loadLayoutAsyncMock.mockResolvedValue({
+      ...local,
+      gridUnitMm: 42,
+      drawer: { width: 2, depth: 2, height: 3, outline, measuredMm: { width: 120, depth: 120 } },
+    });
+    await layoutAdapter.applyRemote({
+      id: 'lay-1',
+      payload: {
+        ...stripped,
+        gridUnitMm: 42,
+        drawer: { width: 2, depth: 2, height: 3, outline },
+      } as unknown as Layout,
+      modifiedAt: 2000,
+      schemaVersion: 1,
+    });
+
+    const drawer = savedLayout().drawer as { outline?: typeof outline };
+    expect(Math.max(...(drawer.outline?.vertices ?? []).map((v) => v.x))).toBe(110);
+  });
+
+  it('treats a copy with no version as an older one', async () => {
+    loadLayoutAsyncMock.mockResolvedValue(local);
+    await layoutAdapter.applyRemote({
+      id: 'lay-1',
+      payload: stripped as unknown as Layout,
+      modifiedAt: 2000,
+    });
+
+    expect(savedLayout()).toMatchObject({ baseplateParams: plate });
+  });
+
+  it('takes a schema-2 copy’s drawer fields as they are, so a measurement cleared elsewhere stays cleared', async () => {
+    loadLayoutAsyncMock.mockResolvedValue(local);
+    await layoutAdapter.applyRemote({
+      id: 'lay-1',
+      payload: stripped as unknown as Layout,
+      modifiedAt: 2000,
+      schemaVersion: 2,
+    });
+
+    expect(savedLayout()).not.toHaveProperty('baseplateParams');
+    expect(savedLayout()).not.toHaveProperty('activeBaseplateId');
+    expect(savedLayout().drawer).not.toHaveProperty('measuredMm');
+  });
+
+  it('leaves a first pull alone when this device has no copy', async () => {
+    loadLayoutAsyncMock.mockResolvedValue(null);
+    await layoutAdapter.applyRemote({
+      id: 'lay-1',
+      payload: stripped as unknown as Layout,
+      modifiedAt: 2000,
+      schemaVersion: 1,
+    });
+
+    expect(savedLayout()).not.toHaveProperty('baseplateParams');
+  });
+});
+
+describe('layoutAdapter.applyRemote — copies the server stored before schema 3', () => {
+  const fit = {
+    clearanceHeight: heightUnits(2),
+    extendToMargin: true,
+    marginTaper: { profile: 'chamfer' as const, bandHeight: 10 },
+    overhang: { left: 0, right: 10.5, front: 0, back: 0 },
+  };
+  const bin = (id: string, x: number, extra: Partial<Bin> = {}): Bin =>
+    ({
+      id,
+      layerId: 'layer-1',
+      x,
+      y: 0,
+      width: 2,
+      depth: 2,
+      height: 3,
+      category: 'cat-1',
+      label: '',
+      notes: '',
+      ...extra,
+    }) as unknown as Bin;
+  const local = {
+    ...minimalLayout('Mine'),
+    drawer: { width: 12, depth: 12, height: 12, measuredMm: { width: 520, depth: 510 } },
+    bins: [bin('a', 0, fit), bin('b', 4, fit)],
+  };
+
+  beforeEach(() => {
+    computePreviewMock.mockReturnValue({ binCount: 2 });
+    saveLayoutAsyncMock.mockResolvedValue({ ok: true });
+    saveLibraryMock.mockResolvedValue({ ok: true });
+    loadLayoutAsyncMock.mockResolvedValue(local);
+  });
+
+  afterEach(() => {
+    loadLayoutAsyncMock.mockReset();
+  });
+
+  const savedBins = (): Record<string, unknown>[] =>
+    (saveLayoutAsyncMock.mock.calls[0][1] as { bins: Record<string, unknown>[] }).bins;
+
+  const pull = (bins: Bin[], schemaVersion: number, drawer: object = local.drawer): Promise<void> =>
+    layoutAdapter.applyRemote({
+      id: 'lay-1',
+      payload: { ...minimalLayout('Mine'), drawer, bins } as unknown as Layout,
+      modifiedAt: 2000,
+      schemaVersion,
+    });
+
+  it('keeps this device’s drawer-fit fields that a schema-2 copy lost, matched by bin id', async () => {
+    await pull([bin('a', 0)], 2);
+    expect(savedBins()[0]).toMatchObject(fit);
+  });
+
+  it('drops the overhang of a bin the copy moved, since it held only where it was', async () => {
+    await pull([bin('b', 6)], 2);
+    expect(savedBins()[0]).not.toHaveProperty('overhang');
+    expect(savedBins()[0]).toMatchObject({ clearanceHeight: 2, extendToMargin: true });
+  });
+
+  it('lets a value the copy carries win over this device’s', async () => {
+    await pull([bin('a', 0, { clearanceHeight: heightUnits(5) })], 2);
+    expect(savedBins()[0]).toMatchObject({ clearanceHeight: 5 });
+  });
+
+  it('lets a schema-2 copy that turned the margin off win over this device’s', async () => {
+    await pull([bin('a', 0, { extendToMargin: false })], 2);
+    expect(savedBins()[0]).toMatchObject({ extendToMargin: false });
+  });
+
+  it('leaves a bin this device has never seen alone', async () => {
+    await pull([bin('new', 8)], 2);
+    expect(savedBins()[0]).not.toHaveProperty('clearanceHeight');
+    expect(savedBins()[0]).not.toHaveProperty('overhang');
+  });
+
+  it('restores both drawer and bin fields from a schema-1 copy', async () => {
+    await pull([bin('a', 0)], 1, { width: 12, depth: 12, height: 12 });
+    const saved = saveLayoutAsyncMock.mock.calls[0][1] as { drawer: Record<string, unknown> };
+    expect(saved.drawer).toHaveProperty('measuredMm');
+    expect(savedBins()[0]).toMatchObject(fit);
+  });
+
+  it('takes a schema-3 copy’s drawer-fit fields as they are, so one cleared elsewhere stays cleared', async () => {
+    await pull([bin('a', 0)], 3);
+    for (const key of Object.keys(fit)) expect(savedBins()[0]).not.toHaveProperty(key);
+  });
+});
+
+describe('layoutAdapter.applyRemote — copies the server stored before schema 4', () => {
+  const items = [{ id: 'i1', name: 'M3 screws', qty: 40 }];
+  const bin = (id: string, extra: Partial<Bin> = {}): Bin =>
+    ({
+      id,
+      layerId: 'layer-1',
+      x: 0,
+      y: 0,
+      width: 2,
+      depth: 2,
+      height: 3,
+      category: 'cat-1',
+      label: '',
+      notes: '',
+      ...extra,
+    }) as unknown as Bin;
+  const local = {
+    ...minimalLayout('Mine'),
+    drawer: { width: 12, depth: 12, height: 12 },
+    bins: [bin('a', { items, clearanceHeight: heightUnits(2) })],
+  };
+
+  beforeEach(() => {
+    computePreviewMock.mockReturnValue({ binCount: 1 });
+    saveLayoutAsyncMock.mockResolvedValue({ ok: true });
+    saveLibraryMock.mockResolvedValue({ ok: true });
+    loadLayoutAsyncMock.mockResolvedValue(local);
+  });
+
+  afterEach(() => {
+    loadLayoutAsyncMock.mockReset();
+  });
+
+  const pull = (bins: Bin[], schemaVersion: number): Promise<void> =>
+    layoutAdapter.applyRemote({
+      id: 'lay-1',
+      payload: { ...minimalLayout('Mine'), drawer: local.drawer, bins } as unknown as Layout,
+      modifiedAt: 2000,
+      schemaVersion,
+    });
+
+  const savedBin = (): Record<string, unknown> =>
+    (saveLayoutAsyncMock.mock.calls[0][1] as { bins: Record<string, unknown>[] }).bins[0];
+
+  it('keeps this device’s items that a schema-3 copy lost, and nothing else', async () => {
+    await pull([bin('a')], 3);
+    expect(savedBin()).toMatchObject({ items });
+    expect(savedBin()).not.toHaveProperty('clearanceHeight');
+  });
+
+  it('takes a current copy as it is, so items cleared elsewhere stay cleared', async () => {
+    await pull([bin('a')], LAYOUT_SCHEMA_VERSION);
+    expect(savedBin()).not.toHaveProperty('items');
+  });
+});
+
+describe('layoutAdapter.applyRemote — copies the server stored before schema 5', () => {
+  const slant = { angleDeg: 40, side: 'back' as const, endSupport: true };
+  const bin = (id: string, extra: Partial<Bin> = {}): Bin =>
+    ({
+      id,
+      layerId: 'layer-1',
+      x: 0,
+      y: 0,
+      width: 2,
+      depth: 2,
+      height: 3,
+      category: 'cat-1',
+      label: '',
+      notes: '',
+      ...extra,
+    }) as unknown as Bin;
+  const local = {
+    ...minimalLayout('Mine'),
+    drawer: { width: 12, depth: 12, height: 12 },
+    bins: [bin('a', { slant, items: [{ id: 'i1', name: 'Pens' }] })],
+  };
+
+  beforeEach(() => {
+    computePreviewMock.mockReturnValue({ binCount: 1 });
+    saveLayoutAsyncMock.mockResolvedValue({ ok: true });
+    saveLibraryMock.mockResolvedValue({ ok: true });
+    loadLayoutAsyncMock.mockResolvedValue(local);
+  });
+
+  afterEach(() => {
+    loadLayoutAsyncMock.mockReset();
+  });
+
+  const pull = (bins: Bin[], schemaVersion: number): Promise<void> =>
+    layoutAdapter.applyRemote({
+      id: 'lay-1',
+      payload: { ...minimalLayout('Mine'), drawer: local.drawer, bins } as unknown as Layout,
+      modifiedAt: 2000,
+      schemaVersion,
+    });
+
+  const savedBin = (): Record<string, unknown> =>
+    (saveLayoutAsyncMock.mock.calls[0][1] as { bins: Record<string, unknown>[] }).bins[0];
+
+  it('keeps this device’s slant that a schema-4 copy lost, but not the items it carried', async () => {
+    await pull([bin('a')], 4);
+    expect(savedBin()).toMatchObject({ slant });
+    expect(savedBin()).not.toHaveProperty('items');
+  });
+
+  it('takes a current copy as it is, so a slant cleared elsewhere stays cleared', async () => {
+    await pull([bin('a')], LAYOUT_SCHEMA_VERSION);
+    expect(savedBin()).not.toHaveProperty('slant');
   });
 });
 

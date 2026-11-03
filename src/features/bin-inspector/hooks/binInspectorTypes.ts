@@ -6,13 +6,12 @@
  * lets the multi-action hook import only what it needs.
  */
 
-import type { Bin, Category, Layer, Layout } from '@/core/types';
+import type { Bin, BinItem, Category, Layer, Layout } from '@/core/types';
 import { emitSyncEvent } from '@/shared/events/syncEventBus';
 
 export type BinField =
   'width' | 'depth' | 'height' | 'clearanceHeight' | 'category' | 'label' | 'notes';
 
-export type MinHeightReason = 'layer_height' | 'global_minimum';
 export type MaxHeightReason = 'remaining_space' | 'drawer_height';
 
 export interface BinConstraints {
@@ -22,8 +21,6 @@ export interface BinConstraints {
   maxGridUnits: { width: number; depth: number };
   needsSplit: boolean;
   heightRange: string;
-  /** Why the minimum height is what it is */
-  minHeightReason: MinHeightReason;
   /** Why the maximum height is what it is */
   maxHeightReason: MaxHeightReason;
 }
@@ -45,6 +42,7 @@ export interface UseBinInspectorReturn {
 
   updateField: (field: BinField, value: string | number) => void;
   updateCustomProperties: (properties: Record<string, string>) => void;
+  updateItems: (items: BinItem[]) => void;
   updateMultiCustomProperty: (key: string, value: string) => void;
   updateMultiCategory: (categoryId: string) => void;
   updateMultiHeight: (delta: number) => void;

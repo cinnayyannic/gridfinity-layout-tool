@@ -25,6 +25,10 @@ graph TB
 
 ## Key Files
 
+- `components/panel/PullTabSection/` — raised grips on any wall or the center divider (`pullTab.walls` via `resolvePullTabWalls`; `resolvePullTabCenter` picks the divider), mm/% width, optional mirrored recess. `src/shared/utils/pullTabPlan.ts` resolves dimensions and safe blends; `setParam` preserves undo/redo. Missing `pullTab` stays absent on legacy designs. Unsupported wall features disable the tab without clearing its saved settings.
+
+- `components/LayoutDesignSwitch/` — header menu of the active layout's linked designs. A pick
+  calls `navigateToDesign(id, binId)` so `usePlacementOverhang` still applies.
 - `components/DesignerPage/DesignerQuickstartCard.tsx` — one-time orientation card for first-visit
   /designer landers (desktop/tablet only). Dismissed by "Got it", Escape, or the first edit;
   state in `hooks/useDesignerFirstRun.ts`. `hooks/usePlannerBridge.ts` shows the one-time
@@ -59,7 +63,7 @@ graph TB
   relief depth, edge profile), plus a specimen drawn from the REAL glyph outlines via
   `@/shared/utils/typePlan`. The style lives on `params.textDefaults`, so this one section governs
   wall text, the lid, label tabs, plates and cutout labels alike; per-surface refinements layer on
-  top through `surfaceText.lidStyle` / `surfaceText.wallStyles`. The active preset is DERIVED from
+  top through `surfaceText.lidStyle` / `surfaceText.insideStyle` / `surfaceText.wallStyles`. The active preset is DERIVED from
   the fields (`matchTextPreset`), never stored, so the chip cannot claim a look the geometry does
   not have. New designs start on `TEXT_PRESETS.engineering` while `migrateParams` backfills the
   NEUTRAL defaults, so a design saved before the type system renders as it always did.
@@ -127,7 +131,7 @@ graph TB
   PAIR of bins sharing a `pairId` (`@/shared/utils/binPairs.ts` + the
   `useKnifeRestPairing` reconciler in design-linking) — moving, stashing, deleting and
   rotating act on the unit while the gap between them stays free grid space
-- `components/panel/LidSection/` — click-lock lid toggle, fit pills, top-surface picker with its magnet / lip-only / separate-baseplate sub-toggles, thickness sliders. A hinged lid's thickness floors at `hingePlateFloorMm` (the stop lobe's reach, so the flipped export lies flat); it rises with extra height, and the plan reads the same numbers
+- `components/panel/LidSection/` — click-lock lid toggle, fit pills, top-surface picker with its magnet / lip-only / separate-baseplate sub-toggles, thickness sliders. A hinged lid's thickness floors at `hingePlateFloorMm` (the stop lobe's reach, so the flipped export lies flat); extra height leaves it alone because the bin's hinge wall rises with the axis, and the plan reads the same numbers
 - `components/panel/SlideControls/` — channel placement (`recessed` under the stacking lip so the bin still stacks, or `flush` at the rim for the deepest interior, which needs the lip off and says so as a blocker with a one-click fix), which wall it opens through, the pull (none / finger notch / in-plane tab), and the click-shut detent. Sliding clearance is deliberately NOT here: it lives under Advanced with the other millimetre knobs, being the one number with a right answer per printer and none in general. Everything rendered comes from `slideLidPlanForParams`, so a readout cannot disagree with the geometry.
 - `components/panel/HingeControls/` — which wall the hinge axis runs along, and what holds the lid SHUT (nothing / a snap rail on the opposite wall / magnet bosses on that wall). A hinge fixes one edge and says nothing about the other three, which is why the catch is its own choice. The readout is the point: the pin is a filament offcut the user cuts themselves, so the cut length is the one number nobody can measure off the model, and it is quoted again in the export dialog from the same `hingePinLengths` call, one per RUN (a cutout splitting the hinge wall leaves two barrels and needs two pins). Running fit lives under Advanced with the other millimetre knobs. Switching TO a hinge seeds a scallop grip on the opposite wall when the grip is still untouched, but never overwrites a configured one.
 - `components/panel/LidGripControls/` — the chamfer / shadow-line / scallop cut at the lid↔bin seam, plus the opt-in bin lip dip. `grip.heightMm` is a knob on the shadow line and the scallop (`null` = the mode's own request; a chamfer has none, its 45° section being its depth). The readout reports depth, height, lid left ABOVE the cut and which dimension ran out, because the requested values are bounded by the design's own tray / magnet / skirt geometry and a shortened relief otherwise reads as a defect. The shadow line is unavailable on a stackable top, since it moves the face an upper bin registers against; `lidGripModeAllowed` is the rule, mirrored server-side.
@@ -151,6 +155,7 @@ graph TB
 - `hooks/useBinDefaults.ts` — single source of behavior (`setCurrentAsDefault` / `resetToFactory` / `hasCustomDefault` + toasts) shared by all four discoverability surfaces: the Saved Designs ⋯ menu, the `SetDefaultFooter` (parameter-panel footer), the Settings → Defaults tab, and the command palette. The palette can't import this feature (cross-feature boundary), so `set-bin-default`/`reset-bin-default` commands dispatch window events that `useBinDefaultCommandBridge` (mounted by `DesignerPage`) translates into hook calls
 - `utils/tags.ts` — `normalizeTags` (trim/strip-control-chars/dedupe/cap: 12 tags × 32 chars)
 - `@/shared/printSettings/assembledHeight` — how tall the design stands seated on a baseplate with its lid on, as disjoint bottom-to-top bands summing to the total. **A socketed bin nests `SOCKET_HEIGHT` into the plate**, so a plain no-magnet, no-solid-floor plate contributes 0mm; only `baseplateFloorDepth` (magnet retaining floor + optional solid floor) lifts the bin. **A flat base has no socket, so it gets no plate band at all**: counting one would overstate clearance by the plate's full height. Feeds the sidebar rows (`panel/AssembledHeightBreakdown`) and the 3D height dimension (`preview/BinDimensions`) through `hooks/useAssembledHeight`, so drawing and readout cannot disagree. The lid's rise is derived from `lidAnchorZ`/`resolveLidPlateThickness` rather than measured, so it is correct before generation finishes; `generation/.../assembledHeight.scenario.test.ts` runs the real kernel to pin the derivation to the meshes. It lives in `shared/` because the layout's drawer-ceiling check, the bin inspector and the layers panel all need the answer and cannot import this feature, reaching it via `assembledRiseMm` on the custom-bin registry.
+- `utils/interiorDimensions.ts` — the Inside line under the Dimensions readout: wall-to-wall width and depth, floor top to wall top (stacking lip excluded). A Nesting body's floor sits on the bed under a mouth `LID_CORNER_RADIUS` in from the footprint, so it reads taller and narrower than the cavity above. Null for solid, base-only, open lightweight floor and masked footprints. `interiorDimensions.test.ts` pins it to the pipeline's dimensions and `interiorDimensions.scenario.test.ts` to the built mesh.
 
 ## Critical Concepts
 
@@ -176,7 +181,7 @@ with `pnpm run validate:json`.
 - **Spacer / riser (`base.spacer`)**: a floorless bin used as a riser so bins of different heights finish flush. Deliberately NOT a new `BinStyle` but a base property, so it composes with wall features and doesn't ripple through the ~20 `style` consumers.
   - Derives `dimensions.lightweight = true` and asks `lightweightBaseBuilder` for the `'through'` open direction: **zShift 0**, so the cup opens at BOTH ends. The floor-opening slug punches the body floor over each cup, making the whole cell a through-hole.
   - **What holds a multi-cell spacer together is the inter-cell webbing** (each cup keeps its own wall, adjacent cups' walls meet) plus the perimeter. Remove it and interior feet come loose as separate solids, which the 3x3 scenario guards. Envelope, feet and lip are untouched, so stacking arithmetic is inherited: a 2u spacer under a 2u bin reaches the top of a 4u one.
-  - **The one bin allowed down to 1u.** `DESIGNER_CONSTRAINTS.MIN_HEIGHT` is 2 because 1u leaves no usable cavity, which a floorless riser doesn't have. The floor lives in ONE place, `minHeightUnits(base)`, read by the stepper bound, `validateBinParams` and every base toggle; `api/lib/designerValidation.ts` mirrors it. It keys off the **effective** spacer (`base.spacer && style !== 'flat'`), since the flag is inert on a flat base, so keying off `base.spacer` alone would hand the relaxed floor to a `{ style: 'flat', spacer: true, height: 1 }` payload. `useBaseSection` routes every toggle through one `commit()` that re-applies the floor. It must cover more than the spacer card (`setBodyType`), since enabling the flat base auto-disables the spacer through `CONSTRAINT_RULES` and would strand a 1u bin below its own stepper's floor, reading the RESOLVED params (the engine's post-check can return params untouched when an enable is blocked). Layout placement is excluded: `CONSTRAINTS.MIN_BIN_HEIGHT` stays 2.
+  - **The one bin allowed down to 1u.** `DESIGNER_CONSTRAINTS.MIN_HEIGHT` is 2 because 1u leaves no usable cavity, which a floorless riser doesn't have. The floor lives in ONE place, `minHeightUnits(base)`, read by the stepper bound, `validateBinParams` and every base toggle; `api/lib/designerValidation.ts` mirrors it. It keys off the **effective** spacer (`base.spacer && style !== 'flat'`), since the flag is inert on a flat base, so keying off `base.spacer` alone would hand the relaxed floor to a `{ style: 'flat', spacer: true, height: 1 }` payload. Every base toggle writes through `finalizeBaseParams`, which re-applies the floor. It must cover more than the spacer card (`setBodyType`), since enabling the flat base auto-disables the spacer through `CONSTRAINT_RULES` and would strand a 1u bin below its own stepper's floor, reading the RESOLVED params (the engine's post-check can return params untouched when an enable is blocked). Layout placement is excluded: `CONSTRAINTS.MIN_BIN_HEIGHT` stays 2.
   - **Attachment hardware is suppressed** (`deriveDimensions` zeroes `withMagnet`/`withScrew`): a magnet pad inside a through-hole would be a free-standing pillar. Incompatibilities are declared in `CONSTRAINT_RULES` and deliberately **one-way** from the interior features (the `style.solid` precedent), so a spacer stays reachable from a fully-designed bin and clears the incompatible set on the way in. Only the flat base blocks it, mutually.
   - Every place that special-cases the shelled base takes the spacer too: `canBinUseDirectMesh`, the split floor-scarf, the generation timeout budget, split alignment, and the floor-pattern fit/estimate.
 - **Underside lightweight relief (`base.lightweightMode`)**: the lite shells opened DOWNWARD, so each foot becomes a ring capped by the bin's own floor. The interior stays flat, so contents can't settle into recesses and floor-dependent features keep working. A mode on `base.lightweight`, **absent** when `interior` so `communityParamsFingerprint` is unchanged for published designs (the `base.tile` precedent).
@@ -186,7 +191,7 @@ with `pnpm run validate:json`.
   - The mode selector nests inside the `FeatureToggle`. Safe only because a "Use underside relief" action renders beside the greyed toggle when `undersideReliefUnblocks`, and `showFloor` includes that flag so the control can't be unmounted with the feature it would unblock.
 - **Lid-compatible bottom (`base.style: 'lid'`)**: a fully editable bin whose underside is lid mating geometry instead of a Gridfinity socket, so a shallow organiser caps the bin below it. `base.trayBottom` is a narrow subset of `LidConfig` sharing field names and units; the lid's top-face fields are omitted because a tray's top is its own interior.
   - **Nesting body** opts into `base.trayBottom.floorAtBed: true`. It reuses the lid mating taper, fills the plug, and opens the original body floor down to a bed-supported slab. Magnet bosses and divider supports stay solid. Drainage patterns cut the lowered slab after it is built, with keep-outs around all magnet bosses and divider feet. `resolveTrayBottomConfig` fixes clearance at zero, excludes click rails, and shares the lid's magnet dimensions with four corner pockets and optional edge magnets. It nests on same-size bins, not Gridfinity baseplates. Custom outlines keep the continuous floor but do not offer the rectangular magnet or drainage layout. Existing lid-base designs keep their raised floor. Floor-mounted inserts, scoops, and removable dividers are unavailable in this mode because they use the original floor datum.
-  - Its slab uses the ordinary `binFloorMm(wallThickness)` rule: `max(wallThickness, 2mm)`. Selecting Nesting unlocks the shared Mounting section; `base.magnet` reads/writes its corner-pocket attachment without changing the body type. Hardware stays off unless already enabled. Magnet dimensions use the lid's retention limits and stay synchronized in both editing directions; Standard retains its per-foot dimensions and limits.
+  - Its slab uses the socketed `binFloorMm` rule: `max(wallThickness, 2.25mm)`. Selecting Nesting unlocks the shared Mounting section; `base.magnet` reads/writes its corner-pocket attachment without changing the body type. Hardware stays off unless already enabled. Magnet dimensions use the lid's retention limits and stay synchronized in both editing directions; Standard retains its per-foot dimensions and limits.
   - `trayBottomInputs` synthesises a `lid` config and calls the real `resolveLidInputs`; `trayBottomStage` fuses `buildMatingShell` + `addClickRails` + `addLidRetentionMagnets` under the body.
   - **That reuse is only sound because the profiles coincide**: body outer is `w*grid - CLEARANCE` (0.5mm), lid outer is `w*grid - 2*LID_FIT_CLEARANCE`, and both corner radii are 3.75mm (`BOX_CORNER_RADIUS` vs `LID_CORNER_RADIUS - LID_FIT_CLEARANCE`). `trayBottomStage.geometry.test.ts` keeps that honest if either constant moves.
   - `resolveLidInputs` is fed `base.stackingLip: true` regardless of the tray's own lip: the field means "does the thing I mate with have a lip", which is true by construction. `disabledRails` is forced empty, since the rail-conflict check reads the COVERED bin's features, which live in a different design.
@@ -322,15 +327,19 @@ intersection`, not XOR** — they coincide for 2 members but diverge for
   size. Polygons are sized **across-flats** (matches hex/Allen specs);
   per-shape sizing + hardware presets live in `CutoutShapeControls`.
 
-- **Entry chamfer**: `chamferWidth` (mm) lofts a ~45° flare at the cut's top rim
-  so parts self-center on insertion. The generator builds it via `loftWith`
-  between the nominal profile and a `chamferWidth`-expanded top profile; it
-  composes with scoop fillets and is clamped to `maxEntryChamfer(cutDepth)` (a
-  `MIN_STRAIGHT_WALL` straight section must remain below the bevel). New
-  insert-style holes seed a size-scaled default via `defaultEntryChamfer`
-  (~10% of the tightest dimension, clamped to a tasteful 0.4–0.8mm). Available
-  on `rectangle` / `circle` / `polygon` / `slot`. The editor exposes tolerance +
-  chamfer as 0.2mm steppers that still accept off-grid fractional typing.
+- **Entry chamfer**: `chamferWidth` (mm) lofts a ~45° flare where the cut opens
+  (the fill surface, or the floor of a shallower pocket around it:
+  `planNestedOpenings`) so parts self-center on insertion. The generator builds
+  it via `loftWith` between the nominal profile and a `chamferWidth`-expanded
+  rim profile; it composes with scoop fillets and is clamped to
+  `maxEntryChamfer(cutDepth)` (a `MIN_STRAIGHT_WALL` straight section must
+  remain below the bevel). New insert-style holes seed a size-scaled default
+  via `defaultEntryChamfer` (~10% of the tightest dimension, clamped to a
+  tasteful 0.4–0.8mm). Available on every shape in `CHAMFER_SHAPES`:
+  `rectangle` / `circle` / `polygon` / `slot` / `knifeSlot` / `path`, and
+  `mesh`, whose bevel is swept in the mesh domain. The editor exposes
+  tolerance + chamfer as 0.2mm steppers that still accept off-grid fractional
+  typing.
 
 - **Label plate preview**: socket-mode plates render as REAL geometry, meshed by
   `labelPlateGenerator` and carried on the generation result beside `lidMesh`. Seats come
@@ -462,7 +471,7 @@ intersection`, not XOR** — they coincide for 2 members but diverge for
 
 ### Mesh imprint cutouts (STL import)
 
-`shape: 'mesh'` cutouts carve a contoured pocket from an uploaded STL. The compressed mesh lives in `BinParams.meshAssets` (content shared across duplicates/arrays; store GCs an asset when its last referencing cutout is deleted — see `cutoutSlice`). Import flow: `panel/CutoutsSection/stlImport/` (`useStlImport` → worker `IMPORT_MESH` → orientation dialog → `addMeshCutout`). The 2D editor renders the stored silhouette (`renderer/MeshFootprintMesh`) shape-locked: move/rotate/array yes; resize, point-edit, scoops, pathfinder groups no. Fit controls (clearance/chamfer) apply. Payload cap is 2MB only when `meshAssets` is non-empty (server mirror in `api/lib/designerValidation.ts`).
+`shape: 'mesh'` cutouts carve a contoured pocket from an uploaded STL. `BinParams.meshAssets` holds a ref per mesh into the local mesh file store (files, refs, cleanup and worker delivery: the mesh-storage skill); the store GCs an entry when its last referencing cutout is deleted (see `cutoutSlice`). Import flow: `panel/CutoutsSection/stlImport/` (`useStlImport` → worker `IMPORT_MESH` → orientation dialog → `addMeshCutout`). The 2D editor renders the stored silhouette (`renderer/MeshFootprintMesh`) shape-locked: move/rotate/array yes; resize, point-edit, scoops, pathfinder groups no. Fit controls (clearance/chamfer) apply. Payload cap is 2MB only when `meshAssets` is non-empty (server mirror in `api/lib/designerValidation.ts`).
 
 ### Imported bin designs (STL → design, `stl_bin_import` flag — graduated)
 
@@ -491,16 +500,16 @@ estimates), and the source file name.
 - **Registry**: `CustomBinRef.kind?: ItemKind` (absent = bin) lets the
   planner/link dialog identify imported entries; `designFootprint()` in
   `utils/designKind.ts` reads dimensions for any kind.
-- **Scope (v1)**: local-only — cloud sync deliberately skips non-bin kinds
-  (`sync/designAdapter.ts` filters with `isBinDesign`); the layout grid/3D
-  view renders the standard box + link badge, not the real mesh.
+- **Scope (v1)**: local-only, since `isSyncableDesign` keeps them and their
+  versions out of cloud sync; the layout grid/3D view renders the standard
+  box + link badge, not the real mesh.
 
 ## Gotchas
 
 1. **Compartment cells must form ONE CONNECTED region, not a rectangle** — `isContiguousSelection()` is the invariant (`mergeCells` and `validateCompartmentGrid` enforce it); two islands under one id would print as two pockets sharing a label. A merged L/S/T/U is valid geometry, since divider walls fall out of the boundaries between differing ids. Anything that positions itself from `getCompartmentBounds` must gate on `isRectangularCompartment()` — scoop ramps, label tabs and divider tilt already do, because on an L the bounding box crosses the notch into a neighbour. Bento's `mergeBackground` mode applies the same idea to leftover grid: connected runs collapse to one pocket, marked in `backgroundIds` so a multi-cell region nobody drew still reads as background. A stashed shape keeps its footprint in `StashedCompartment.cells`, row-major with row 0 at the FRONT of the bin — omitted means the plain `w × h` rectangle, which is what keeps a rectangular entry serializing byte-identically to before the field existed (and its `communityParamsFingerprint` stable). Every path that copies a compartment — move, clone, stash, restore, migration — has to carry `cells` and its row order across, or a merged L comes back as a rectangle or mirrored front-to-back
 2. **`compartments.floorRaises` is one more id-keyed parallel array** — remapped through `remapFloorRaises` in every mutation like `compartmentTexts`, absent when empty, and clamped at generation so `MIN_RAISED_CAVITY_MM` of pocket survives; the panel's ceiling (`maxCompartmentFloorRaiseMm`) measures from the same lip-taper-adjusted interior height, so the slider never names a raise the slab then loses.
 3. **Min compartment size is 5mm** - smaller cells skip wall generation
-4. **Auto-save only for saved designs** - "Untitled" bins don't persist
+4. **Auto-save only for saved designs** - "Untitled" bins don't persist. An edit can sit unsaved for over a second (debounce, then a wait on generation), and storage reads do not wait for writes, so anything that opens another design must read it through `useDesignerUrlSync` or after `settleDesignSaves()` (`hooks/designSaveGate.ts`). A read that starts first can miss the edit, or a variant its parent's change.
 5. **Half-cells get no magnet holes** - only full 1×1 unit cells
 6. **Solid style skips shell** - `buildBinBox`'s `solid` flag bypasses `.shell()`, so wallThickness is irrelevant
 7. **Label tabs skip solid bins** - both generation and ghost overlay guard against `style === 'solid'`. Tabs default to `edges: 'back'` (legacy); `'front'` and `'both'` enable tuck-under ledges (#1898). `inset` (mm) slides the tab inward from its anchor wall for shorter coverage. In `'both'` mode the front tab silently drops when `2·depth + 2·inset > compartmentDepth` and the panel surfaces an inline warning.
@@ -608,14 +617,11 @@ estimates), and the source file name.
     to identity — a single uniform scalar would distort circles and rotated
     shapes. Path bounds use `getPathBounds` (flattened bezier) so curves that
     bow outward beyond their anchors aren't clipped.
-14. **Physical-units print bed is dual-axis** — the section uses the shared
-    `PrintBedInput`, so width and depth round-trip independently when the
-    link toggle is off. The linked state is encoded by
-    `settings.defaultPrintBedDepth === undefined` (`undefined` = "follow
-    width", not "0" or "missing"). `usePhysicalUnitsSection.handlePrintBedChange`
-    must call the setter with `depth: undefined` when relinking — otherwise
-    a stale depth lingers in localStorage and the bed silently stays
-    non-square on the next load.
+14. **The print bed is the layout's** — every designer reader goes through
+    `useLayoutPrintBed`, the same bed the planner, baseplate and layout ZIP
+    split against; `settings.defaultPrintBedSize` only seeds new layouts.
+    `layout.printBedDepth === undefined` is a square bed, so relinking passes
+    no depth to `setPrintBedSize`.
 15. **`BinMesh` multi↔single material switch needs distinct keys** — the
     multi-color branch passes `material` as a `<mesh>` **prop** (array of
     `MeshStandardMaterial`), the single-color branch declares the material as

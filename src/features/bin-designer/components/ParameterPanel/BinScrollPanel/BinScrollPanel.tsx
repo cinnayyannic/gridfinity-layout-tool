@@ -20,6 +20,7 @@ import { jumpToDesignerControl } from '@/features/bin-designer/settingsManifest'
 import { binHasText } from '@/features/bin-designer/utils/binText';
 
 import { StickyGroupHeader } from '../../panel/StickyGroupHeader';
+import { PullTabSection } from '../../panel/PullTabSection';
 import { PanelSection } from '../../panel/PanelSection';
 import { FeatureGate } from '../../panel/FeatureGate';
 import { DependencyHint } from '../../panel/shared';
@@ -39,12 +40,15 @@ import { InteriorFilletSection } from '../../panel/InteriorFilletSection';
 import { KnifeRestSection } from '../../panel/KnifeRestSection';
 import { SlideTraySection } from '../../panel/SlideTraySection';
 import { BaseSection, FloorPatternSection } from '../../panel/BaseSection';
+import { FloorTextSection } from '../../panel/FloorTextSection';
 import { TypeSection } from '../../panel/TypeSection';
 import { ColorsSection } from '../../panel/ColorsSection';
 import { PhysicalUnitsSection } from '../../panel/PhysicalUnitsSection';
 import { SetDefaultFooter } from '../../panel/SetDefaultFooter';
 import { modifiedGroups, type PanelGroup } from '../groupModified';
 import { GROUP_OF_CONTROL, HELP_SURFACES } from './groupControls';
+import { SlantTooLargeNotice } from '../../panel/shared';
+import { SlantSection, useSlantVisible } from '../../panel/SlantSection';
 
 export interface BinScrollPanelProps {
   /** docked = desktop frame (resizable, collapsible); plain = fill the parent. */
@@ -78,7 +82,8 @@ export function BinScrollPanel({
       hasText: binHasText(s.params),
     }))
   );
-  const { needsSplit } = useSplitOptionsSection();
+  const { needsSplit, slantTooLarge, printBedSize } = useSplitOptionsSection();
+  const slantVisible = useSlantVisible();
 
   const [open, setOpen] = useState<Record<PanelGroup, boolean>>({
     shape: true,
@@ -115,7 +120,7 @@ export function BinScrollPanel({
   const markIf = (isModified: boolean): string | undefined =>
     isModified ? modifiedLabel : undefined;
 
-  const customShapeReason = t('binDesigner.shape.custom.hint');
+  const customShapeReason = t('binDesigner.shape.custom.unavailable');
   const footprintFix = isCustomShape ? (
     <DependencyHint
       reason={customShapeReason}
@@ -142,6 +147,11 @@ export function BinScrollPanel({
           <PanelSection helpTarget="bd-shape">
             <ShapeSection />
           </PanelSection>
+          {slantVisible && (
+            <PanelSection helpTarget="bd-slant">
+              <SlantSection />
+            </PanelSection>
+          )}
           <PanelSection helpTarget="bd-walls">
             <WallThicknessSection />
           </PanelSection>
@@ -152,6 +162,11 @@ export function BinScrollPanel({
           {needsSplit && (
             <PanelSection helpTarget="bd-print-fit">
               <SplitOptionsSection />
+            </PanelSection>
+          )}
+          {slantTooLarge && (
+            <PanelSection helpTarget="bd-print-fit">
+              <SlantTooLargeNotice width={printBedSize.width} depth={printBedSize.depth} />
             </PanelSection>
           )}
         </div>
@@ -166,6 +181,9 @@ export function BinScrollPanel({
         <div className="divide-y divide-stroke-subtle/50">
           <PanelSection helpTarget="bd-lid">
             <LidSection />
+          </PanelSection>
+          <PanelSection helpTarget="bd-pull-tab">
+            <PullTabSection />
           </PanelSection>
           <PanelSection helpTarget="bd-handles">
             <HandleSection />
@@ -242,6 +260,7 @@ export function BinScrollPanel({
           </PanelSection>
           <PanelSection helpTarget="bd-floor-pattern">
             <FloorPatternSection />
+            <FloorTextSection />
           </PanelSection>
           <PanelSection helpTarget="bd-physical-units">
             <PhysicalUnitsSection />

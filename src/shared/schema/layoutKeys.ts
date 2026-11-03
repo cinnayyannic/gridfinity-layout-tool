@@ -7,6 +7,7 @@
 import type { LinkedDesignExport } from '@/core/storage';
 import type {
   Bin,
+  BinItem,
   Category,
   CornerCutParams,
   Drawer,
@@ -16,6 +17,7 @@ import type {
   MeasuredDrawerMm,
   OutlineVertex,
   ScrewHoleParams,
+  MountMagnetParams,
   SplitOverride,
   StackPrintParams,
   StoredBaseplateParams,
@@ -77,15 +79,20 @@ export const BIN_KEYS = [
   'label',
   'notes',
   'customProperties',
+  'items',
   'linkedDesignId',
   'extendToMargin',
   'marginTaper',
   'overhang',
+  'slant',
   'locked',
   'pairId',
   'pairRole',
 ] as const;
 export type _BinKeys = Assert<KeysMatch<keyof Bin, (typeof BIN_KEYS)[number]>>;
+
+export const BIN_ITEM_KEYS = ['id', 'name', 'qty', 'note'] as const;
+export type _BinItemKeys = Assert<KeysMatch<keyof BinItem, (typeof BIN_ITEM_KEYS)[number]>>;
 
 export const MARGIN_TAPER_KEYS = ['profile', 'bandHeight', 'enabled', 'flare'] as const;
 export type _MarginTaperKeys = Assert<
@@ -136,6 +143,7 @@ export const BASEPLATE_PARAMS_KEYS = [
   'wholeCellsOnly',
   'connectorNubs',
   'lightweight',
+  'ecoPlate',
   'solidFloor',
   'solidFloorThickness',
   'syncWithLayout',
@@ -155,6 +163,7 @@ export const BASEPLATE_PARAMS_KEYS = [
   'stackPrint',
   'splitOverride',
   'screwHoles',
+  'mountMagnets',
 ] as const;
 export type _BaseplateParamsKeys = Assert<
   KeysMatch<keyof StoredBaseplateParams, (typeof BASEPLATE_PARAMS_KEYS)[number]>
@@ -185,9 +194,16 @@ export const SCREW_HOLES_KEYS = [
   'headDiameter',
   'counterboreDepth',
   'screwsPerPiece',
+  'edgeInsetCells',
+  'cellCorner',
 ] as const;
 export type _ScrewHolesKeys = Assert<
   KeysMatch<keyof ScrewHoleParams, (typeof SCREW_HOLES_KEYS)[number]>
+>;
+
+export const MOUNT_MAGNETS_KEYS = ['enabled', 'diameter', 'depth', 'perPiece', 'chamfer'] as const;
+export type _MountMagnetsKeys = Assert<
+  KeysMatch<keyof MountMagnetParams, (typeof MOUNT_MAGNETS_KEYS)[number]>
 >;
 
 export const LINKED_DESIGN_KEYS = [

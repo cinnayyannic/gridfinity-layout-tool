@@ -9,6 +9,7 @@
 
 import type { ResolvedBaseplateParams } from '@/shared/types/bin';
 import type { StackPrintParams } from '@/core/types';
+import { STACK_SEAM_TRIM_MM } from '@/core/types';
 import type { BaseplatePiece, BaseplateTiling } from '../types/tiling';
 import type { PieceGroup } from './pieceFingerprint';
 import { colToLetter } from './splitPlanner';
@@ -171,13 +172,19 @@ function generateStackingSection(stack: StackPrintParams): string {
     '',
     '  ORIENTATION — print exactly as oriented in the file. The bottom plate is',
     '  right-side up (solid bed adhesion); every plate above it is flipped upside',
-    '  down so the stack prints without supports. Do not lay it flat or re-orient.',
+    '  down so the stack prints without supports. A custom-shaped plate that',
+    "  doesn't match itself when turned over has its bottom plate flipped too, so",
+    '  every plate lands on the one below. Do not lay it flat or re-orient.',
     '',
-    '  SLICER SETUP — no special settings and NO supports are needed; slice it as',
-    '  a single object and print. The air gap is built into the model, so any',
-    `  slicer reproduces it automatically. One rule: keep your layer height AT OR`,
-    `  BELOW the ${gap}mm gap. A taller layer height collapses the gap and fuses the`,
-    '  plates together.',
+    '  SLICER SETUP — NO supports are needed; slice it as a single object and',
+    '  print. The air gap is built into the model. One rule: keep your layer',
+    `  height AT OR BELOW the ${gap}mm gap. A taller layer height collapses the gap`,
+    '  and fuses the plates together.',
+    '',
+    `  FLAT TOPS — each plate is ${STACK_SEAM_TRIM_MM}mm shorter than an unstacked one. The`,
+    '  sharp top edge of every grid wall is flattened, so the plates meet on a',
+    '  ridge wide enough to print with either wall generator (Arachne or',
+    '  Classic). Bins sit in these plates the same way.',
     '',
     `  SEPARATION — a ${gap}mm air gap sits between every plate so they don't fuse.`,
     '  After printing, flex the stack or work a thin flat-head screwdriver into',

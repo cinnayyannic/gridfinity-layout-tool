@@ -15,6 +15,8 @@
 import type { Bin, Layout } from '@/core/types';
 import { normalizeDrawerOutline } from './drawerOutline';
 import { dropOrphanedPairs } from './binPairs';
+import { migrateLayoutFields } from './layoutMigration';
+import { sanitizeBinItems } from './binItems';
 import {
   binId as toBinId,
   layerId as toLayerId,
@@ -26,12 +28,105 @@ import {
 } from '@/core/types';
 import { CONSTRAINTS, STAGING_ID } from '@/core/constants';
 import { isValidDrawer, isValidLayer, isValidBin, isValidCategory } from './validationGuards';
-import { canPlaceBin } from './validationPlacement';
+import { canPlaceFootprint } from './validationPlacement';
 import { validateImport, PLACEMENT_REASON_MESSAGE } from './validationImport';
+import { migrateSlant } from './slantPlan';
 
 export type SalvageSuccess = { valid: true; layout: Layout; salvaged: string[] };
 export type SalvageFailure = { valid: false; salvaged?: undefined; layout?: undefined };
 export type SalvageResult = SalvageSuccess | SalvageFailure;
+
+const CHECKED_FIELDS = [
+  'clearanceHeight',
+  'extendToMargin',
+  'marginTaper',
+  'overhang',
+  'locked',
+  'items',
+  'slant',
+] as const satisfies readonly (keyof Bin)[];
+
+type CheckedFields = Pick<Bin, (typeof CHECKED_FIELDS)[number]>;
+
+const isNonNegative = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+const isOptionalBoolean = (value: unknown): boolean =>
+  value === undefined || typeof value === 'boolean';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isMarginTaper(value: unknown): value is NonNullable<Bin['marginTaper']> {
+  return (
+    isRecord(value) &&
+    (value.profile === 'chamfer' || value.profile === 'fillet') &&
+    isNonNegative(value.bandHeight) &&
+    isOptionalBoolean(value.enabled) &&
+    (value.flare === undefined || isNonNegative(value.flare))
+  );
+}
+
+function hasSides(value: Record<string, unknown>): boolean {
+  return [value.left, value.right, value.front, value.back].every(isNonNegative);
+}
+
+function isWallTaper(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    (value.profile === 'chamfer' || value.profile === 'fillet') &&
+    isNonNegative(value.bandHeight) &&
+    hasSides(value) &&
+    isOptionalBoolean(value.enabled)
+  );
+}
+
+/** A malformed taper goes alone; the overhang under it still holds. */
+function wellFormedOverhang(value: unknown): Bin['overhang'] {
+  if (
+    !isRecord(value) ||
+    !hasSides(value) ||
+    !isOptionalBoolean(value.enabled) ||
+    !isOptionalBoolean(value.feet)
+  ) {
+    return undefined;
+  }
+  const { taper, ...overhang } = value;
+  return (isWallTaper(taper) ? { ...overhang, taper } : overhang) as unknown as NonNullable<
+    Bin['overhang']
+  >;
+}
+
+const CHECKED_FIELD_SET: ReadonlySet<string> = new Set(CHECKED_FIELDS);
+
+function withoutCheckedFields(bin: object): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(bin).filter(([key]) => !CHECKED_FIELD_SET.has(key)));
+}
+
+/** The structural guard never looks at these, so a damaged bin's malformed one is dropped alone. */
+function wellFormedCheckedFields(bin: object): Partial<CheckedFields> {
+  const raw: Record<string, unknown> = { ...bin };
+  const overhang = wellFormedOverhang(raw.overhang);
+  const items = sanitizeBinItems(raw.items);
+  const slant = migrateSlant(raw.slant);
+  return {
+    ...(isNonNegative(raw.clearanceHeight)
+      ? { clearanceHeight: heightUnits(raw.clearanceHeight) }
+      : {}),
+    ...(typeof raw.extendToMargin === 'boolean' ? { extendToMargin: raw.extendToMargin } : {}),
+    ...(isMarginTaper(raw.marginTaper) ? { marginTaper: raw.marginTaper } : {}),
+    ...(overhang ? { overhang } : {}),
+    ...(raw.locked === true ? { locked: true } : {}),
+    ...(items ? { items } : {}),
+    ...(slant ? { slant } : {}),
+  };
+}
+
+/** A stashed bin has left the position its explicit overhang was computed for. */
+function toStaging({ overhang: _overhang, ...bin }: Bin): Bin {
+  return { ...bin, layerId: STAGING_ID };
+}
 
 export function salvageImport(data: unknown): SalvageResult {
   // Run strict validation first — if it passes, no salvaging needed
@@ -83,9 +178,6 @@ export function salvageImport(data: unknown): SalvageResult {
   const layerIds = new Set(validLayers.map((l) => l.id));
   layerIds.add(STAGING_ID);
 
-  const totalHeight = validLayers.reduce((sum, layer) => sum + layer.height, 0);
-  if (totalHeight > drawer.height) return { valid: false };
-
   // Validate categories (fatal if structurally invalid)
   const categories = raw.categories as unknown[];
   for (const cat of categories) {
@@ -105,7 +197,11 @@ export function salvageImport(data: unknown): SalvageResult {
       return;
     }
 
+    // Spread first, as the strict path keeps each bin whole: a fixed field list
+    // here strips every field it does not name from all the healthy bins.
     const typedBin: Bin = {
+      ...withoutCheckedFields(bin),
+      ...wellFormedCheckedFields(bin),
       id: toBinId(bin.id),
       layerId: toLayerId(bin.layerId),
       x: gridUnits(bin.x),
@@ -131,11 +227,11 @@ export function salvageImport(data: unknown): SalvageResult {
     // Check if layer exists
     if (!layerIds.has(bin.layerId)) {
       salvaged.push(`Bin ${i} references invalid layer and was moved to staging`);
-      resultBins.push({ ...typedBin, layerId: STAGING_ID });
+      resultBins.push(toStaging(typedBin));
       return;
     }
 
-    // Check placement (bounds, height, collisions, blocked zones)
+    // Check the footprint (bounds, drawer shape, same-layer collisions)
     const partialLayout: Layout = {
       version: '1.0',
       name: 'salvage-validation',
@@ -155,22 +251,23 @@ export function salvageImport(data: unknown): SalvageResult {
       heightUnitMm: mm(7),
     };
 
-    const placementResult = canPlaceBin(
+    const placementResult = canPlaceFootprint(
       {
         x: gridUnits(bin.x),
         y: gridUnits(bin.y),
         width: gridUnits(bin.width),
         depth: gridUnits(bin.depth),
-        height: heightUnits(bin.height),
       },
       toLayerId(bin.layerId),
       partialLayout
     );
 
-    if (!placementResult.valid) {
-      const message = PLACEMENT_REASON_MESSAGE[placementResult.reason] || 'has invalid placement';
+    if (!placementResult.valid || bin.height > drawer.height) {
+      const message = !placementResult.valid
+        ? PLACEMENT_REASON_MESSAGE[placementResult.reason] || 'has invalid placement'
+        : 'is taller than the drawer';
       salvaged.push(`Bin ${i} ${message} and was moved to staging`);
-      resultBins.push({ ...typedBin, layerId: STAGING_ID });
+      resultBins.push(toStaging(typedBin));
       return;
     }
 
@@ -182,7 +279,7 @@ export function salvageImport(data: unknown): SalvageResult {
   // Build salvaged layout. A salvage that dropped one half of a pair must
   // unpair the survivor, or its pair expansion dangles forever.
   const salvageLayout: Layout = {
-    ...(data as Layout),
+    ...(migrateLayoutFields(raw) as Layout),
     bins: [...dropOrphanedPairs(resultBins)],
   };
 

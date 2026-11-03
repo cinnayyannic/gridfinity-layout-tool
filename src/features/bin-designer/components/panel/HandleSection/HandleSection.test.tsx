@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { HandleSection } from './HandleSection';
 import { useDesignerStore } from '@/features/bin-designer/store';
 import { DEFAULT_BIN_PARAMS, DEFAULT_UI_STATE } from '@/features/bin-designer/constants';
+import en from '@/i18n/locales/en';
 
 describe('HandleSection', () => {
   beforeEach(() => {
@@ -42,7 +43,7 @@ describe('HandleSection', () => {
     });
     render(<HandleSection />);
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Chamfer edges' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Chamfer edges' }));
 
     expect(useDesignerStore.getState().params.handles.chamfer).toBe(true);
   });
@@ -140,5 +141,11 @@ describe('HandleSection', () => {
 
     render(<HandleSection />);
     expect(screen.getByText(/Not available/)).toBeDefined();
+  });
+
+  it('plays a clip of the feature from the dot beside its toggle', () => {
+    render(<HandleSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'Watch a clip: Handles' }));
+    expect(screen.getByText(en['binDesigner.featureTip.handles'])).toBeInTheDocument();
   });
 });

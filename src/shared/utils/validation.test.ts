@@ -133,15 +133,15 @@ describe('canPlaceBin', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('rejects placement in blocked zone', () => {
+  it('rejects placement on clearance a lower bin reserves', () => {
     const layout = createTestLayout();
     layout.bins = [
-      // Tall bin on layer 1 that protrudes into layer 2
       createTestBin({
         id: binId('tall'),
         width: gridUnits(3),
         depth: gridUnits(3),
-        height: heightUnits(6),
+        height: heightUnits(3),
+        clearanceHeight: heightUnits(2),
       }),
     ];
     const result = canPlaceBin(
@@ -154,9 +154,8 @@ describe('canPlaceBin', () => {
     expect(result.blockingInfo).toMatchObject({ binId: 'tall', layerId: 'layer1' });
   });
 
-  it('rejects placement overlapping fractional blocked zone', () => {
+  it('rejects placement overlapping fractional clearance', () => {
     const layout = createTestLayout();
-    // Small fractional bin on layer 1 that protrudes into layer 2
     layout.bins = [
       createTestBin({
         id: binId('small-tall'),
@@ -164,10 +163,11 @@ describe('canPlaceBin', () => {
         y: gridUnits(1.5),
         width: gridUnits(0.5),
         depth: gridUnits(0.5),
-        height: heightUnits(6),
+        height: heightUnits(3),
+        clearanceHeight: heightUnits(2),
       }),
     ];
-    // Bin on layer 2 that covers the blocked zone area
+    // Bin on layer 2 that covers the clearance footprint
     const result = canPlaceBin(
       placementRect({ x: 0, y: 0, width: 3, depth: 3, height: 6 }),
       LAYER_2,
@@ -178,17 +178,18 @@ describe('canPlaceBin', () => {
     expect(result.blockingInfo).toMatchObject({ binId: 'small-tall', layerId: 'layer1' });
   });
 
-  it('allows placement adjacent to fractional blocked zone', () => {
+  it('allows placement adjacent to fractional clearance', () => {
     const layout = createTestLayout();
     layout.bins = [
       createTestBin({
         id: binId('small-tall'),
         width: gridUnits(0.5),
         depth: gridUnits(0.5),
-        height: heightUnits(6),
+        height: heightUnits(3),
+        clearanceHeight: heightUnits(2),
       }),
     ];
-    // Bin placed at (1, 0) doesn't overlap the 0.5x0.5 blocked zone at (0, 0)
+    // Bin placed at (1, 0) doesn't overlap the 0.5x0.5 clearance at (0, 0)
     const result = canPlaceBin(
       placementRect({ x: 1, y: 0, width: 2, depth: 2, height: 6 }),
       LAYER_2,
@@ -399,15 +400,30 @@ describe('validateImport', () => {
     expect(result.errors[0]).toContain('Bin 0');
   });
 
-  it('rejects total layer height exceeding drawer', () => {
+  it('accepts layer heights that add up past the drawer', () => {
     const layout = createTestLayout();
     layout.layers = [
       { id: LAYER_1, name: 'Layer 1', height: heightUnits(10) },
       { id: LAYER_2, name: 'Layer 2', height: heightUnits(10) },
     ];
+    expect(validateImport(layout).valid).toBe(true);
+  });
+
+  it('accepts a stack taller than the drawer for the editor to flag', () => {
+    const layout = createTestLayout();
+    layout.bins = [
+      createTestBin({ id: binId('low'), height: heightUnits(8) }),
+      createTestBin({ id: binId('high'), layerId: LAYER_2, height: heightUnits(8) }),
+    ];
+    expect(validateImport(layout).valid).toBe(true);
+  });
+
+  it('rejects a bin taller than the drawer on its own', () => {
+    const layout = createTestLayout();
+    layout.bins = [createTestBin({ id: binId('giant'), height: heightUnits(13) })];
     const result = validateImport(layout);
     expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes('exceeds drawer height'))).toBe(true);
+    expect(result.errors).toEqual(['Bin 0 is taller than the drawer']);
   });
 
   it('rejects drawer depth out of range', () => {
@@ -448,6 +464,59 @@ describe('validateImport', () => {
     const result = validateImport(invalidLayout);
     expect(result.valid).toBe(false);
     expect(result.errors.some((e) => e.includes('Category 0 is invalid'))).toBe(true);
+  });
+
+  it('fills the print bed and unit sizes a hand-written file omits', () => {
+    const layout: Record<string, unknown> = { ...createTestLayout() };
+    delete layout.printBedSize;
+    delete layout.gridUnitMm;
+    delete layout.heightUnitMm;
+
+    const result = validateImport(layout);
+
+    if (!result.valid) throw new Error(result.errors.join(', '));
+    expect(result.layout.printBedSize).toBe(CONSTRAINTS.PRINT_BED_MM_DEFAULT);
+    expect(result.layout.gridUnitMm).toBe(CONSTRAINTS.GRID_UNIT_MM_DEFAULT);
+    expect(result.layout.heightUnitMm).toBe(CONSTRAINTS.HEIGHT_UNIT_MM_DEFAULT);
+    expect(result.layout.printBedDepth).toBeUndefined();
+  });
+
+  it('imports a legacy maxPrintSize as the print bed size', () => {
+    const layout: Record<string, unknown> = { ...createTestLayout(), maxPrintSize: 10 };
+    delete layout.printBedSize;
+
+    const result = validateImport(layout);
+
+    if (!result.valid) throw new Error(result.errors.join(', '));
+    expect(result.layout.printBedSize).toBe(420);
+    expect(result.layout).not.toHaveProperty('maxPrintSize');
+  });
+
+  it('keeps the print bed and unit sizes a file provides', () => {
+    const layout = { ...createTestLayout(), gridUnitMm: mm(40), heightUnitMm: mm(6) };
+
+    const result = validateImport(layout);
+
+    if (!result.valid) throw new Error(result.errors.join(', '));
+    expect(result.layout.printBedSize).toBe(168);
+    expect(result.layout.gridUnitMm).toBe(40);
+    expect(result.layout.heightUnitMm).toBe(6);
+  });
+
+  it('fills an empty label and notes on a bin that omits them', () => {
+    const { label: _label, notes: _notes, ...bare } = createTestBin({ id: binId('bare') });
+    const written = createTestBin({
+      id: binId('written'),
+      x: gridUnits(4),
+      label: 'Screws',
+      notes: 'M3 x 8',
+    });
+
+    const result = validateImport({ ...createTestLayout(), bins: [bare, written] });
+
+    if (!result.valid) throw new Error(result.errors.join(', '));
+    expect(result.layout.bins[0]).toMatchObject({ id: 'bare', label: '', notes: '' });
+    expect(result.layout.bins[1]).toMatchObject({ label: 'Screws', notes: 'M3 x 8' });
   });
 });
 
@@ -513,6 +582,29 @@ describe('salvageImport', () => {
     expect(gridBins).toHaveLength(1);
     expect(stagedBins).toHaveLength(1);
     expect(stagedBins[0].id).toBe('bin2');
+  });
+
+  it('fills a missing print bed size on a layout it had to salvage', () => {
+    const layout: Record<string, unknown> = {
+      ...createTestLayout(),
+      bins: [
+        createTestBin({ id: binId('bin1'), width: gridUnits(3), depth: gridUnits(3) }),
+        createTestBin({
+          id: binId('bin2'),
+          x: gridUnits(1),
+          y: gridUnits(1),
+          width: gridUnits(3),
+          depth: gridUnits(3),
+        }),
+      ],
+    };
+    delete layout.printBedSize;
+
+    const result = salvageImport(layout);
+
+    if (!result.valid) throw new Error('expected the salvage to succeed');
+    expect(result.salvaged).toHaveLength(1);
+    expect(result.layout.printBedSize).toBe(CONSTRAINTS.PRINT_BED_MM_DEFAULT);
   });
 
   it('moves out-of-bounds bins to staging', () => {
@@ -637,6 +729,86 @@ describe('salvageImport', () => {
     const stagedBins = result.layout.bins.filter((b) => b.layerId === STAGING_ID);
     expect(stagedBins).toHaveLength(1);
     expect(stagedBins[0].id).toBe('staged');
+  });
+
+  it('keeps every field of the healthy bins when it has to salvage another', () => {
+    const fit = {
+      clearanceHeight: heightUnits(1),
+      extendToMargin: true,
+      marginTaper: { profile: 'fillet' as const, bandHeight: 12 },
+      overhang: { left: 0, right: 7, front: 0, back: 0 },
+      locked: true,
+      slant: { angleDeg: 40, side: 'back' as const, endSupport: true },
+    };
+    const layout = createTestLayout();
+    layout.bins = [
+      createTestBin({ id: binId('healthy'), width: gridUnits(3), depth: gridUnits(3), ...fit }),
+      createTestBin({
+        id: binId('collides'),
+        x: gridUnits(1),
+        y: gridUnits(1),
+        width: gridUnits(3),
+        depth: gridUnits(3),
+        ...fit,
+      }),
+    ];
+    expect(validateImport(layout).valid).toBe(false);
+
+    const result = salvageImport(layout);
+    if (!result.valid) throw new Error('expected the salvage to succeed');
+    const healthy = result.layout.bins.find((b) => b.id === 'healthy');
+    const stashed = result.layout.bins.find((b) => b.id === 'collides');
+    expect(healthy).toMatchObject(fit);
+    expect(stashed?.layerId).toBe(STAGING_ID);
+    const { overhang: _overhang, ...positionFree } = fit;
+    expect(stashed).toMatchObject(positionFree);
+    expect(stashed).not.toHaveProperty('overhang');
+  });
+
+  it('drops a malformed drawer-fit value from a salvaged bin and keeps the rest', () => {
+    const layout = createTestLayout();
+    const healthy = {
+      ...createTestBin({ id: binId('healthy'), width: gridUnits(3), depth: gridUnits(3) }),
+      clearanceHeight: 'bad',
+      overhang: { left: -1, right: 0, front: 0, back: 0 },
+      marginTaper: { profile: 'bevel', bandHeight: 4 },
+      extendToMargin: true,
+      locked: 'yes',
+      slant: { angleDeg: 40, side: 'up' },
+    };
+    const collides = createTestBin({
+      id: binId('collides'),
+      x: gridUnits(1),
+      y: gridUnits(1),
+      width: gridUnits(3),
+      depth: gridUnits(3),
+    });
+    const result = salvageImport({ ...layout, bins: [healthy, collides] });
+    if (!result.valid) throw new Error('expected the salvage to succeed');
+    const kept = result.layout.bins.find((b) => b.id === 'healthy');
+    expect(kept).toMatchObject({ extendToMargin: true });
+    for (const key of ['clearanceHeight', 'overhang', 'marginTaper', 'locked', 'slant']) {
+      expect(kept).not.toHaveProperty(key);
+    }
+  });
+
+  it('drops a salvaged bin’s malformed overhang taper and keeps the overhang', () => {
+    const layout = createTestLayout();
+    const overhang = { left: 0, right: 7, front: 0, back: 0 };
+    const healthy = {
+      ...createTestBin({ id: binId('healthy'), width: gridUnits(3), depth: gridUnits(3) }),
+      overhang: { ...overhang, taper: { profile: 'fillet', bandHeight: 'tall' } },
+    };
+    const collides = createTestBin({
+      id: binId('collides'),
+      x: gridUnits(1),
+      y: gridUnits(1),
+      width: gridUnits(3),
+      depth: gridUnits(3),
+    });
+    const result = salvageImport({ ...layout, bins: [healthy, collides] });
+    if (!result.valid) throw new Error('expected the salvage to succeed');
+    expect(result.layout.bins.find((b) => b.id === 'healthy')?.overhang).toEqual(overhang);
   });
 });
 

@@ -16,6 +16,7 @@ import type {
 import type { GridfinityItem } from '@/shared/types/item';
 import type { LabelPlateIconId, LabelPlateTextMode } from '@/shared/constants/labelPlates';
 import type { MeshImportRotation } from '@/shared/generation/meshAsset';
+import type { FitTestMode, FitTestOutlineSize } from '@/shared/utils/fitTestOutlinePlan';
 
 /** Geometry kernel backend for BREP operations */
 export type KernelName = 'brepkit' | 'occt-wasm' | 'manifold';
@@ -45,7 +46,25 @@ export type WorkerMessage =
   | ExportCombinedMessage
   | ExportSplitMessage
   | ExportSplitRangeMessage
-  | ImportMeshMessage;
+  | ImportMeshMessage
+  | PutMeshMessage
+  | DropMeshMessage;
+
+/**
+ * A mesh file (`meshFile.ts`) for the refs in later requests, sent once per
+ * worker and named by its hash. The bytes are transferred.
+ */
+export interface PutMeshMessage {
+  readonly type: 'PUT_MESH';
+  readonly hash: string;
+  readonly bytes: Uint8Array;
+}
+
+/** Release a file the bridge sent, which no request in flight needs. */
+export interface DropMeshMessage {
+  readonly type: 'DROP_MESH';
+  readonly hash: string;
+}
 
 /**
  * Parse + normalize an uploaded STL into a compressed `MeshAsset` (mesh
@@ -307,16 +326,23 @@ export interface ExportFitTestMessage {
   readonly payload: ExportFitTestPayload;
 }
 
-export interface ExportFitTestPayload {
-  readonly requestId: string;
-  readonly params: BinParams;
-  readonly format: ExportFormat;
+export interface FitTestExportOptions {
+  /** Absent prints the full card. */
+  readonly mode?: FitTestMode;
   /** Card thickness (mm). Clamped worker-side to the design's legal range. */
   readonly thicknessMm?: number;
+  /** Clamped worker-side. */
+  readonly outline?: Partial<FitTestOutlineSize>;
   /** Design name and piece label for the underside stamp. */
   readonly stamp?: { readonly designName?: string };
   /** Print bed (mm). Omitted leaves an oversize card whole. */
   readonly bed?: { readonly width: number; readonly depth: number };
+}
+
+export interface ExportFitTestPayload extends FitTestExportOptions {
+  readonly requestId: string;
+  readonly params: BinParams;
+  readonly format: ExportFormat;
 }
 
 export interface ExportMessage {

@@ -8,9 +8,9 @@
 import { useMemo } from 'react';
 import type { Cutout } from '@/features/bin-designer/types';
 import { useTranslation } from '@/i18n';
-import { CHAMFER_SHAPES, MAX_CUTOUT_CHAMFER, maxEntryChamfer } from '@/features/bin-designer/types';
 import type { FitCue } from '../panel/CutoutsSection/cutoutSectionVisibility';
 import type { GrowTarget } from '../panel/CutoutsSection/growBinToFit';
+import type { PocketChecksView } from '../panel/CutoutsSection/PocketIssueList';
 import { alignSelection, distributeSelection } from '../panel/CutoutsSection/geometryAlign';
 import { expandSelectionToGroups } from '../panel/CutoutsSection/cutoutGroups';
 import { resizeAroundCenter } from '../panel/CutoutsSection/cutoutHelpers';
@@ -32,13 +32,19 @@ import { useCutoutSelection, useDesignerStore } from '@/features/bin-designer/st
 import { Collapsible, NumberField } from '@/design-system';
 import type { AlignMode, DistributeAxis } from '../panel/CutoutsSection/geometryAlign';
 import { SingleCutoutInspector } from './SingleCutoutInspector';
+import { CutoutDepthControl } from '../panel/CutoutsSection/CutoutDepthControl';
+import { isThroughCut } from '@/shared/utils/cutoutDepth';
+import { fingerBottom } from '@/shared/utils/fingerAccess';
+import { BatchEntryEdgeFields } from './BatchEntryEdgeFields';
 import { CutoutColorControls } from './CutoutColorControls';
 import { CutoutBoardSettings } from './CutoutBoardSettings';
 import { BinSizeSection } from './BinSizeSection';
 import { BinFeaturesSection } from './BinFeaturesSection';
 import { FitTestButton } from './FitTestButton';
+import { ShadowBoardButton } from './ShadowBoardButton';
 import { AlignControls } from './AlignControls';
 import { RepeatSuggestion } from './RepeatSuggestion';
+import type { SplitTool } from './CutoutSplitControls';
 import { useRepeatSuggestion } from '@/features/bin-designer/hooks/useRepeatSuggestion';
 
 /** Matches the per-cutout minimum the single-cutout inspector enforces. */
@@ -71,6 +77,8 @@ interface InspectorContentProps {
   readonly disabled?: boolean;
   readonly onFitCue?: (cue: FitCue) => void;
   readonly onFlattenArray?: (id: string) => void;
+  readonly onAddFingerAccess?: (id: string) => void;
+  readonly splitTool?: SplitTool;
   /** Bakes a repeated group into one independent group per copy. */
   readonly onFlattenGroupArray?: (id: string) => void;
   readonly board?: BoardSettings;
@@ -78,6 +86,7 @@ interface InspectorContentProps {
   readonly offBoardCount?: number;
   /** Count of cutouts the generator will cut shallower than requested. */
   readonly depthShortfallCount?: number;
+  readonly pocketChecks?: PocketChecksView;
   /** Clamp every off-board cutout back inside the board. */
   readonly onClampOffBoard?: () => void;
   /** Center every off-board cutout as one block. */
@@ -197,10 +206,13 @@ export function InspectorContent({
   disabled = false,
   onFitCue,
   onFlattenArray,
+  onAddFingerAccess,
+  splitTool,
   onFlattenGroupArray,
   board,
   offBoardCount = 0,
   depthShortfallCount = 0,
+  pocketChecks,
   onClampOffBoard,
   onCenterOffBoard,
   growTarget,
@@ -228,6 +240,13 @@ export function InspectorContent({
   // Same reason: the group Repeat section renders far below the early return,
   // but its hook cannot.
   const setCutoutArray = useDesignerStore((st) => st.setCutoutArray);
+  // Through cuts have no floor and curved finger cuts size their own, so
+  // neither takes a fillet radius from these fields.
+  const allThrough = useDesignerStore(
+    (st) =>
+      selectedCutouts.length > 0 &&
+      selectedCutouts.every((c) => isThroughCut(c, st.params) || fingerBottom(c) === 'curved')
+  );
 
   // Bin-level controls stay visible across every selection state so the user can
   // resize the board and clear the stacking lip without leaving the editor.
@@ -238,11 +257,13 @@ export function InspectorContent({
         onClampOffBoard={onClampOffBoard}
         onCenterOffBoard={onCenterOffBoard}
         depthShortfallCount={depthShortfallCount}
+        pocketChecks={pocketChecks}
         growTarget={growTarget}
         onGrowToFit={onGrowToFit}
       />
       <BinFeaturesSection />
       <FitTestButton />
+      {!throughOnly && <ShadowBoardButton />}
     </>
   );
 
@@ -302,8 +323,6 @@ export function InspectorContent({
   const sharedY = getSharedValue(selectedCutouts, preview, 'y');
   const sharedWidth = getSharedValue(selectedCutouts, preview, 'width');
   const sharedDepth = getSharedValue(selectedCutouts, preview, 'depth');
-  const chamferCutouts = selectedCutouts.filter((c) => CHAMFER_SHAPES.includes(c.shape));
-  const sharedChamfer = getSharedValue(chamferCutouts, preview, 'chamferWidth');
 
   // `transformOnly` fields fall under the lock contract ("cannot be moved,
   // resized, or rotated"); cut depth and colour do not, so they still apply to
@@ -348,19 +367,6 @@ export function InspectorContent({
     if (updates.size > 0) onUpdateBatch(updates);
   };
 
-  // Chamfer headroom depends on each cutout's own cut depth, and not every
-  // shape takes one — so ineligible shapes are skipped rather than blocking the
-  // control for the whole selection.
-  const handleChamferBatch = (value: number) => {
-    if (!onUpdateBatch || selectedCutouts.length <= 1) return;
-    const updates = new Map<string, Partial<Cutout>>();
-    for (const c of selectedCutouts) {
-      if (!CHAMFER_SHAPES.includes(c.shape)) continue;
-      updates.set(c.id, { chamferWidth: Math.min(value, maxEntryChamfer(c.cutDepth)) });
-    }
-    if (updates.size > 0) onUpdateBatch(updates);
-  };
-
   const applySelectionUpdates = (updates: ReadonlyMap<string, Partial<Cutout>>) => {
     if (onUpdateBatch && updates.size > 0) onUpdateBatch(updates);
   };
@@ -401,6 +407,8 @@ export function InspectorContent({
           onUpdate={onUpdate}
           onFitCue={onFitCue}
           onFlattenArray={onFlattenArray}
+          onAddFingerAccess={onAddFingerAccess}
+          splitTool={splitTool}
           disabled={disabled}
         />
       )}
@@ -510,54 +518,49 @@ export function InspectorContent({
             />
             {!throughOnly && (
               <>
-                <NumberField
-                  label={t('binDesigner.cutouts.cutDepth')}
-                  value={sharedCutDepth ?? 5}
-                  indeterminate={sharedCutDepth === null}
-                  onChange={(cutDepth) => handleBatchUpdate('cutDepth', cutDepth)}
-                  min={0.5}
-                  max={maxCutDepth}
-                  step={0.5}
-                  unit="mm"
-                  disabled={disabled}
+                <CutoutDepthControl
+                  cutouts={selectedCutouts.map((c) => ({ ...c, ...preview.get(c.id) }))}
+                  maxCutDepth={maxCutDepth}
+                  onUpdate={(updates) => onUpdateBatch?.(updates)}
+                  disabled={disabled || !onUpdateBatch}
                 />
-                <NumberField
-                  label={t('binDesigner.cutouts.scoopW')}
-                  value={sharedScoopRadiusW ?? 0}
-                  indeterminate={sharedScoopRadiusW === null}
-                  onChange={(scoopRadiusW) => handleScoopAxisBatch('scoopRadiusW', scoopRadiusW)}
-                  min={0}
-                  max={sharedCutDepth ?? maxCutDepth}
-                  step={0.5}
-                  unit="mm"
-                  disabled={disabled}
-                />
-                <NumberField
-                  label={t('binDesigner.cutouts.scoopD')}
-                  value={sharedScoopRadiusD ?? 0}
-                  indeterminate={sharedScoopRadiusD === null}
-                  onChange={(scoopRadiusD) => handleScoopAxisBatch('scoopRadiusD', scoopRadiusD)}
-                  min={0}
-                  max={sharedCutDepth ?? maxCutDepth}
-                  step={0.5}
-                  unit="mm"
-                  disabled={disabled}
-                />
+                {!allThrough && (
+                  <>
+                    <NumberField
+                      label={t('binDesigner.cutouts.scoopW')}
+                      value={sharedScoopRadiusW ?? 0}
+                      indeterminate={sharedScoopRadiusW === null}
+                      onChange={(scoopRadiusW) =>
+                        handleScoopAxisBatch('scoopRadiusW', scoopRadiusW)
+                      }
+                      min={0}
+                      max={sharedCutDepth ?? maxCutDepth}
+                      step={0.5}
+                      unit="mm"
+                      disabled={disabled}
+                    />
+                    <NumberField
+                      label={t('binDesigner.cutouts.scoopD')}
+                      value={sharedScoopRadiusD ?? 0}
+                      indeterminate={sharedScoopRadiusD === null}
+                      onChange={(scoopRadiusD) =>
+                        handleScoopAxisBatch('scoopRadiusD', scoopRadiusD)
+                      }
+                      min={0}
+                      max={sharedCutDepth ?? maxCutDepth}
+                      step={0.5}
+                      unit="mm"
+                      disabled={disabled}
+                    />
+                  </>
+                )}
               </>
             )}
-            {chamferCutouts.length > 0 && (
-              <NumberField
-                label={t('binDesigner.cutouts.chamfer')}
-                value={sharedChamfer ?? 0}
-                indeterminate={sharedChamfer === null}
-                onChange={handleChamferBatch}
-                min={0}
-                max={MAX_CUTOUT_CHAMFER}
-                step={0.2}
-                unit="mm"
-                disabled={disabled}
-              />
-            )}
+            <BatchEntryEdgeFields
+              cutouts={selectedCutouts.map((c) => ({ ...c, ...preview.get(c.id) }))}
+              onUpdateBatch={applySelectionUpdates}
+              disabled={disabled}
+            />
           </div>
           {/* Gated exactly as the single-select inspector gates it: a lid hole
               is tagged with the flat CUTOUT tag and takes no colour, so the

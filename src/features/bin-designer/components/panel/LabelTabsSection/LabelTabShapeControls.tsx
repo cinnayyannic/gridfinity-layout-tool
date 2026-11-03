@@ -1,8 +1,10 @@
 /** The collapsed "tab shape & size" group: support style, tab dimensions and the label lip. */
 
-import { CheckboxRow } from '@/design-system';
+import { FieldLabel } from '../shared';
+import { MoreDisclosure } from '@/shared/components/MoreDisclosure';
+import { FeatureToggle } from '../FeatureToggle';
 import { getSegmentClass, SEGMENT_GROUP_CLASS } from '@/shared/components/segmentedControlClasses';
-import { Button, Stepper, InfoIcon, Collapsible } from '@/design-system';
+import { Button, Stepper, InfoIcon } from '@/design-system';
 import { DESIGNER_CONSTRAINTS } from '../../../constants';
 import type { LabelTabSupport } from '../../../types';
 import type { useLabelTabsSection } from './useLabelTabsSection';
@@ -33,20 +35,17 @@ export function LabelTabShapeControls({
   badge,
 }: LabelTabShapeControlsProps) {
   return (
-    <Collapsible
-      title={title}
+    <MoreDisclosure
+      label={title}
       summary={summary}
-      expanded={expanded}
-      onExpandedChange={onExpandedChange}
-      size="sm"
+      open={expanded}
+      onOpenChange={onExpandedChange}
       badge={badge}
     >
       <div className="space-y-3">
         {/* Support */}
         <div>
-          <span className="mb-1 block text-label text-content-tertiary">
-            {t('binDesigner.tabSupport')}
-          </span>
+          <FieldLabel>{t('binDesigner.tabSupport')}</FieldLabel>
           <div
             role="group"
             aria-label={t('binDesigner.tabSupport')}
@@ -70,9 +69,7 @@ export function LabelTabShapeControls({
 
         <div className="grid grid-cols-2 gap-2">
           <div className="min-w-0">
-            <span className="mb-1 block text-xs text-content-tertiary">
-              {t('binDesigner.tabWidth')}
-            </span>
+            <FieldLabel>{t('binDesigner.tabWidth')}</FieldLabel>
             <Stepper
               value={state.label.width}
               onChange={handlers.setTabWidth}
@@ -95,9 +92,7 @@ export function LabelTabShapeControls({
             />
           </div>
           <div className="min-w-0">
-            <span className="mb-1 block text-xs text-content-tertiary">
-              {t('binDesigner.tabDepth')}
-            </span>
+            <FieldLabel>{t('binDesigner.tabDepth')}</FieldLabel>
             <Stepper
               value={state.label.depth}
               onChange={handlers.setTabDepth}
@@ -120,9 +115,7 @@ export function LabelTabShapeControls({
             />
           </div>
           <div className="min-w-0">
-            <span className="mb-1 block text-xs text-content-tertiary">
-              {t('binDesigner.tabHeight')}
-            </span>
+            <FieldLabel>{t('binDesigner.tabHeight')}</FieldLabel>
             <Stepper
               value={state.tabHeightMm}
               onChange={handlers.setTabHeight}
@@ -145,9 +138,7 @@ export function LabelTabShapeControls({
             />
           </div>
           <div className="min-w-0">
-            <span className="mb-1 block text-xs text-content-tertiary">
-              {t('binDesigner.tabInset')}
-            </span>
+            <FieldLabel>{t('binDesigner.tabInset')}</FieldLabel>
             <Stepper
               value={state.label.inset ?? 0}
               onChange={handlers.setTabInset}
@@ -174,19 +165,15 @@ export function LabelTabShapeControls({
               Text-mode only — socket plates retain themselves. */}
         {state.lipAvailable && (
           <div className="mt-3 border-t border-border-subtle pt-3">
-            <CheckboxRow
+            <FeatureToggle
               label={t('binDesigner.tabLip')}
               checked={state.lipEnabled}
-              onChange={handlers.toggleLabelLip}
+              onChange={() => handlers.toggleLabelLip(!state.lipEnabled)}
+              info={t('binDesigner.tabLipHint')}
             />
-            <p className="mt-0.5 pl-7 text-label leading-snug text-content-tertiary">
-              {t('binDesigner.tabLipHint')}
-            </p>
             {state.lipEnabled && (
               <div className="mt-2 min-w-0 pl-7">
-                <span className="mb-1 block text-xs text-content-tertiary">
-                  {t('binDesigner.tabLipHeight')}
-                </span>
+                <FieldLabel>{t('binDesigner.tabLipHeight')}</FieldLabel>
                 <Stepper
                   value={state.lipHeightMm}
                   onChange={handlers.setLabelLipHeight}
@@ -225,6 +212,6 @@ export function LabelTabShapeControls({
           </div>
         )}
       </div>
-    </Collapsible>
+    </MoreDisclosure>
   );
 }

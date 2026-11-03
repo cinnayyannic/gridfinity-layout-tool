@@ -67,6 +67,7 @@ export function computePieceFingerprint(params: ResolvedBaseplateParams): string
     `ip:${params.preferIdenticalPieces ? 1 : 0}`,
     `cs:${params.connectorStyle ?? 'dovetail'}`,
     `lw:${params.lightweight ? 1 : 0}`,
+    ...(params.ecoPlate === true ? ['eco:1'] : []),
     // Solid floor changes slab height + through-cut, and (with magnets) keeps the
     // underside continuous — so floored and hollow pieces must never dedupe. The
     // thickness only bites when solidFloor is on, so gate it to avoid false misses.
@@ -79,8 +80,15 @@ export function computePieceFingerprint(params: ResolvedBaseplateParams): string
       ? [
           `sc:${params.screwHoles.diameter},${params.screwHoles.headStyle},` +
             `${params.screwHoles.headDiameter ?? ''},${params.screwHoles.counterboreDepth ?? ''},` +
-            `${params.screwHoles.screwsPerPiece ?? ''}`,
+            `${params.screwHoles.screwsPerPiece ?? ''},` +
+            `${params.screwHoles.edgeInsetCells ?? ''},${params.screwHoles.cellCorner ?? ''}`,
           `sp:${params.screwPadThicknessMm ?? 0}`,
+        ]
+      : []),
+    ...(params.mountMagnets?.enabled === true
+      ? [
+          `mm:${params.mountMagnets.diameter},${params.mountMagnets.depth},` +
+            `${params.mountMagnets.perPiece ?? ''},${params.mountMagnets.chamfer === true ? 1 : 0}`,
         ]
       : []),
     `sft:${params.solidFloor ? (params.solidFloorThickness ?? '') : ''}`,

@@ -25,9 +25,11 @@ import {
   registryEdgeFields,
   registryHeightFields,
   registryOverhangFields,
+  registrySlantFields,
 } from '@/features/bin-designer';
-import { isErr } from '@/core/result';
+import { isErr, isOk } from '@/core/result';
 import { useTranslation } from '@/i18n';
+import { getPlacementErrorMessage } from '@/shared/utils/validation';
 import { onSyncEvent } from '../events';
 import type { BinResizedEvent } from '../events';
 import { useLinkingStore } from '../store';
@@ -35,12 +37,12 @@ import {
   hasComplexGeometry,
   getComplexityReasons,
   getBinsLinkedToDesign,
-  dimensionsFitAllowingRotation,
   compareDimensions,
   extractBinDimensions,
-  checkBatchSyncEligibility,
   createBinSyncUpdate,
-  partitionSyncableByLock,
+  planSiblingCascade,
+  resizeBlockedBySupport,
+  resizeOrder,
 } from '../domain';
 
 export function useBinResizedListener(): void {
@@ -75,10 +77,26 @@ export function useBinResizedListener(): void {
       // Skip if already processing this design (prevents concurrent IDB writes)
       if (inFlightDesigns.current.has(linkedDesignId)) return;
 
+      const refusedBySupport = (): boolean => {
+        const blocker = resizeBlockedBySupport(layoutRef.current, linkedDesignId, newDimensions);
+        if (!blocker) return false;
+        addToastRef.current({
+          message: getPlacementErrorMessage(
+            tRef.current,
+            blocker.result.reason,
+            blocker.result.blockingInfo
+          ),
+          type: 'info',
+          duration: 3000,
+        });
+        return true;
+      };
+
       // If the designer is currently open for this design, push dimensions
       // directly into the designer store. This triggers auto-save naturally,
       // which persists to IDB and emits `design-saved` for sibling cascade.
       if (useDesignerStore.getState().currentDesignId === linkedDesignId) {
+        if (refusedBySupport()) return;
         const designerSetParams = useDesignerStore.getState().setParams;
         designerSetParams({
           width: newDimensions.width,
@@ -88,7 +106,7 @@ export function useBinResizedListener(): void {
 
         const designName =
           registryRef.current.find((r) => r.id === linkedDesignId)?.name ?? linkedDesignId;
-        showDesignerUpdatedDialogRef.current(linkedDesignId, designName);
+        showDesignerUpdatedDialogRef.current(binId, linkedDesignId, designName);
         return;
       }
 
@@ -129,6 +147,7 @@ export function useBinResizedListener(): void {
           height: newDimensions.height,
         };
 
+        if (refusedBySupport()) return;
         const updateResult = await updateDesignParams(linkedDesignId, newParams);
         if (isErr(updateResult)) {
           addToastRef.current({
@@ -139,30 +158,53 @@ export function useBinResizedListener(): void {
           return;
         }
 
-        // Update the lightweight registry
-        upsertRegistryEntry({
-          id: updateResult.value.id,
-          name: updateResult.value.name,
-          width: newDimensions.width,
-          depth: newDimensions.depth,
-          height: newDimensions.height,
-          ...registryEdgeFields(newParams),
-          ...registryHeightFields(newParams),
-          ...registryOverhangFields(newParams),
-          updatedAt: updateResult.value.updatedAt,
-        });
+        const register = (updatedAt: string): void => {
+          upsertRegistryEntry({
+            id: updateResult.value.id,
+            name: updateResult.value.name,
+            width: newDimensions.width,
+            depth: newDimensions.depth,
+            height: newDimensions.height,
+            ...registryEdgeFields(newParams),
+            ...registryHeightFields(newParams),
+            ...registryOverhangFields(newParams),
+            ...registrySlantFields(newParams),
+            updatedAt,
+          });
+        };
+
+        // Placement reads supports from the registry, which still holds the
+        // old size, so the layout may have changed while the design saved.
+        // Checked again in the same step as the registry write, nothing can
+        // slip between them.
+        if (refusedBySupport()) {
+          const restored = await updateDesignParams(linkedDesignId, design.params);
+          if (isErr(restored)) {
+            // The new size is what is stored, so the registry has to say so:
+            // the layout then reserves the support the export will print, and
+            // flags the bin it now covers.
+            register(updateResult.value.updatedAt);
+            addToastRef.current({
+              message: tRef.current('designLinking.toast.designUpdateFailed'),
+              type: 'error',
+              duration: 3000,
+            });
+          }
+          return;
+        }
+        register(updateResult.value.updatedAt);
 
         // Cascade to sibling bins (other bins linked to the same design)
         const layout = layoutRef.current;
-        const allSiblings = getBinsLinkedToDesign(layout.bins, linkedDesignId).filter(
-          (b) => b.id !== binId
-        );
-
-        // Only cascade to siblings whose dimensions actually differ
-        const { syncable: siblingBins, locked: lockedSiblings } = partitionSyncableByLock(
-          allSiblings.filter(
-            (b) => !dimensionsFitAllowingRotation(extractBinDimensions(b), newDimensions)
-          )
+        const {
+          syncable: siblingBins,
+          locked: lockedSiblings,
+          eligibility,
+          allEligible,
+        } = planSiblingCascade(
+          getBinsLinkedToDesign(layout.bins, linkedDesignId).filter((b) => b.id !== binId),
+          newDimensions,
+          layout
         );
 
         if (siblingBins.length === 0) {
@@ -179,31 +221,39 @@ export function useBinResizedListener(): void {
           return;
         }
 
-        // Check eligibility for sibling bins that need syncing
-        const eligibility = checkBatchSyncEligibility(siblingBins, newDimensions, layout);
-        const allEligible = eligibility.every((e) => e.canSync);
-
         if (allEligible) {
           const syncUpdate = createBinSyncUpdate(newDimensions);
+          let refused = 0;
           batch(() => {
-            for (const bin of siblingBins) {
-              updateBinRef.current(bin.id, syncUpdate);
+            for (const bin of resizeOrder(siblingBins, newDimensions, layout)) {
+              if (!isOk(updateBinRef.current(bin.id, syncUpdate))) refused += 1;
             }
           });
 
-          addToastRef.current({
-            message:
-              lockedSiblings.length > 0
-                ? tRef.current('designLinking.toast.cascadedResizeSomeLocked', {
-                    count: siblingBins.length,
-                    locked: lockedSiblings.length,
-                  })
-                : tRef.current('designLinking.toast.cascadedResize', {
-                    count: siblingBins.length,
+          addToastRef.current(
+            refused > 0
+              ? {
+                  message: tRef.current('designLinking.toast.cascadedResizeSomeRefused', {
+                    count: siblingBins.length - refused,
+                    refused,
                   }),
-            type: 'success',
-            duration: 2000,
-          });
+                  type: 'info',
+                  duration: 4000,
+                }
+              : {
+                  message:
+                    lockedSiblings.length > 0
+                      ? tRef.current('designLinking.toast.cascadedResizeSomeLocked', {
+                          count: siblingBins.length,
+                          locked: lockedSiblings.length,
+                        })
+                      : tRef.current('designLinking.toast.cascadedResize', {
+                          count: siblingBins.length,
+                        }),
+                  type: 'success',
+                  duration: 2000,
+                }
+          );
         } else {
           // Some siblings can't fit -- show sync dialog
           const comparison = compareDimensions(newDimensions, extractBinDimensions(siblingBins[0]));

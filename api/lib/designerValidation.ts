@@ -5,6 +5,8 @@
  * These constraints mirror DESIGNER_CONSTRAINTS from the client.
  */
 
+import { withSanitizedOverhang } from './binFitValidation.js';
+import { withSanitizedSlant } from './slantValidation.js';
 import {
   isNumber,
   inRange,
@@ -36,9 +38,11 @@ import {
   validateCutouts,
   validateCutoutGroupNames,
   validateMeshAssets,
+  isMeshRef,
 } from './designerCutoutValidation.js';
 import { validateLid } from './designerLidValidation.js';
 import { validateBase, validateWalls } from './designerBaseValidation.js';
+import { validatePullTab } from './designerPullTabValidation.js';
 export {
   VALID_FOOT_LATTICES,
   VALID_LIGHTWEIGHT_MODES,
@@ -56,8 +60,12 @@ export {
   VALID_LID_GRIP_MODES,
 } from './designerLidValidation.js';
 export {
+  VALID_CUTOUT_DEPTH_MODES,
+  VALID_CUTOUT_ENTRY_PROFILES,
   VALID_CUTOUT_FILL_REFERENCES,
+  VALID_CUTOUT_FINGER_BOTTOMS,
   VALID_CUTOUT_LABEL_MODES,
+  VALID_SPLIT_DEPTH_MODES,
 } from './designerCutoutValidation.js';
 export {
   VALID_TEXT_FONTS,
@@ -67,6 +75,7 @@ export {
   VALID_TEXT_CUT_PROFILES,
   VALID_WALL_TEXT_SIDES,
   VALID_WALL_TEXT_ALIGNS,
+  VALID_TEXT_QUARTER_TURNS,
   VALID_LABEL_SOCKET_STYLES,
 } from './designerTextValidation.js';
 export {
@@ -128,7 +137,7 @@ const VALID_ROTATIONS = [0, 90, 180, 270] as const;
  * `src/features/bin-designer/types/index.ts`. Update both together when
  * adding a new generator-level parameter.
  */
-const ALLOWED_PARAM_KEYS = new Set<string>([
+export const ALLOWED_PARAM_KEYS: ReadonlySet<string> = new Set<string>([
   // Dimensions & units
   'width',
   'depth',
@@ -144,6 +153,8 @@ const ALLOWED_PARAM_KEYS = new Set<string>([
   'extraWallHeightMm',
   'interiorFilletMm',
   'style',
+  'overhang',
+  'slant',
   // Sub-objects (deep-validated below)
   'base',
   'compartments',
@@ -171,6 +182,7 @@ const ALLOWED_PARAM_KEYS = new Set<string>([
   'cutoutGroupNames',
   'knifeRest',
   'wallLabelSlots',
+  'pullTab',
 ]);
 
 /**
@@ -185,7 +197,7 @@ function pickAllowedParams(params: Record<string, unknown>): Record<string, unkn
       out[key] = params[key];
     }
   }
-  return out;
+  return withSanitizedSlant(withSanitizedOverhang(out));
 }
 
 export interface DesignerSharePayload {
@@ -332,9 +344,14 @@ function validateInsert(insert: unknown, index: number): string | null {
  *
  * @param body - The parsed request payload to validate; expected shape: `{ type: 'designer', version: 1, params: { ... } }`.
  * @param sizeBytes - The size of the raw payload in bytes (used to enforce the maximum payload size).
+ * @param options.meshRefs - Accept mesh assets that name a stored mesh file by hash. Only sync opts in; the caller checks the account holds each file.
  * @returns A result object: on success `{ valid: true, payload }` where `payload` contains the validated `type`, `version`, and `params`; on failure `{ valid: false, error }` where `error` includes a `code` and human-readable `message` describing the validation failure.
  */
-export function validateDesignerShare(body: unknown, sizeBytes: number): DesignerValidationResult {
+export function validateDesignerShare(
+  body: unknown,
+  sizeBytes: number,
+  options: { readonly meshRefs?: boolean } = {}
+): DesignerValidationResult {
   // Hard ceiling first; the tighter no-mesh cap is applied once params are
   // parsed and we know whether the design legitimately carries mesh assets.
   if (sizeBytes > CONSTRAINTS.MESH_MAX_PAYLOAD_BYTES) {
@@ -526,16 +543,18 @@ export function validateDesignerShare(body: unknown, sizeBytes: number): Designe
   if (groupNamesErr) return validationError('INVALID_PARAMS', groupNamesErr);
 
   if (params.meshAssets !== undefined || Array.isArray(params.cutouts)) {
-    const meshErr = validateMeshAssets(params.meshAssets, params.cutouts);
+    const meshErr = validateMeshAssets(params.meshAssets, params.cutouts, options.meshRefs);
     if (meshErr) return validationError('INVALID_PARAMS', meshErr);
   }
 
   // Conditional payload cap: only a validated mesh design (non-empty assets
   // that survived validateMeshAssets, which guarantees each is referenced by a
   // mesh cutout) earns the raised MESH_MAX_PAYLOAD_BYTES budget checked at the
-  // top; everything else keeps the 100KB cap.
+  // top; everything else keeps the 100KB cap. A ref is a few hundred bytes, so
+  // only an inline asset earns it.
   const hasValidMeshImprints =
-    isObject(params.meshAssets) && Object.keys(params.meshAssets).length > 0;
+    isObject(params.meshAssets) &&
+    Object.values(params.meshAssets).some((asset) => isObject(asset) && !isMeshRef(asset));
   if (!hasValidMeshImprints && sizeBytes > CONSTRAINTS.MAX_PAYLOAD_BYTES) {
     return validationError('SIZE_EXCEEDED', 'Designer share payload too large (max 100KB)');
   }
@@ -550,6 +569,10 @@ export function validateDesignerShare(body: unknown, sizeBytes: number): Designe
     if (stErr) return validationError('INVALID_PARAMS', stErr);
   }
 
+  if (params.pullTab !== undefined) {
+    const pullTabErr = validatePullTab(params.pullTab);
+    if (pullTabErr) return validationError('INVALID_PARAMS', pullTabErr);
+  }
   if (params.wallLabelSlots !== undefined) {
     const slotsErr = validateWallLabelSlots(params.wallLabelSlots);
     if (slotsErr) return validationError('INVALID_PARAMS', slotsErr);

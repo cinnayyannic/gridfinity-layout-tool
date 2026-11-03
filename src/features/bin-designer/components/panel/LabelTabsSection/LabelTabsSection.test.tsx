@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { LabelTabsSection } from './LabelTabsSection';
 import { useDesignerStore } from '@/features/bin-designer/store';
 import { DEFAULT_BIN_PARAMS, DEFAULT_UI_STATE } from '@/features/bin-designer/constants';
+import en from '@/i18n/locales/en';
 
 describe('LabelTabsSection', () => {
   beforeEach(() => {
@@ -50,6 +51,18 @@ describe('LabelTabsSection', () => {
     expect(screen.getByRole('button', { name: 'Solid', pressed: false })).toBeInTheDocument();
   });
 
+  it('shows the plate export for swappable labels without opening Plate fit', () => {
+    useDesignerStore.setState((s) => ({
+      params: {
+        ...s.params,
+        label: { ...s.params.label, enabled: true, mode: 'socket', depth: 14 },
+      },
+    }));
+    render(<LabelTabsSection />);
+
+    expect(screen.getByRole('button', { name: 'Export plates' })).toBeInTheDocument();
+  });
+
   it('offers the removal hole on click-in sockets only, and stores it only when on', () => {
     useDesignerStore.setState((s) => ({
       params: {
@@ -60,7 +73,7 @@ describe('LabelTabsSection', () => {
     render(<LabelTabsSection />);
     fireEvent.click(screen.getByRole('button', { name: /Plate fit/ }));
 
-    const hole = screen.getByRole('checkbox', { name: 'Removal hole' });
+    const hole = screen.getByRole('switch', { name: 'Removal hole' });
     expect(hole).not.toBeChecked();
     fireEvent.click(hole);
     expect(useDesignerStore.getState().params.label.removalHole).toBe(true);
@@ -68,7 +81,7 @@ describe('LabelTabsSection', () => {
     expect(useDesignerStore.getState().params.label.removalHole).toBeUndefined();
 
     fireEvent.click(screen.getByRole('button', { name: 'Slide-in' }));
-    expect(screen.queryByRole('checkbox', { name: 'Removal hole' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'Removal hole' })).not.toBeInTheDocument();
   });
 
   it('plate fit offset steps and displays in 0.05 increments', () => {
@@ -105,5 +118,11 @@ describe('LabelTabsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: /Placement/ }));
     expect(screen.getByRole('button', { name: 'Center', pressed: true })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Left', pressed: false })).toBeInTheDocument();
+  });
+
+  it('plays a clip of the feature from the dot beside its toggle', () => {
+    render(<LabelTabsSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'Watch a clip: Label tabs' }));
+    expect(screen.getByText(en['binDesigner.featureTip.labelTabs'])).toBeInTheDocument();
   });
 });

@@ -186,11 +186,17 @@ export function validateTextStyleOverride(value: unknown, label: string): string
 
 const ALLOWED_SURFACE_TEXT_KEYS = new Set([
   'lidText',
+  'lidTextRotation',
+  'floorText',
+  'floorTextRotation',
   'walls',
   'wallAlign',
   'style',
   'lidStyle',
+  'floorStyle',
   'wallStyles',
+  'wallFaces',
+  'insideStyle',
 ]);
 
 /**
@@ -218,8 +224,14 @@ export const VALID_WALL_TEXT_SIDES = ['front', 'back', 'left', 'right'] as const
 
 export const VALID_WALL_TEXT_ALIGNS = ['top', 'center', 'bottom'] as const;
 
+/** Mirrors the client `WALL_TEXT_FACES`. */
+export const VALID_WALL_TEXT_FACES = ['outside', 'inside'] as const;
+
+/** Mirrors the client `TEXT_QUARTER_TURNS`. */
+export const VALID_TEXT_QUARTER_TURNS = [0, 90, 180, 270] as const;
+
 /**
- * Exterior-surface text: a lid-top string plus per-wall strings
+ * Surface text: a lid-top string, a floor string, per-wall strings
  * and a shared vertical alignment. Strings share the client's
  * `TEXT_MAX_LENGTH = 50` cap (mirrored numerically, like `compartmentTexts`);
  * the style override reuses the `textDefaults` field caps so a crafted share
@@ -238,6 +250,23 @@ export function validateSurfaceText(value: unknown): string | null {
     if (typeof value.lidText !== 'string') return 'surfaceText.lidText must be a string';
     const err = checkCaption(value.lidText, 'surfaceText.lidText');
     if (err) return err;
+  }
+  if (
+    value.lidTextRotation !== undefined &&
+    !(VALID_TEXT_QUARTER_TURNS as readonly unknown[]).includes(value.lidTextRotation)
+  ) {
+    return `surfaceText.lidTextRotation must be one of: ${VALID_TEXT_QUARTER_TURNS.join(', ')}`;
+  }
+  if (value.floorText !== undefined) {
+    if (typeof value.floorText !== 'string') return 'surfaceText.floorText must be a string';
+    const err = checkCaption(value.floorText, 'surfaceText.floorText');
+    if (err) return err;
+  }
+  if (
+    value.floorTextRotation !== undefined &&
+    !(VALID_TEXT_QUARTER_TURNS as readonly unknown[]).includes(value.floorTextRotation)
+  ) {
+    return `surfaceText.floorTextRotation must be one of: ${VALID_TEXT_QUARTER_TURNS.join(', ')}`;
   }
   if (value.walls !== undefined) {
     if (!isObject(value.walls)) return 'surfaceText.walls must be an object';
@@ -265,6 +294,10 @@ export function validateSurfaceText(value: unknown): string | null {
     const styleErr = validateTextStyleOverride(value.lidStyle, 'surfaceText.lidStyle');
     if (styleErr) return styleErr;
   }
+  if (value.floorStyle !== undefined) {
+    const styleErr = validateTextStyleOverride(value.floorStyle, 'surfaceText.floorStyle');
+    if (styleErr) return styleErr;
+  }
   if (value.wallStyles !== undefined) {
     if (!isObject(value.wallStyles)) return 'surfaceText.wallStyles must be an object';
     for (const key of Object.keys(value.wallStyles)) {
@@ -277,6 +310,21 @@ export function validateSurfaceText(value: unknown): string | null {
       );
       if (styleErr) return styleErr;
     }
+  }
+  if (value.wallFaces !== undefined) {
+    if (!isObject(value.wallFaces)) return 'surfaceText.wallFaces must be an object';
+    for (const key of Object.keys(value.wallFaces)) {
+      if (!(VALID_WALL_TEXT_SIDES as readonly string[]).includes(key)) {
+        return `surfaceText.wallFaces has unknown key: ${key}`;
+      }
+      if (!(VALID_WALL_TEXT_FACES as readonly unknown[]).includes(value.wallFaces[key])) {
+        return `surfaceText.wallFaces.${key} must be one of: ${VALID_WALL_TEXT_FACES.join(', ')}`;
+      }
+    }
+  }
+  if (value.insideStyle !== undefined) {
+    const styleErr = validateTextStyleOverride(value.insideStyle, 'surfaceText.insideStyle');
+    if (styleErr) return styleErr;
   }
   return null;
 }

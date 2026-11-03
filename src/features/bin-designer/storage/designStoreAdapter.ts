@@ -10,25 +10,39 @@
  * IndexedDB/registry code stays out of any eager chunk that only needs the
  * adapter reference — the same code-splitting the old dynamic imports in
  * `core/storage` provided, now on an allowed feature-internal edge.
+ *
+ * Every design core loads leaves the device (layout file export, cloud share,
+ * bulk archive), so `loadDesign` hands back its meshes inline, and a design
+ * whose mesh file is missing fails with `STORAGE_MESH_MISSING`.
  */
 
 import type {
   DesignRegistryEdgeFields,
   DesignRegistryEntry,
+  DesignRegistryPlacementFields,
   DesignStorePort,
   LoadedDesignData,
   SaveDesignInput,
   SavedDesignData,
 } from '@/core/storage/designStorePort';
+import { isOk } from '@/core/result';
 import type { Result, StorageError } from '@/core/result';
 import type { DesignId } from '@/core/types';
 import type { BinParams } from '@/features/bin-designer/types';
 import type { ItemEnvelope } from '@/shared/types/item';
 
 export const designStoreAdapter: DesignStorePort = {
-  async loadDesign(id: DesignId): Promise<Result<LoadedDesignData, StorageError>> {
-    const { loadDesign } = await import('@/features/bin-designer/storage/DesignerStorage');
-    return loadDesign(id);
+  async loadDesign(
+    id: DesignId,
+    options: { readonly meshRefs?: boolean } = {}
+  ): Promise<Result<LoadedDesignData, StorageError>> {
+    const [{ loadDesign }, { inlineHolderMeshes }] = await Promise.all([
+      import('@/features/bin-designer/storage/DesignerStorage'),
+      import('@/shared/generation/meshRefs'),
+    ]);
+    const loaded = await loadDesign(id);
+    if (!isOk(loaded) || options.meshRefs === true) return loaded;
+    return inlineHolderMeshes(loaded.value);
   },
 
   async saveDesign(input: SaveDesignInput): Promise<Result<SavedDesignData, StorageError>> {
@@ -65,5 +79,14 @@ export const designStoreAdapter: DesignStorePort = {
   async registryEdgeFields(params: unknown): Promise<DesignRegistryEdgeFields> {
     const { registryEdgeFields } = await import('@/features/bin-designer/store/customBinRegistry');
     return registryEdgeFields(params as BinParams);
+  },
+
+  async registryPlacementFields(params: unknown): Promise<DesignRegistryPlacementFields> {
+    const [{ registryHeightFields, registrySlantFields }, { migrateParams }] = await Promise.all([
+      import('@/features/bin-designer/store/customBinRegistry'),
+      import('@/features/bin-designer/constants/paramMigration'),
+    ]);
+    const migrated = migrateParams(params as BinParams);
+    return { ...registryHeightFields(migrated), ...registrySlantFields(migrated) };
   },
 };

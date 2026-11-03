@@ -16,7 +16,8 @@ import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useDesignerStore } from '@/features/bin-designer/store';
 import { binDimensions } from '@/features/bin-designer/utils/binDimensions';
-import { InfoIcon, Stepper } from '@/design-system';
+import { Stepper } from '@/design-system';
+import { FieldLabel, Hint } from '../panel/shared';
 import {
   calculateDividerHeight,
   resolveCompartmentDividerHeight,
@@ -53,9 +54,7 @@ export function DividerHeightControl() {
 
   return (
     <div>
-      <span className="mb-1 block text-xs text-content-tertiary">
-        {t('binDesigner.dividerHeight')}
-      </span>
+      <FieldLabel>{t('binDesigner.dividerHeight')}</FieldLabel>
       <Stepper
         value={currentValue}
         displayValue={
@@ -89,10 +88,11 @@ export function DividerHeightControl() {
         aria-label={t('binDesigner.dividerHeight')}
       />
       {isAuto && stackingLip && (
-        <p className="mt-1 flex items-start gap-1 text-xs text-content-tertiary">
-          <InfoIcon size="xs" className="mt-0.5 shrink-0" />
-          <span>{t('binDesigner.dividerHeightLipCeiling')}</span>
-        </p>
+        <div className="mt-1">
+          <Hint info={t('binDesigner.dividerHeightLipCeiling')}>
+            {t('binDesigner.dividerHeightLipCeilingShort')}
+          </Hint>
+        </div>
       )}
     </div>
   );

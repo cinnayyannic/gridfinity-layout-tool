@@ -11,6 +11,8 @@ import { calcMaxGridUnits } from '@/core/constants';
 import { generateEnhancedPrintList } from '@/features/print-export/utils/split';
 import type { PrintSplitFit } from '@/features/print-export/utils/split';
 import { resolveBinOverhang } from '@/shared/utils/drawerMargin';
+import { placedSlant } from '@/shared/utils/placedSlant';
+import { placementCaption } from '@/shared/utils/placedCaption';
 import { effectiveGridUnitMmY } from '@/core/types';
 import {
   applyFiltersAndSort,
@@ -34,6 +36,7 @@ import type {
 import { categoryId as toCategoryId } from '@/core/types';
 import { useLabelPlateCounts } from '@/shared/hooks/useLabelPlateCounts';
 import { useLinkedDesignOverhangs } from '@/shared/hooks/useLinkedDesignOverhangs';
+import { useLinkedDesignKinds } from '@/shared/hooks/useLinkedDesignKinds';
 import type { LabelPlateWidthU } from '@/shared/constants/labelPlates';
 import { useTranslation } from '@/i18n';
 
@@ -118,8 +121,10 @@ export function usePrintList(): UsePrintListReturn {
   // primitives: `baseRows` keys off this object, and a fresh identity every
   // render would rebuild the whole list on every render.
   const designOverhangs = useLinkedDesignOverhangs();
+  const designKinds = useLinkedDesignKinds();
   const gridUnitMmY = effectiveGridUnitMmY(layout);
   const { printBedSize, printBedDepth, gridUnitMm, baseplateParams } = layout;
+  const { drawer: layoutDrawer, heightUnitMm, lowProfileBase } = layout;
   const drawerWidth = layout.drawer.width;
   const drawerDepth = layout.drawer.depth;
   const splitFit = useMemo(
@@ -130,9 +135,26 @@ export function usePrintList(): UsePrintListReturn {
       gridUnitMmY,
       // A placed bin's own overhang wins; the design's is the fallback tier
       // `resolveBinOverhang` leaves to its caller.
-      overhangFor: (bin) =>
-        resolveBinOverhang(bin, { width: drawerWidth, depth: drawerDepth }, baseplateParams) ??
-        (bin.linkedDesignId === undefined ? undefined : designOverhangs.get(bin.linkedDesignId)),
+      overhangFor: (bin) => {
+        const linkedId = bin.linkedDesignId;
+        const linkedKind = linkedId === undefined ? undefined : designKinds.get(linkedId);
+        const drawer = { width: drawerWidth, depth: drawerDepth };
+        return (
+          resolveBinOverhang(bin, drawer, baseplateParams, linkedKind) ??
+          (linkedId === undefined ? undefined : designOverhangs.get(linkedId))
+        );
+      },
+      // `placedSlant` reads the same registry `designOverhangs` follows, so a
+      // re-saved design's slant refreshes this through that dependency.
+      slantFor: (bin) =>
+        placedSlant(bin, {
+          drawer: layoutDrawer,
+          baseplateParams,
+          gridUnitMm,
+          gridUnitMmY,
+          heightUnitMm,
+          lowProfileBase,
+        })?.plan ?? null,
     }),
     [
       printBedSize,
@@ -141,8 +163,12 @@ export function usePrintList(): UsePrintListReturn {
       gridUnitMmY,
       drawerWidth,
       drawerDepth,
+      layoutDrawer,
+      heightUnitMm,
+      lowProfileBase,
       baseplateParams,
       designOverhangs,
+      designKinds,
     ]
   );
 
@@ -165,10 +191,13 @@ export function usePrintList(): UsePrintListReturn {
     return baseRows.map((row) => {
       const info = row.linkedDesignId ? labelInfos.get(row.linkedDesignId) : undefined;
       if (!info) return row;
+      // A row's bins share one label: the print-list group key includes it.
+      const labelFillsTabs =
+        info.blankCaptionTakesBinLabel && placementCaption(row.labels[0] ?? '') !== null;
       return {
         ...row,
         ...(info.plateSet ? { labelPlateCount: info.plateSet.perBin * row.binCount } : {}),
-        ...(info.tabsWithoutText ? { labelTabsWithoutText: true } : {}),
+        ...(info.tabsWithoutText && !labelFillsTabs ? { labelTabsWithoutText: true } : {}),
       };
     });
   }, [baseRows, labelInfos]);

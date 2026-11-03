@@ -27,6 +27,61 @@ describe('validateBaseplateShare', () => {
     if (result.valid) expect(result.payload.params).not.toHaveProperty('evil');
   });
 
+  describe('optional settings', () => {
+    it('keeps well-formed optional settings', () => {
+      const optional = {
+        syncWithLayout: true,
+        overTile: false,
+        connectorStyle: 'puzzle',
+        paddingAnchor: 'tl',
+        fractionalEdgeX: 'end',
+        stackPrint: { enabled: true, gapMm: 0.3, copies: 4 },
+      };
+      const result = validate({ ...validParams, ...optional });
+      expect(result.valid).toBe(true);
+      if (result.valid) expect(result.payload.params).toMatchObject(optional);
+    });
+
+    it('drops malformed optional settings without rejecting the plate', () => {
+      const result = validate({
+        ...validParams,
+        syncWithLayout: 'yes',
+        overTile: 1,
+        connectorStyle: 'zigzag',
+        paddingAnchor: 'x'.repeat(200),
+        fractionalEdgeX: 'middle',
+        stackPrint: { enabled: true, gapMm: 'bad' },
+      });
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        for (const key of [
+          'syncWithLayout',
+          'overTile',
+          'connectorStyle',
+          'paddingAnchor',
+          'fractionalEdgeX',
+          'stackPrint',
+        ]) {
+          expect(result.payload.params).not.toHaveProperty(key);
+        }
+      }
+    });
+
+    it('drops a stack-print setting outside the bounds the client clamps to', () => {
+      for (const stackPrint of [
+        { enabled: true, gapMm: 5 },
+        { enabled: true, copies: 0 },
+        { enabled: true, copies: 2.5 },
+        { gapMm: 0.3 },
+        { enabled: true, extra: 1 },
+      ]) {
+        const result = validate({ ...validParams, stackPrint });
+        expect(result.valid).toBe(true);
+        if (result.valid) expect(result.payload.params).not.toHaveProperty('stackPrint');
+      }
+    });
+  });
+
   describe('splitOverride (#3115)', () => {
     it('accepts a well-formed plan and preserves it through the allowlist', () => {
       const result = validate({ ...validParams, splitOverride: { cols: [6, 4], rows: [8] } });
@@ -83,6 +138,34 @@ describe('validateBaseplateShare', () => {
     });
   });
 
+  describe('mountMagnets', () => {
+    const mountMagnets = { enabled: true, diameter: 6.5, depth: 2.5, perPiece: 4, chamfer: true };
+
+    it('accepts and keeps a valid config', () => {
+      const result = validate({ ...validParams, mountMagnets });
+      expect(result.valid).toBe(true);
+      if (result.valid) expect(result.payload.params.mountMagnets).toEqual(mountMagnets);
+    });
+
+    it('drops a malformed config without rejecting the plate', () => {
+      for (const bad of [
+        { ...mountMagnets, diameter: 7 },
+        { ...mountMagnets, depth: 3 },
+        { ...mountMagnets, perPiece: 2.5 },
+        { ...mountMagnets, perPiece: 65 },
+        { ...mountMagnets, chamfer: 'yes' },
+        { ...mountMagnets, extra: 1 },
+        { diameter: 6.5, depth: 2 },
+        { enabled: true },
+        'on',
+      ]) {
+        const result = validate({ ...validParams, mountMagnets: bad });
+        expect(result.valid).toBe(true);
+        if (result.valid) expect(result.payload.params).not.toHaveProperty('mountMagnets');
+      }
+    });
+  });
+
   describe('screwHoles (#3425)', () => {
     const screwHoles = {
       enabled: true,
@@ -91,6 +174,8 @@ describe('validateBaseplateShare', () => {
       headDiameter: 8,
       counterboreDepth: 3,
       screwsPerPiece: 4,
+      edgeInsetCells: 1,
+      cellCorner: 'inner',
     };
 
     it('accepts a fully specified object and preserves it through the allowlist', () => {
@@ -202,6 +287,17 @@ describe('validateBaseplateShare', () => {
       ).toBe(false);
       expect(
         validate({ ...validParams, screwHoles: { ...screwHoles, screwsPerPiece: '4' } }).valid
+      ).toBe(false);
+    });
+
+    it('rejects a fractional or out-of-range edge inset, and an unknown cell corner', () => {
+      for (const edgeInsetCells of [0.5, -1, 5, '1']) {
+        expect(
+          validate({ ...validParams, screwHoles: { ...screwHoles, edgeInsetCells } }).valid
+        ).toBe(false);
+      }
+      expect(
+        validate({ ...validParams, screwHoles: { ...screwHoles, cellCorner: 'diagonal' } }).valid
       ).toBe(false);
     });
   });

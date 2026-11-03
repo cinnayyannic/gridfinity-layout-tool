@@ -49,6 +49,78 @@ export type CutoutColorScope = 'floor' | 'floorAndWalls';
 /** Scope applied when a cutout is colored but no scope was set. */
 export const DEFAULT_CUTOUT_COLOR_SCOPE: CutoutColorScope = 'floorAndWalls';
 
+/**
+ * What a cutout's depth is held to when the bin around it changes:
+ *  - `fixed` — {@link Cutout.cutDepth} below the fill surface, as typed. A tool
+ *    set to sit flush stays flush when the fill moves.
+ *  - `floor` — the pocket floor stays {@link Cutout.floorMm} above the bin's
+ *    underside, so `cutDepth` follows the fill and the bin height.
+ *  - `through` — no floor: the cut opens out of the underside.
+ *
+ * For `floor` and `through`, `cutDepth` is derived (see `resolveCutoutDepth`)
+ * and re-derived after every store write, so every reader of `cutDepth` sees
+ * the depth the generator builds.
+ */
+export type CutoutDepthMode = 'fixed' | 'floor' | 'through';
+
+/**
+ * Shape of a cutout's entry edge, sized by {@link Cutout.chamferWidth}:
+ *  - `chamfer` — a 45° bevel, so a part centres itself as it drops in.
+ *  - `round` — a quarter round over the same width and drop, tangent to the
+ *    wall and to the top, so the edge is smooth to the hand and nothing
+ *    catches on it.
+ */
+export type CutoutEntryProfile = 'chamfer' | 'round';
+
+export const CUTOUT_ENTRY_PROFILES: readonly CutoutEntryProfile[] = ['chamfer', 'round'];
+
+/**
+ * Floor of a finger-access cut: `curved` follows the fingertip (the deepest
+ * floor fillet the cut can take), `flat` keeps the cut's own fillet settings.
+ */
+export type CutoutFingerBottom = 'curved' | 'flat';
+
+export const CUTOUT_FINGER_BOTTOMS: readonly CutoutFingerBottom[] = ['curved', 'flat'];
+
+/**
+ * Marks a slot or round cutout as finger access: a dip beside a pocket that a
+ * fingertip reaches into to grip a tool and lift it out.
+ */
+export interface CutoutFinger {
+  readonly bottom: CutoutFingerBottom;
+}
+
+/** A point in a cutout's own frame: mm from its centre, before it is turned. */
+export interface CutoutSplitPoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+/** The modes side B of a split stores; it never cuts through. */
+export const SPLIT_DEPTH_MODES = ['floor'] as const;
+
+/**
+ * A straight line across a pocket that cuts each side to its own depth, from
+ * the same top. Side A lies left of `a` to `b` and keeps the cutout's own depth
+ * fields; side B takes these. The line sits in the cutout's own frame, so it
+ * moves and turns with the pocket.
+ */
+export interface CutoutSplit {
+  readonly a: CutoutSplitPoint;
+  readonly b: CutoutSplitPoint;
+  readonly cutDepth: number;
+  /** Absent means a fixed depth. */
+  readonly depthMode?: (typeof SPLIT_DEPTH_MODES)[number];
+  /** Read only in `floor` mode, as {@link Cutout.floorMm} is. */
+  readonly floorMm?: number;
+}
+
+/** Ordered mode list for UI rendering and exhaustiveness checks. */
+export const CUTOUT_DEPTH_MODES: readonly CutoutDepthMode[] = ['fixed', 'floor', 'through'];
+
+/** The modes a cutout stores; `fixed` is stored as the field's absence. */
+export const STORED_CUTOUT_DEPTH_MODES = ['floor', 'through'] as const;
+
 /** Minimum side count for a polygon cutout (triangle). */
 export const MIN_POLYGON_SIDES = 3;
 /** Maximum side count for a polygon cutout. */
@@ -82,6 +154,14 @@ export const MAX_CUTOUT_CLEARANCE = 5;
 
 /** Largest entry-chamfer width (mm) the editor allows. */
 export const MAX_CUTOUT_CHAMFER = 5;
+
+/** Highest {@link Cutout.floorMm} a file may carry: the tallest bin's height
+ *  (MAX_HEIGHT units at 7mm). Mirrored in `api/lib/designerValidationConstants.ts`. */
+export const MAX_CUTOUT_FLOOR_MM = 350;
+
+/** Farthest a split line's point may sit from its pocket's centre (mm). Only
+ *  stops absurd values. Mirrored in `api/lib/designerValidationConstants.ts`. */
+export const MAX_SPLIT_POINT_MM = 1000;
 
 /** Straight wall (mm) that must remain below the bevel, so a chamfer never
  *  consumes the full cut depth. */
@@ -121,10 +201,10 @@ export function defaultEntryChamfer(holeSize: number, cutDepth: number): number 
 /**
  * Shapes that accept an entry {@link Cutout.chamferWidth}. Paths are included:
  * the generator flattens the outline to a polyline and offsets *that* (a
- * well-defined polygon offset) for the flared top rim, falling back to a
- * straight extrude if the offset/loft can't be built. (A constant-offset of an
- * unflattened arbitrary bezier still isn't well-defined — flattening first is
- * what makes the path case tractable.)
+ * well-defined polygon offset, held back locally at any curve too tight for
+ * it) for the flared top rim, falling back to a straight extrude if the loft
+ * can't be built. (A constant-offset of an unflattened arbitrary bezier still
+ * isn't well-defined — flattening first is what makes the path case tractable.)
  */
 export const CHAMFER_SHAPES: readonly CutoutShape[] = [
   'rectangle',
@@ -361,6 +441,15 @@ export const DEFAULT_SCOOP_EDGES: CutoutScoopEdges = {
  */
 export const MIN_PATH_POINTS = 2;
 
+/**
+ * Most anchors the path tool draws. A path cutout's crossing check compares
+ * every edge pair of a path this long before its pair budget can run out.
+ */
+export const MAX_PATH_POINTS = 200;
+
+/** Most islands one path cutout keeps; more are dropped on load and import. */
+export const MAX_CUTOUT_HOLES = 64;
+
 /** A vertex in a bezier path with optional control handles */
 export interface PathPoint {
   /** X position in mm from bin interior left edge */
@@ -439,6 +528,17 @@ export interface Cutout {
   readonly depth: number;
   /** Cavity depth in mm (how deep the cut goes from top surface) */
   readonly cutDepth: number;
+  /**
+   * How {@link cutDepth} is held when the bin changes. Absent means `fixed`,
+   * so a design saved before the field existed serializes unchanged.
+   */
+  readonly depthMode?: (typeof STORED_CUTOUT_DEPTH_MODES)[number];
+  /**
+   * Plastic under the pocket floor, measured from the bin's underside (a
+   * socket's height included), in mm. Read only in `floor` mode; absent there
+   * means the base's default floor.
+   */
+  readonly floorMm?: number;
   /** Rotation in degrees (0-359) */
   readonly rotation: number;
   /** Corner radius for rectangle shape (mm) */
@@ -521,6 +621,13 @@ export interface Cutout {
   /** Path vertices for pen tool shapes (required when shape === 'path') */
   readonly path?: PathPoint[];
   /**
+   * Islands in a path cutout: closed rings in the same frame as {@link path},
+   * where the bin keeps its material to the full height, such as the middle of
+   * a traced wrench's ring. Clearance shrinks each one and the entry edge runs
+   * round it. Ignored for every other shape.
+   */
+  readonly holes?: PathPoint[][];
+  /**
    * Side count for regular-polygon cutouts (required when shape === 'polygon').
    * Clamped to [{@link MIN_POLYGON_SIDES}, {@link MAX_POLYGON_SIDES}]. Ignored
    * for every other shape.
@@ -540,6 +647,12 @@ export interface Cutout {
    * Missing/undefined/0 = straight walls, so existing designs are unchanged.
    */
   readonly chamferWidth?: number;
+  /** Shape of that entry edge. Absent means `chamfer`. */
+  readonly entryProfile?: CutoutEntryProfile;
+  /** Present on a finger-access cut; read only on a slot or a circle. */
+  readonly finger?: CutoutFinger;
+  /** Present on a pocket cut to two depths either side of a line. */
+  readonly split?: CutoutSplit;
   /**
    * Tilt of the pocket's axis off vertical, in degrees (±{@link
    * MAX_CUTOUT_LEAN_DEG}), so an item slides in at a slope. The pocket is the

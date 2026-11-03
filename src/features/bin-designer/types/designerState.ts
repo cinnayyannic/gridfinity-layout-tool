@@ -1,5 +1,5 @@
 import type { SaveStatus } from '@/shared/types/saveStatus';
-import type { MeshAsset } from '@/shared/generation/meshAsset';
+import type { MeshAssetEntry } from '@/shared/generation/meshAsset';
 import type { MeasurePoint } from '@/features/bin-designer/utils/measure3d';
 import type { CellMask } from '@/shared/utils/cellMask';
 import type { LabelPlateIconId } from '@/shared/constants/labelPlates';
@@ -15,12 +15,20 @@ import type {
 } from '@/shared/types/assembly';
 import type { AccentBandConfig, ColorZone, HoverableZone, LipColorConfig } from './featureColors';
 import type { LidConfig } from './lid';
-import type { TextStyleDefaults, TextStyleOverride, WallTextSide, TextAnchor } from './text';
+import type {
+  TextStyleDefaults,
+  TextStyleOverride,
+  WallTextSide,
+  WallTextFace,
+  TextAnchor,
+  TextQuarterTurn,
+} from './text';
 import type {
   Cutout,
   CutoutArrayConfig,
   CutoutConfig,
   CutoutColorScope,
+  CutoutSplit,
   GroupOp,
   CutoutToggleProperties,
   ReorderDirection,
@@ -57,6 +65,7 @@ import type {
   SplitPieceMeshEntry,
 } from './generation';
 import type { PerfSnapshot } from '@/shared/types/generation';
+import type { BodyTypeMemory } from './bodyTypeMemory';
 import type {
   DesignerHistory,
   DesignerUIState,
@@ -265,15 +274,22 @@ export interface DesignerState {
   setTextDefaults: (partial: Partial<TextStyleDefaults>) => void;
   setLabelTabTextStyle: (overrides: TextStyleOverride | null) => void;
 
-  // Surface text actions (lid top + outer walls)
+  // Surface text actions (lid top, floor, walls)
   setLidText: (text: string) => void;
   setWallText: (side: WallTextSide, text: string) => void;
-  /** Remove text from every wall in one history entry (drops per-wall styles too). */
+  /** Remove text from every wall in one history entry (drops per-wall styles and faces too). */
   clearWallText: () => void;
+  setWallTextFace: (side: WallTextSide, face: WallTextFace) => void;
+  /** Anchor for inside-facing wall text, written onto `insideStyle`. */
+  setInsideTextAnchor: (anchor: TextAnchor) => void;
   setSurfaceTextStyle: (overrides: TextStyleOverride | null) => void;
   /** Anchor for every surface, written onto the shared surface style. */
   setSurfaceTextAnchor: (anchor: TextAnchor) => void;
   setLidTextStyle: (overrides: TextStyleOverride | null) => void;
+  setLidTextRotation: (rotation: TextQuarterTurn) => void;
+  setFloorText: (text: string) => void;
+  setFloorTextStyle: (overrides: TextStyleOverride | null) => void;
+  setFloorTextRotation: (rotation: TextQuarterTurn) => void;
   setWallTextStyle: (side: WallTextSide, overrides: TextStyleOverride | null) => void;
 
   // Wall pattern actions
@@ -296,9 +312,13 @@ export interface DesignerState {
   // Cutout actions
   /** Returns whether the cutout landed — false when the lid is at its cap. */
   addCutout: (cutout: Cutout) => boolean;
-  addMeshCutout: (cutout: Cutout, asset: MeshAsset) => void;
+  /** Add a finger cut bound to `pocketId`; false when nothing was added. */
+  addFingerAccess: (pocketId: string, finger: Cutout) => boolean;
+  addMeshCutout: (cutout: Cutout, asset: MeshAssetEntry) => void;
   removeCutout: (id: string) => void;
   updateCutout: (id: string, updates: Partial<Cutout>) => void;
+  /** Split a pocket into two depths along a line, or remove its split with null. */
+  setCutoutSplit: (id: string, split: CutoutSplit | null) => void;
   clearCutouts: () => void;
   duplicateCutouts: (cutoutIds: readonly string[]) => void;
   /**
@@ -357,6 +377,13 @@ export interface DesignerState {
   // Transaction + batch cutout actions
   startTransaction: () => void;
   commitTransaction: () => void;
+  /**
+   * Regenerate from the params as they stand, with no undo entry. Inside a
+   * transaction only the first change bumps the generation epoch, so a
+   * caller that changed geometry over several ticks of one transaction
+   * calls this once it commits.
+   */
+  invalidateGeometry: () => void;
   updateCutoutsBatch: (updates: ReadonlyMap<string, Partial<Cutout>>) => void;
   removeCutoutsBatch: (ids: readonly string[]) => void;
   /**
@@ -429,6 +456,10 @@ export interface DesignerState {
   setShapeEditorOpen: (open: boolean) => void;
   setSplitViewMode: (mode: SplitViewMode) => void;
   setShowLabelPlates: (show: boolean) => void;
+  queueDepthPrompt: (ids: readonly string[]) => void;
+  /** Stop asking about these outlines, or about every queued one. */
+  clearDepthPrompt: (ids?: readonly string[]) => void;
+  setBodyTypeMemory: (memory: BodyTypeMemory | null) => void;
   setSplitPieceMeshes: (meshes: readonly SplitPieceMeshEntry[]) => void;
   setHoveredColorZone: (zone: HoverableZone | null) => void;
   setHoveredOverhangSide: (side: OverhangHighlightSide | null) => void;

@@ -35,14 +35,14 @@ Rate limits are keyed by `userId`, not IP — each authenticated user gets their
 {
   layout: Layout,           // sanitized via validateShareLayout
   modifiedAt: number,       // ms since epoch (LWW comparison value)
-  schemaVersion: 1,
+  schemaVersion: 4,         // as the client declared it; 1 when it declares none
 }
 
 // users/{uid}/designs/{id}.json
 {
   design: BinParams,        // sanitized via validateDesignerShare
   modifiedAt: number,
-  schemaVersion: 1,
+  schemaVersion: 2,
 }
 
 // users/{uid}/designVersions/{id}.json
@@ -74,10 +74,9 @@ type IndexEntry = {
 blob stores — so quota accounting matches reality. Each kind also has a
 **pre-validation cap** that bounds CPU on huge inputs: layouts use
 `SHARE_CONSTRAINTS.MAX_SIZE_BYTES` (500 KB, measured on `{ layout }`); designs
-use `CONSTRAINTS.MAX_PAYLOAD_BYTES` (100 KB, measured on
-`{ name, type, version, params }`). The pre-validation count is intentionally a
-subset of the request body, not the full HTTP payload — its only job is to gate
-the validator's workload.
+use `CONSTRAINTS.MAX_PAYLOAD_BYTES` (100 KB), or `MESH_MAX_PAYLOAD_BYTES` (2 MB)
+when the design carries an inline mesh asset. The cap counts a subset of the request body, not
+the full HTTP payload, since its only job is to gate the validator's workload.
 
 ### Folders
 
@@ -108,6 +107,7 @@ Every write supplies a `modifiedAt` (ms epoch) representing the client's view of
 - **Existing live, server `modifiedAt` ≥ request `modifiedAt`** — `409 Conflict` with the stored envelope. Client should pull and replace local.
 - **Existing tombstone, `deletedAt` ≥ request `modifiedAt`** — `410 Gone`. The local edit predates the deletion; client must re-edit (bumping `modifiedAt`) to resurrect.
 - **No existing OR tombstone with `deletedAt` < request `modifiedAt`** — write succeeds (resurrection clears the tombstone).
+- **Mesh refs** — a design or version may name a mesh file by hash (see `/api/meshes/[hash]`) instead of carrying it inline. After the LWW gates, a ref the account does not hold, or any ref while `MESH_STORE_ENABLED` is off, gets `424` with code `MESH_MISSING` and the hashes in `missing`. The client uploads them and retries, so this is not a `409`.
 - **Quota check** — happens after the LWW gate; PUT only consumes a slot when it's actually accepted.
 
 ## Quotas
@@ -135,8 +135,9 @@ The existing share endpoints (`/api/share`) run `filterLayoutContent` because sh
 1. `SMEMBERS users:{uid}:sessions` → `DEL session:{token}` for each
 2. `HKEYS users:{uid}:index:{layouts|designs|baseplates|designVersions|folders}` → `del()` each blob
 3. Release the Ko-fi supporter link and pull the public badge (`unlinkSupporterAccount`)
-4. `DEL users:{uid}:*` (indexes, profile, sessions set, indexUpdatedAt, tombstoneSweptAt)
-5. Clear session cookie on responding device
+4. Leave every held mesh file's holder set (`releaseAllAccountMeshes`); the files are shared by content hash, so they stay. A mesh upload records its hold only while its session exists, so this must follow step 1
+5. `DEL users:{uid}:*` (indexes, profile, sessions set, indexUpdatedAt, tombstoneSweptAt, meshes, meshUsage)
+6. Clear session cookie on responding device
 
 Step 3 deliberately leaves the **donor record** on the supporters wall: it
 carries no user identifier, so deleting it is not required for erasure, and

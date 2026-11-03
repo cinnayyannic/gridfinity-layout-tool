@@ -19,6 +19,7 @@ import type {
   LabelTabConfig,
   LidClickRails,
   OverhangConfig,
+  PullTabConfig,
   ScoopConfig,
   SlideConfig,
   SlotConfig,
@@ -83,6 +84,7 @@ export const BIN_PARAMS_KEYS = [
   'walls',
   'slide',
   'handles',
+  'pullTab',
   'slotConfig',
   'dividerPieces',
   'inserts',
@@ -102,6 +104,7 @@ export const BIN_PARAMS_KEYS = [
   'cellMask',
   'overhang',
   'extraWallHeightMm',
+  'slant',
 ] as const;
 export type _BinParamsKeys = Assert<KeysMatch<keyof BinParams, (typeof BIN_PARAMS_KEYS)[number]>>;
 
@@ -112,9 +115,13 @@ export const BASE_CONFIG_KEYS = [
   'magnetDepth',
   'magnetCrushRibs',
   'magnetChamfer',
+  'cornerHolesOnly',
   'screwDiameter',
   'stackingLip',
   'lipTip',
+  'lipNotches',
+  'rimFillet',
+  'rimFilletRadius',
   'solid',
   'halfSockets',
   'footLatticeX',
@@ -361,3 +368,25 @@ export const SIDE_FLAGS_KEYS = ['front', 'back', 'left', 'right'] as const;
 export type _SideFlagsKeys = Assert<
   KeysMatch<keyof LidClickRails, (typeof SIDE_FLAGS_KEYS)[number]>
 >;
+
+export const PULL_TAB_KEYS = [
+  'enabled',
+  'wall',
+  'walls',
+  'centerAxis',
+  'backRecess',
+  'thickness',
+  'width',
+  'height',
+  'topRadius',
+  'rootRadius',
+  'recessHeight',
+  'recessBorder',
+  'recessDepth',
+  'recessRadius',
+  'recessEdgeRadius',
+  'recessInsideRadius',
+  'widthMode',
+  'widthPercent',
+] as const;
+export type _PullTabKeys = Assert<KeysMatch<keyof PullTabConfig, (typeof PULL_TAB_KEYS)[number]>>;

@@ -18,13 +18,33 @@
  * single-flight anyway) and results are cached module-wide keyed by design
  * id + updatedAt, so design edits invalidate stale meshes. Failures cache as
  * null — bins fall back to the stylized box (+ divider) rendering.
+ *
+ * Export prints a placement's resolved overhang IN PLACE OF the design's own,
+ * and the preview draws the placement's as strips around the body. A bin
+ * whose placement resolves one therefore gets a second variant of a design
+ * that carries its own overhang, built without it, or the preview would show
+ * both. Every other bin shares the design's single mesh.
+ *
+ * A labeled bin whose design takes its layout label as the tab caption
+ * (`withPlacedTabCaption`) gets its own variant as well. Whether a design takes
+ * one is only known once its params load, so such a bin shows the design's
+ * mesh until its captioned one is built.
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import type { Bin, DesignId } from '@/core/types';
+import { useShallow } from 'zustand/react/shallow';
+import type { Bin, BinId, DesignId, SlantConfig } from '@/core/types';
+import type { BinParams } from '@/shared/types/bin';
 import { isOk } from '@/core/result';
-import { loadDesign, useCustomBins, type SavedDesign } from '@/features/bin-designer';
+import {
+  binDimensions,
+  loadDesign,
+  useCustomBins,
+  type SavedDesign,
+} from '@/features/bin-designer';
 import { decodeMeshData } from '@/shared/generation/meshAsset';
+import { holderMeshHashes, resolveMeshAsset } from '@/shared/generation/meshRefs';
+import { subscribeMeshFileArrivals } from '@/shared/generation/meshStore';
 import {
   binMeshCacheKey,
   itemMeshCacheKey,
@@ -34,6 +54,14 @@ import {
 import { bridgeManager, getActiveKernel } from '@/shared/generation/bridge';
 import { withSocketNozzle } from '@/shared/generation/socketNozzle';
 import { withLowProfileBase } from '@/shared/generation/lowProfileBase';
+import { resolveBinOverhang } from '@/shared/utils/drawerMargin';
+import { isTurnedPlacement, sideInDesign } from '@/shared/utils/placementTurn';
+import {
+  placementCaption,
+  takesPlacedTabCaption,
+  withPlacedTabCaption,
+} from '@/shared/utils/placedCaption';
+import { normalizeSlant } from '@/shared/utils/slantPlan';
 import { useSettingsStore } from '@/core/store';
 import { useLayoutStore } from '@/core/store/layout';
 import type { MeshData } from '@/shared/types/generation';
@@ -48,12 +76,23 @@ export interface LinkedDesignMesh {
   /** Design footprint in grid units — detects rotated (w↔d) placement. */
   readonly width: number;
   readonly depth: number;
+  /**
+   * Z (mm, mesh frame) of the body's underside: where an overhang hangs from.
+   * Parametric bins only; a stored or assembled mesh has no body to extend.
+   */
+  readonly bodyBaseMm?: number;
 }
 
 // Module-level cache shared across preview mounts. null = unsupported kind,
 // decode/generation failure, or deleted design payload.
 const meshCache = new Map<string, LinkedDesignMesh | null>();
-const MAX_CACHE_ENTRIES = 32;
+/** Bound on entries no mounted preview is using. @internal, exported for tests. */
+export const MAX_CACHE_ENTRIES = 32;
+// Keys a mounted preview is showing, refcounted across mounts. They are never
+// evicted: the loading effect only re-runs when the requested set changes, so
+// an entry evicted under a mounted preview would leave its bins as plain boxes
+// until something unrelated changed.
+const pinnedKeys = new Map<string, number>();
 // Every waiter is called when its key settles, including one registered by a
 // later mount: an effect that finds its key already in flight would otherwise
 // never hear back, since the effect that started it was cleaned up.
@@ -63,22 +102,122 @@ const inFlight = new Map<string, Set<() => void>>();
 // uncached linked designs doesn't stampede the (single-flight) worker.
 let resolveChain: Promise<void> = Promise.resolve();
 
+// An entry built while a mesh file was not on this device (its pocket uncut,
+// or no mesh at all) is shown but never final. It waits on those files; when
+// one arrives the entry turns stale and mounted previews resolve it again,
+// showing the old entry until the new one lands.
+const waitingKeys = new Map<string, ReadonlySet<string>>();
+const staleKeys = new Set<string>();
+const staleListeners = new Set<() => void>();
+let stopHearingArrivals: (() => void) | null = null;
+// Files that arrived during the resolution in progress: one it found missing
+// can land before its entry starts waiting, and would otherwise go unheard.
+let arrivedWhileResolving: Set<string> | null = null;
+
+// Request keys whose design takes a labeled placement's layout label as its tab
+// caption, per design and only for its current save. Kept apart from the mesh
+// cache because a captioned variant still needs the answer once the plain mesh
+// it was learned from has been evicted.
+const tabCaptionKeys = new Map<DesignId, { readonly updatedAt: string; keys: Set<string> }>();
+const tabCaptionListeners = new Set<() => void>();
+
+function noteTabCaption(request: MeshRequest, key: string): void {
+  const known = tabCaptionKeys.get(request.id);
+  if (known?.updatedAt === request.updatedAt) {
+    if (known.keys.has(key)) return;
+    known.keys.add(key);
+  } else {
+    tabCaptionKeys.set(request.id, { updatedAt: request.updatedAt, keys: new Set([key]) });
+  }
+  for (const listener of tabCaptionListeners) listener();
+}
+
+function markStale(keys: readonly string[]): void {
+  if (keys.length === 0) return;
+  for (const key of keys) {
+    waitingKeys.delete(key);
+    staleKeys.add(key);
+  }
+  for (const listener of staleListeners) listener();
+}
+
+function onMeshFileArrived(hash: string): void {
+  arrivedWhileResolving?.add(hash);
+  const staled: string[] = [];
+  for (const [key, hashes] of waitingKeys) if (hashes.has(hash)) staled.push(key);
+  markStale(staled);
+}
+
 /** Reset module state. @internal — for tests only. */
 export function clearLinkedDesignMeshCache(): void {
   meshCache.clear();
   inFlight.clear();
+  pinnedKeys.clear();
+  waitingKeys.clear();
+  staleKeys.clear();
+  tabCaptionKeys.clear();
+  stopHearingArrivals?.();
+  stopHearingArrivals = null;
+  arrivedWhileResolving = null;
   resolveChain = Promise.resolve();
 }
 
-// Insert an entry, evicting the least-recently-used on overflow. Recency is
-// refreshed on read by getCachedMesh, so a still-visible design is never
-// evicted by an unrelated insert (matches designGeometryCache's LRU policy).
-function setCachedMesh(key: string, entry: LinkedDesignMesh | null): void {
-  if (meshCache.size >= MAX_CACHE_ENTRIES && !meshCache.has(key)) {
-    const oldestKey = meshCache.keys().next().value;
-    if (oldestKey !== undefined) meshCache.delete(oldestKey);
+function pinKey(key: string): void {
+  pinnedKeys.set(key, (pinnedKeys.get(key) ?? 0) + 1);
+}
+
+function unpinKey(key: string): void {
+  const count = pinnedKeys.get(key) ?? 0;
+  if (count <= 1) pinnedKeys.delete(key);
+  else pinnedKeys.set(key, count - 1);
+}
+
+// Evict least-recently-used unpinned entries until at most `limit` remain.
+// Pinned entries sit outside the bound, so the cache grows to hold whatever
+// the mounted previews show.
+function evictUnpinned(limit: number): void {
+  let unpinned = 0;
+  for (const key of meshCache.keys()) if (!pinnedKeys.has(key)) unpinned++;
+  for (const key of meshCache.keys()) {
+    if (unpinned <= limit) return;
+    if (pinnedKeys.has(key)) continue;
+    meshCache.delete(key);
+    waitingKeys.delete(key);
+    staleKeys.delete(key);
+    unpinned--;
   }
+}
+
+let trimScheduled = false;
+
+// Deferred past the effect cleanup and setup React runs back to back, so a
+// requests update re-pins the meshes it still shows before anything unpinned
+// is trimmed, instead of evicting and reloading them.
+function scheduleTrim(): void {
+  if (trimScheduled) return;
+  trimScheduled = true;
+  queueMicrotask(() => {
+    trimScheduled = false;
+    evictUnpinned(MAX_CACHE_ENTRIES);
+  });
+}
+
+// Recency is refreshed on read by getCachedMesh (matches designGeometryCache's
+// LRU policy).
+function setCachedMesh(
+  key: string,
+  entry: LinkedDesignMesh | null,
+  waitingFor: readonly string[] = []
+): void {
+  meshCache.delete(key);
+  evictUnpinned(pinnedKeys.has(key) ? MAX_CACHE_ENTRIES : MAX_CACHE_ENTRIES - 1);
   meshCache.set(key, entry);
+  staleKeys.delete(key);
+  if (waitingFor.length === 0) {
+    waitingKeys.delete(key);
+    return;
+  }
+  waitingKeys.set(key, new Set(waitingFor));
 }
 
 // Read a cached entry (including a cached null miss), promoting it to
@@ -121,15 +260,67 @@ function stripLabelPlates(mesh: MeshData): MeshData {
   return rest;
 }
 
+function withoutOwnOverhang(params: BinParams): BinParams {
+  if (params.overhang === undefined) return params;
+  const { overhang: _drop, ...rest } = params;
+  return rest;
+}
+
+interface MeshRequest {
+  readonly id: DesignId;
+  readonly updatedAt: string;
+  readonly stripOwnOverhang: boolean;
+  /**
+   * A placed slant, in the design's frame, built in place of the design's own;
+   * null builds the design upright.
+   */
+  readonly slant?: SlantConfig | null;
+  readonly caption?: string;
+}
+
+function previewParams(
+  params: BinParams,
+  request: MeshRequest,
+  nozzleSizeMm: number,
+  lowProfileBase: boolean
+): BinParams {
+  const ownOverhang = request.stripOwnOverhang ? withoutOwnOverhang(params) : params;
+  // The export does the same: the placed slant replaces the design's, and the
+  // lip goes with it.
+  const source =
+    request.slant === undefined
+      ? ownOverhang
+      : normalizeSlant({ ...ownOverhang, slant: request.slant ?? undefined });
+
+  // Nozzle-merged (transient) so a socket bin's pocket matches the live print
+  // setting and shares the same cache key the designer preview persists under.
+  // The drawer decides the foot, whatever profile the design was saved with.
+  const genParams = withLowProfileBase(withSocketNozzle(source, nozzleSizeMm), lowProfileBase);
+  return request.caption === undefined
+    ? genParams
+    : withPlacedTabCaption(genParams, request.caption);
+}
+
+/**
+ * `waitingFor` collects the mesh files a result was built without, which makes
+ * the result provisional.
+ */
 async function resolveDesignMesh(
   design: SavedDesign,
   sig: string,
+  request: MeshRequest,
   nozzleSizeMm: number,
-  lowProfileBase: boolean
+  lowProfileBase: boolean,
+  waitingFor: string[]
 ): Promise<LinkedDesignMesh | null> {
   const structure = design.structure;
   if (structure?.kind === 'importedMesh' && design.envelope) {
-    const decoded = await decodeMeshData(structure.asset.data);
+    const asset = await resolveMeshAsset(structure.asset);
+    if (!asset) {
+      waitingFor.push(...holderMeshHashes(design));
+      return null;
+    }
+    const decoded = await decodeMeshData(asset.data, asset.triangleCount);
     if (!isOk(decoded)) return null;
     const { positions, indices } = decoded.value;
     const mesh: MeshData = {
@@ -170,17 +361,14 @@ async function resolveDesignMesh(
 
   const params = design.params;
   if (!params) return null;
-
-  // Nozzle-merged (transient) so a socket bin's pocket matches the live print
-  // setting and shares the same cache key the designer preview persists under.
-  // The drawer decides the foot, whatever profile the design was saved with.
-  const genParams = withLowProfileBase(withSocketNozzle(params, nozzleSizeMm), lowProfileBase);
+  const genParams = previewParams(params, request, nozzleSizeMm, lowProfileBase);
   // Kernel-namespaced: this reader returns a hit and stops, with no regeneration
   // behind it, so a cross-engine hit would survive until LRU eviction.
   const persistKey = binMeshCacheKey(genParams, getActiveKernel());
+  const bodyBaseMm = binDimensions(genParams).floorZ;
   const persisted = await loadPersistedBinMesh(persistKey);
   if (persisted) {
-    return { sig, mesh: persisted, width: params.width, depth: params.depth };
+    return { sig, mesh: persisted, width: params.width, depth: params.depth, bodyBaseMm };
   }
 
   // Cold path: generate the exact preview mesh in the worker (same flow as
@@ -194,15 +382,16 @@ async function resolveDesignMesh(
     // designer result could alias in. Strip them rather than bake plate buffers
     // into every cross-session cache entry.
     const mesh = stripLabelPlates(result.mesh);
-    savePersistedBinMesh(persistKey, mesh);
-    return { sig, mesh, width: params.width, depth: params.depth };
+    if (result.meshesPending) waitingFor.push(...holderMeshHashes(design));
+    else savePersistedBinMesh(persistKey, mesh);
+    return { sig, mesh, width: params.width, depth: params.depth, bodyBaseMm };
   } finally {
     bridgeManager.release();
   }
 }
 
 function enqueueResolve(
-  id: DesignId,
+  request: MeshRequest,
   key: string,
   nozzleSizeMm: number,
   lowProfileBase: boolean,
@@ -215,79 +404,183 @@ function enqueueResolve(
   }
   inFlight.set(key, new Set([onSettled]));
   resolveChain = resolveChain.then(async () => {
+    stopHearingArrivals ??= subscribeMeshFileArrivals(onMeshFileArrived);
+    const arrived = new Set<string>();
+    arrivedWhileResolving = arrived;
+    let missedArrival = false;
+    let takesCaption = false;
     try {
-      const designResult = await loadDesign(id);
-      const entry = isOk(designResult)
-        ? await resolveDesignMesh(designResult.value, key, nozzleSizeMm, lowProfileBase)
+      // The inspector rewrites a bin's label on every keystroke, so most
+      // caption variants have no viewer left by the time their turn comes.
+      if (request.caption !== undefined && !pinnedKeys.has(key)) return;
+      const designResult = await loadDesign(request.id);
+      const waitingFor: string[] = [];
+      const design = isOk(designResult) ? designResult.value : null;
+      const entry = design
+        ? await resolveDesignMesh(design, key, request, nozzleSizeMm, lowProfileBase, waitingFor)
         : null;
-      setCachedMesh(key, entry);
+      setCachedMesh(key, entry, waitingFor);
+      missedArrival = waitingFor.some((hash) => arrived.has(hash));
+      const params = design?.params;
+      takesCaption =
+        request.caption === undefined &&
+        params !== undefined &&
+        takesPlacedTabCaption(previewParams(params, request, nozzleSizeMm, lowProfileBase));
     } catch {
       // Worker init/generation failure — cache the miss so we don't retry
       // every render; a design re-save (new updatedAt) retries naturally.
       setCachedMesh(key, null);
     } finally {
+      arrivedWhileResolving = null;
       const settled = inFlight.get(key);
       inFlight.delete(key);
       for (const waiter of settled ?? []) waiter();
+      if (missedArrival) markStale([key]);
+      // After the plain mesh is cached, so a bin moving to its captioned
+      // variant can show this one while that builds.
+      if (takesCaption) noteTabCaption(request, key);
     }
   });
 }
 
 /**
- * Resolve real design meshes for every design linked from the given bins.
- * Returns a map keyed by design id; designs still loading (or unresolvable)
- * are absent and their bins keep the stylized box rendering.
+ * Resolve the real design mesh for every linked bin. Returns a map keyed by
+ * bin id; bins whose mesh is still loading (or unresolvable) are absent and
+ * keep the stylized box rendering. Bins sharing a mesh share the same entry.
  */
-export function useLinkedDesignMeshes(bins: Bin[]): Map<DesignId, LinkedDesignMesh> {
+export function useLinkedDesignMeshes(bins: Bin[]): Map<BinId, LinkedDesignMesh> {
   const registry = useCustomBins();
   const [loadTick, setLoadTick] = useState(0);
+  const [staleTick, setStaleTick] = useState(0);
+  useEffect(() => {
+    const onStale = (): void => setStaleTick((tick) => tick + 1);
+    staleListeners.add(onStale);
+    return () => {
+      staleListeners.delete(onStale);
+    };
+  }, []);
+  const [captionTick, setCaptionTick] = useState(0);
+  useEffect(() => {
+    const onCaption = (): void => setCaptionTick((tick) => tick + 1);
+    tabCaptionListeners.add(onCaption);
+    return () => {
+      tabCaptionListeners.delete(onCaption);
+    };
+  }, []);
   // Part of the cache key so a nozzle change re-resolves socket-bin meshes at the
   // new pocket clearance. Non-socket designs re-resolve too but hit the persisted
   // mesh cache (their key is nozzle-invariant), so it stays cheap.
   const nozzleSizeMm = useSettingsStore((state) => state.settings.printSettings.nozzleSizeMm);
-  const lowProfileBase = useLayoutStore((state) => state.layout.lowProfileBase === true);
+  const { lowProfileBase, drawer, baseplate } = useLayoutStore(
+    useShallow((state) => ({
+      lowProfileBase: state.layout.lowProfileBase === true,
+      drawer: state.layout.drawer,
+      baseplate: state.layout.baseplateParams,
+    }))
+  );
 
-  const linkedRefs = useMemo(() => {
+  const { requests, keyByBin, fallbackByBin } = useMemo(() => {
+    // captionTick re-runs this memo when a design turns out to take captions.
+    void captionTick;
     const registryById = new Map(registry.map((ref) => [ref.id, ref]));
-    const refs = new Map<DesignId, string>();
+    const requests = new Map<string, MeshRequest>();
+    const keyByBin = new Map<BinId, string>();
+    // The plain mesh a captioned bin shows until its own is built.
+    const fallbackByBin = new Map<BinId, string>();
     for (const bin of bins) {
-      if (bin.linkedDesignId === undefined || refs.has(bin.linkedDesignId)) continue;
+      if (bin.linkedDesignId === undefined) continue;
       const ref = registryById.get(bin.linkedDesignId);
+      if (!ref) continue;
+      const parametric = ref.kind === undefined || ref.kind === 'bin';
+      // Only a parametric bin has a `params.overhang` to strip; an assembly's
+      // `overhangMm` is parts standing past its plate. `overhangMm` answers
+      // "does the design carry one" without loading its params; with none,
+      // stripping changes nothing and the bin keeps the shared mesh.
+      const placedOverhang = resolveBinOverhang(bin, drawer, baseplate, ref.kind) !== null;
+      const stripOwnOverhang = parametric && ref.overhangMm !== undefined && placedOverhang;
+      // As the export builds it: an overhang of the placement's own keeps the
+      // bin upright, even a design that leans, and a placed slant faces the
+      // drawer, so a turned placement builds it turned back.
+      let slant: SlantConfig | null | undefined;
+      if (parametric && placedOverhang) {
+        slant = ref.slant?.config ? null : undefined;
+      } else if (parametric && bin.slant) {
+        slant = isTurnedPlacement(bin, ref)
+          ? { ...bin.slant, side: sideInDesign(bin.slant.side) }
+          : bin.slant;
+      }
       // Quantize the nozzle so float noise (e.g. 0.6000000000000001) can't
       // fragment the cache key into avoidable misses.
-      if (ref)
-        refs.set(
-          bin.linkedDesignId,
-          `${ref.id}:${ref.updatedAt}:n${nozzleSizeMm.toFixed(3)}${
-            // Only a parametric bin is rebuilt on the layout's foot.
-            lowProfileBase && (ref.kind === undefined || ref.kind === 'bin') ? ':lp' : ''
-          }`
-        );
+      const key = `${ref.id}:${ref.updatedAt}:n${nozzleSizeMm.toFixed(3)}${
+        // Only a parametric bin is rebuilt on the layout's foot.
+        lowProfileBase && parametric ? ':lp' : ''
+      }${stripOwnOverhang ? ':no-own-overhang' : ''}${
+        slant === null
+          ? ':upright'
+          : slant
+            ? `:slant${slant.angleDeg}${slant.side}${slant.endSupport ? 's' : ''}`
+            : ''
+      }`;
+      const request: MeshRequest = {
+        id: ref.id,
+        updatedAt: ref.updatedAt,
+        stripOwnOverhang,
+        ...(slant !== undefined ? { slant } : {}),
+      };
+      const caption =
+        tabCaptionKeys.get(ref.id)?.keys.has(key) === true ? placementCaption(bin.label) : null;
+      if (caption === null) {
+        keyByBin.set(bin.id, key);
+        if (!requests.has(key)) requests.set(key, request);
+        continue;
+      }
+      const captionKey = `${key}:caption${JSON.stringify(caption)}`;
+      keyByBin.set(bin.id, captionKey);
+      fallbackByBin.set(bin.id, key);
+      if (!requests.has(captionKey)) requests.set(captionKey, { ...request, caption });
     }
-    return refs;
-  }, [bins, registry, nozzleSizeMm, lowProfileBase]);
+    return { requests, keyByBin, fallbackByBin };
+  }, [bins, registry, nozzleSizeMm, lowProfileBase, drawer, baseplate, captionTick]);
 
   useEffect(() => {
     let cancelled = false;
     const onSettled = (): void => {
       if (!cancelled) setLoadTick((tick) => tick + 1);
     };
-    for (const [id, key] of linkedRefs) {
-      if (!meshCache.has(key)) enqueueResolve(id, key, nozzleSizeMm, lowProfileBase, onSettled);
+    // Pinned for as long as this preview shows them, including the plain mesh a
+    // captioned bin shows until its own is built. The has-check below still
+    // reloads any evicted before this effect ran, between render and commit.
+    const shown = [...requests.keys(), ...fallbackByBin.values()];
+    for (const key of shown) pinKey(key);
+    for (const [key, request] of requests) {
+      if (!meshCache.has(key) || staleKeys.has(key))
+        enqueueResolve(request, key, nozzleSizeMm, lowProfileBase, onSettled);
     }
     return () => {
       cancelled = true;
+      for (const key of shown) unpinKey(key);
+      scheduleTrim();
     };
-  }, [linkedRefs, nozzleSizeMm, lowProfileBase]);
+  }, [requests, fallbackByBin, nozzleSizeMm, lowProfileBase, staleTick]);
 
   return useMemo(() => {
     // loadTick re-runs this memo when async resolutions land in the cache
     void loadTick;
-    const meshes = new Map<DesignId, LinkedDesignMesh>();
-    for (const [id, key] of linkedRefs) {
-      const entry = getCachedMesh(key);
+    const byKey = new Map<string, LinkedDesignMesh | null>();
+    const cached = (key: string): LinkedDesignMesh | null => {
+      let entry = byKey.get(key);
+      if (entry === undefined) {
+        entry = getCachedMesh(key) ?? null;
+        byKey.set(key, entry);
+      }
+      return entry;
+    };
+    const meshes = new Map<BinId, LinkedDesignMesh>();
+    for (const [id, key] of keyByBin) {
+      const fallback = fallbackByBin.get(id);
+      const entry = cached(key) ?? (fallback === undefined ? null : cached(fallback));
       if (entry) meshes.set(id, entry);
     }
     return meshes;
-  }, [linkedRefs, loadTick]);
+  }, [keyByBin, fallbackByBin, loadTick]);
 }

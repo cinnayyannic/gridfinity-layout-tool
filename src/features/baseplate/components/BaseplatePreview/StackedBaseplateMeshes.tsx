@@ -21,12 +21,13 @@ import {
   stackGroupsFromTiling,
   planPhysicalStacks,
   stackHeightCap,
+  stackedPlateHeightMm,
+  DEFAULT_PLATE_FLIP,
   planPlateFlip,
   isUnstackedSplit,
   type StackMeshArrays,
 } from '../../utils/stackPrint';
 import { buildStackPreviewMeshes, type StackPreviewTower } from '../../utils/stackPreview';
-import { plateProfileHeightMm } from '@/shared/printSettings/gridfinityGeometry';
 
 const EMPTY_GEO = { vertices: null, normals: null, indices: null, edgeVertices: null } as const;
 const EMPTY_F32 = new Float32Array(0);
@@ -103,7 +104,8 @@ export function StackedBaseplateMeshes({
   const singleMesh = useBaseplatePageStore((s) => s.generation.mesh);
   const pieceMeshes = useBaseplatePageStore((s) => s.pieceMeshes);
 
-  const preview = useMemo(() => {
+  // Kept apart from the separation slider: a shaped plate's flip scans its outline.
+  const towerPlan = useMemo(() => {
     const fullParams = buildFullParams(
       baseplateParams,
       drawerWidth,
@@ -124,14 +126,16 @@ export function StackedBaseplateMeshes({
       fullParams,
       stack.copies ?? STACK_PRINT_DEFAULT_COPIES
     );
-    const cap = stackHeightCap(maxPrintHeightMm, plateProfileHeightMm(lowProfileBase), stack.gapMm);
+    const cap = stackHeightCap(maxPrintHeightMm, stackedPlateHeightMm(lowProfileBase), stack.gapMm);
     const plan = planPhysicalStacks(groups, cap);
     const isSplit = tiling?.isSplit ?? false;
 
     // The unsplit mesh is generated from the detach-adjusted body params
     // (padding-free on detached sides), so the flip must be planned from the
     // same params or flipped copies re-seat off-axis by the removed padding.
-    const singleFlip = planPlateFlip(bodyParamsForDetach(fullParams));
+    const singleFlip = isSplit
+      ? DEFAULT_PLATE_FLIP
+      : planPlateFlip(bodyParamsForDetach(fullParams));
 
     // Index pieces/meshes by label once: the loop and the spatial-positioning
     // pass below both look up by label, so a per-tower find() would be O(n²).
@@ -174,10 +178,7 @@ export function StackedBaseplateMeshes({
         })
       : towers;
 
-    return {
-      meshes: buildStackPreviewMeshes(positionedTowers, stack, separationMm, gridUnitMm),
-      plan: filteredPlan,
-    };
+    return { towers: positionedTowers, plan: filteredPlan };
   }, [
     baseplateParams,
     drawerWidth,
@@ -196,8 +197,16 @@ export function StackedBaseplateMeshes({
     singleMesh,
     pieceMeshes,
     stack,
-    separationMm,
   ]);
+
+  const preview = useMemo(
+    () =>
+      towerPlan && {
+        meshes: buildStackPreviewMeshes(towerPlan.towers, stack, separationMm, gridUnitMm),
+        plan: towerPlan.plan,
+      },
+    [towerPlan, stack, separationMm, gridUnitMm]
+  );
 
   const meshResult = preview?.meshes ?? null;
   const plan = preview?.plan ?? [];

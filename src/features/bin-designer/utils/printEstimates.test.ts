@@ -13,6 +13,8 @@ import {
   LOW_PROFILE_DETACHABLE_FEET_SCALE,
 } from '@/shared/printSettings';
 import { footKind, resolveDetachableFeet } from '@/shared/utils/detachableFeetPlan';
+import { DIVIDER_FLOOR_GROOVE_DEPTH } from '@/shared/utils/slotMath';
+import { DEFAULT_TRAY_BOTTOM } from '@/shared/types/bin';
 import type { BinParams } from '@/features/bin-designer/types';
 
 describe('printEstimates', () => {
@@ -77,6 +79,53 @@ describe('printEstimates', () => {
       const short = estimatePrint({ ...DEFAULT_BIN_PARAMS, height: 2 });
       const tall = estimatePrint({ ...DEFAULT_BIN_PARAMS, height: 8 });
       expect(tall.gramsFilament).toBeGreaterThan(short.gramsFilament);
+    });
+
+    it('a thicker wall uses more material', () => {
+      const volumes = [0.4, 0.95, 1.2, 1.6, 2.0, 2.4].map(
+        (wallThickness) =>
+          estimatePrint({ ...DEFAULT_BIN_PARAMS, width: 2, depth: 1, height: 6, wallThickness })
+            .volumeMm3
+      );
+      for (let i = 1; i < volumes.length; i++) {
+        expect(volumes[i]).toBeGreaterThan(volumes[i - 1]);
+      }
+    });
+
+    it('moves the filament weight a reporter would compare (2x1x6, 1.2 to 2.0mm walls)', () => {
+      const thin = estimatePrint({ ...DEFAULT_BIN_PARAMS, width: 2, depth: 1, height: 6 });
+      const thick = estimatePrint({
+        ...DEFAULT_BIN_PARAMS,
+        width: 2,
+        depth: 1,
+        height: 6,
+        wallThickness: 2,
+      });
+      expect(thick.gramsFilament - thin.gramsFilament).toBeGreaterThan(5);
+    });
+
+    it('drops the stacking lip at the size the exported 2x2 solid loses', () => {
+      const lipped = estimatePrint({ ...DEFAULT_BIN_PARAMS, width: 2, depth: 2, height: 3 });
+      const open = estimatePrint({
+        ...DEFAULT_BIN_PARAMS,
+        width: 2,
+        depth: 2,
+        height: 3,
+        base: { ...DEFAULT_BIN_PARAMS.base, stackingLip: false },
+      });
+      expect(lipped.volumeMm3 - open.volumeMm3).toBeGreaterThan(2900);
+      expect(lipped.volumeMm3 - open.volumeMm3).toBeLessThan(3150);
+    });
+
+    it('leaves a solid bin unchanged by its wall, which only trades fill for wall', () => {
+      const solid = (wallThickness: number): number =>
+        estimatePrint({
+          ...DEFAULT_BIN_PARAMS,
+          style: 'solid',
+          base: { ...DEFAULT_BIN_PARAMS.base, solid: true },
+          wallThickness,
+        }).volumeMm3;
+      expect(Math.abs(solid(2.4) - solid(1.2)) / solid(1.2)).toBeLessThan(0.02);
     });
 
     it('slotted style uses similar material to standard', () => {
@@ -322,13 +371,26 @@ describe('printEstimates', () => {
     // ─── Honeycomb wall reduction ─────────────────────────────────────
 
     it('honeycomb walls reduce volume', () => {
-      const standard = estimatePrint(DEFAULT_BIN_PARAMS);
+      const standard = estimatePrint({ ...DEFAULT_BIN_PARAMS, height: 6 });
       const honeycomb = estimatePrint({
         ...DEFAULT_BIN_PARAMS,
         height: 6,
         wallPattern: { enabled: true, pattern: 'honeycomb' as const },
       });
       expect(honeycomb.volumeMm3).toBeLessThan(standard.volumeMm3);
+    });
+
+    it('removes what the exported 3x1x8 honeycomb loses per mm of wall', () => {
+      const removal = (wallThickness: number): number => {
+        const plain = { ...DEFAULT_BIN_PARAMS, height: 8, depth: 1, width: 3, wallThickness };
+        return (
+          estimatePrint(plain).volumeMm3 -
+          estimatePrint({ ...plain, wallPattern: { enabled: true, pattern: 'honeycomb' as const } })
+            .volumeMm3
+        );
+      };
+      expect(removal(2) / 2).toBeCloseTo(9024, -2);
+      expect(removal(1.2) / 1.2).toBeCloseTo(9024, -2);
     });
 
     it('honeycomb walls have no effect on short bins', () => {
@@ -490,6 +552,27 @@ describe('printEstimates', () => {
         estimatePrint(flat).volumeMm3 - estimatePrint({ ...flat, floorPattern }).volumeMm3;
       expect(flatSaving).toBeGreaterThan(0);
       expect(flatSaving).toBeLessThan(socketSaving);
+    });
+
+    it('drainage holes through a flat floor go through the divider groove’s extra floor too', () => {
+      const flat: BinParams = {
+        ...DEFAULT_BIN_PARAMS,
+        width: 2,
+        depth: 2,
+        height: 4,
+        style: 'slotted',
+        base: { ...DEFAULT_BIN_PARAMS.base, style: 'flat' },
+      };
+      const floorPattern = { enabled: true, pattern: 'round' as const, scale: 0.5 };
+      const saving = (floorGroove: boolean): number => {
+        const p = { ...flat, dividerPieces: { ...flat.dividerPieces, floorGroove } };
+        return estimatePrint(p).volumeMm3 - estimatePrint({ ...p, floorPattern }).volumeMm3;
+      };
+      const wall = DEFAULT_BIN_PARAMS.wallThickness;
+      expect(saving(true) / saving(false)).toBeCloseTo(
+        (wall + DIVIDER_FLOOR_GROOVE_DEPTH) / wall,
+        3
+      );
     });
 
     it('half sockets quarter each foot, so the holes remove less', () => {
@@ -661,19 +744,21 @@ describe('printEstimates', () => {
           compartments: { cols: 2, rows: 1, thickness: 1.2, cells: [0, 0] },
           label: enabledLabel,
         };
-        const split: BinParams = {
+        const single: BinParams = {
           ...merged,
-          compartments: { cols: 2, rows: 1, thickness: 1.2, cells: [0, 1] },
+          compartments: { cols: 1, rows: 1, thickness: 1.2, cells: [0] },
         };
         const withoutLabel = (p: BinParams) =>
           estimatePrint({ ...p, label: { ...p.label, enabled: false } }).volumeMm3;
 
         const mergedLabelVol = estimatePrint(merged).volumeMm3 - withoutLabel(merged);
-        const splitLabelVol = estimatePrint(split).volumeMm3 - withoutLabel(split);
+        const singleLabelVol = estimatePrint(single).volumeMm3 - withoutLabel(single);
 
-        // Shelf area is identical (one wide shelf vs two half-width shelves),
-        // but the merged version has one support instead of two.
-        expect(mergedLabelVol).toBeLessThan(splitLabelVol);
+        // A merged row is the same compartment as an unsplit bin. Comparing
+        // against the split row instead would hang on where each tab's gusset
+        // count crosses a ceil boundary, which moves with the wall.
+        expect(mergedLabelVol).toBeGreaterThan(0);
+        expect(mergedLabelVol).toBe(singleLabelVol);
       });
 
       it('accounts for interior-row back walls (1x3 vertical stack)', () => {
@@ -1009,5 +1094,91 @@ describe('printEstimates', () => {
     }).volumeMm3;
     expect(both).toBe(feetOnly);
     expect(both).toBeGreaterThan(0);
+  });
+});
+
+describe('socketed bins keep the fitted shell', () => {
+  // Pinned so the flat shell model can never leak into a socketed estimate.
+  const base = DEFAULT_BIN_PARAMS.base;
+  it.each<[string, Partial<BinParams>, number]>([
+    ['the default 2x2x6', { width: 2, depth: 2, height: 6 }, 59770],
+    [
+      'a lipless 3x2x6 at 0.8mm',
+      { width: 3, depth: 2, height: 6, wallThickness: 0.8, base: { ...base, stackingLip: false } },
+      76110,
+    ],
+    [
+      'a magnet 1x1x3 at 2.0mm',
+      { width: 1, depth: 1, height: 3, wallThickness: 2, base: { ...base, style: 'magnet' } },
+      16330,
+    ],
+    [
+      'a slotted 2x2x3 at 2.4mm',
+      { width: 2, depth: 2, height: 3, wallThickness: 2.4, style: 'slotted' },
+      56949,
+    ],
+  ])('prices %s as before', (_label, over, volume) => {
+    expect(estimatePrint({ ...DEFAULT_BIN_PARAMS, ...over }).volumeMm3).toBe(volume);
+  });
+});
+
+describe('tray click rails', () => {
+  it('prices a tray too small for any rail the same whichever walls ask for one', () => {
+    const tray = (front: boolean, back: boolean, left: boolean, right: boolean): BinParams => ({
+      ...DEFAULT_BIN_PARAMS,
+      width: 0.5,
+      depth: 0.5,
+      height: 3,
+      gridUnitMm: 20,
+      base: {
+        ...DEFAULT_BIN_PARAMS.base,
+        style: 'lid',
+        trayBottom: { ...DEFAULT_TRAY_BOTTOM, clickRails: { front, back, left, right } },
+      },
+    });
+    expect(estimatePrint(tray(true, true, true, true)).volumeMm3).toBe(
+      estimatePrint(tray(true, false, false, false)).volumeMm3
+    );
+  });
+});
+
+describe('solid fill on a custom shape', () => {
+  it('fills the share of mask cells the shape keeps', () => {
+    const fill = (over: Partial<BinParams>): number => {
+      const hollow = { ...DEFAULT_BIN_PARAMS, width: 2, depth: 2, height: 3, ...over };
+      const solid: BinParams = {
+        ...hollow,
+        style: 'solid',
+        base: { ...DEFAULT_BIN_PARAMS.base, solid: true },
+        cutoutConfig: { topOffset: 0 },
+      };
+      return estimatePrint(solid).volumeMm3 - estimatePrint(hollow).volumeMm3;
+    };
+    const lShape = {
+      cols: 4,
+      rows: 4,
+      cells: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0] as (0 | 1)[],
+    };
+    expect(fill({ cellMask: lShape }) / fill({})).toBeCloseTo(12 / 16, 3);
+  });
+});
+
+describe('solid fill keys on base.solid, as the generator does', () => {
+  const hollow: BinParams = { ...DEFAULT_BIN_PARAMS, width: 2, depth: 2, height: 3 };
+
+  it('prices a solid style without base.solid as the hollow bin it exports', () => {
+    const styleOnly: BinParams = {
+      ...hollow,
+      style: 'solid',
+      base: { ...hollow.base, solid: false },
+    };
+    expect(estimatePrint(styleOnly).volumeMm3).toBe(estimatePrint(hollow).volumeMm3);
+  });
+
+  it('fills a bin with base.solid set, whatever its style says', () => {
+    const baseOnly: BinParams = { ...hollow, base: { ...hollow.base, solid: true } };
+    const both: BinParams = { ...baseOnly, style: 'solid' };
+    expect(estimatePrint(baseOnly).volumeMm3).toBe(estimatePrint(both).volumeMm3);
+    expect(estimatePrint(baseOnly).volumeMm3).toBeGreaterThan(2 * estimatePrint(hollow).volumeMm3);
   });
 });

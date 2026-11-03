@@ -25,7 +25,9 @@ import type { BinParams } from '@/shared/types/bin';
 import { isNestingBase, retentionBossRadius, retentionMagnetInset } from '@/shared/types/bin';
 import { retentionMagnetPositions } from '@/shared/utils/retentionMagnetPlacement';
 import { resolveTrayBottomInputs } from './trayBottomInputs';
-import { isPartialMask } from '@/shared/utils/cellMask';
+import { isPartialMask, isRegionFilled } from '@/shared/utils/cellMask';
+import { outerCornerHoleFilter } from '@/shared/generation/cornerHoles';
+import { DEFAULT_SOCKET_CELL_PLAN } from '@/shared/generation/socketCellPlan';
 import type { PatternPanelSpec } from './dividerPatterns';
 import type { WorldKeepOut } from './dividerPatterns';
 import { scoopKeepOuts } from './dividerPatterns';
@@ -37,7 +39,7 @@ import { filledSocketCells } from './socketBuilder';
 import { cellHostsAttachmentHoles, magnetPositionsForCell } from './baseplateMagnets';
 import { footPinPositions, resolveDetachableFeet } from '@/shared/utils/detachableFeetPlan';
 import { DETACHABLE_PIN_HOLE_DIAMETER_MM } from '@/shared/types/bin';
-import { forEachCell } from './cellDecomposition';
+import { forEachCell, type CellInfo } from './cellDecomposition';
 import { FLOOR_PATTERN_BORDER, floorWindowInset } from './floorPatternWindow';
 import { CLEARANCE, COPLANAR_MARGIN } from './generatorConstants';
 import { DEFAULT_MAGNET_ANCHOR } from '@/core/types';
@@ -107,7 +109,7 @@ function inflate(box: WorldKeepOut, by: number): WorldKeepOut {
  * pattern window (5.85mm and 14.78mm from a cell centre against a 16.30mm
  * half-span), so this is not a case the window inset already covers.
  */
-function pinKeepOuts(params: BinParams, dim: BinDimensions): WorldKeepOut[] {
+export function pinKeepOuts(params: BinParams, dim: BinDimensions): WorldKeepOut[] {
   if (!dim.detachableFeet) return [];
   const resolved = resolveDetachableFeet(params);
   const radius = DETACHABLE_PIN_HOLE_DIAMETER_MM / 2;
@@ -164,37 +166,58 @@ function attachmentKeepOuts(params: BinParams, dim: BinDimensions): WorldKeepOut
     dim.withScrew ? params.base.screwDiameter / 2 : 0
   );
   if (radius <= 0) return [];
+  const keepOut = ([x, y]: readonly [number, number]): WorldKeepOut => ({
+    xMin: x - radius,
+    xMax: x + radius,
+    yMin: y - radius,
+    yMax: y + radius,
+    zMin: 0,
+    zMax: 0,
+  });
 
-  const out: WorldKeepOut[] = [];
-  forEachCell(
-    params.width,
-    params.depth,
-    (cell) => {
-      if (!cellHostsAttachmentHoles(cell, radius, dim.gridUnitMmX, dim.gridUnitMmY)) return;
-      for (const [x, y] of magnetPositionsForCell(
-        cell,
-        radius,
-        dim.gridUnitMmX,
-        dim.gridUnitMmY,
-        params.magnetAnchor ?? DEFAULT_MAGNET_ANCHOR
-      )) {
-        out.push({
-          xMin: x - radius,
-          xMax: x + radius,
-          yMin: y - radius,
-          yMax: y + radius,
-          zMin: 0,
-          zMax: 0,
-        });
-      }
-    },
-    {
-      gridUnitMm: { x: dim.gridUnitMmX, y: dim.gridUnitMmY },
-      fractionalEdgeX: params.fractionalEdgeX,
-      fractionalEdgeY: params.fractionalEdgeY,
-    }
-  );
-  return out;
+  const pitch = { x: dim.gridUnitMmX, y: dim.gridUnitMmY };
+  const anchor = params.magnetAnchor ?? DEFAULT_MAGNET_ANCHOR;
+  const sitesOf = (cell: CellInfo): Array<[number, number]> =>
+    cellHostsAttachmentHoles(cell, radius, pitch.x, pitch.y)
+      ? magnetPositionsForCell(cell, radius, pitch.x, pitch.y, anchor)
+      : [];
+  const edge = { x: params.fractionalEdgeX, y: params.fractionalEdgeY };
+  const cells: CellInfo[] = [];
+  forEachCell(params.width, params.depth, (cell) => cells.push(cell), {
+    gridUnitMm: pitch,
+    fractionalEdgeX: edge.x,
+    fractionalEdgeY: edge.y,
+  });
+
+  if (!dim.cornerHolesOnly) return cells.flatMap(sitesOf).map(keepOut);
+
+  // The corners are taken over the holes the active builder actually drills.
+  // Detachable feet sit on whole cells only, and the lightweight base walks the
+  // socket cells, which split a partly removed cell into halves.
+  if (dim.detachableFeet) {
+    const resolved = resolveDetachableFeet(params);
+    return (resolved.screw?.positions ?? resolved.magnet?.positions ?? []).map(keepOut);
+  }
+  const drilled = dim.lightweight
+    ? filledSocketCells(
+        params.width,
+        params.depth,
+        params.cellMask,
+        pitch,
+        DEFAULT_SOCKET_CELL_PLAN,
+        edge
+      ).flatMap(sitesOf)
+    : cells.filter((cell) => cellInMask(params, cell, pitch.x, pitch.y)).flatMap(sitesOf);
+  return drilled.filter(outerCornerHoleFilter(drilled)).map(keepOut);
+}
+
+function cellInMask(params: BinParams, cell: CellInfo, pitchX: number, pitchY: number): boolean {
+  if (!isPartialMask(params.cellMask)) return true;
+  const leftUnit =
+    (cell.centerX + (params.width * pitchX) / 2 - (cell.widthUnits * pitchX) / 2) / pitchX;
+  const bottomUnit =
+    (cell.centerY + (params.depth * pitchY) / 2 - (cell.depthUnits * pitchY) / 2) / pitchY;
+  return isRegionFilled(params.cellMask, leftUnit, bottomUnit, cell.widthUnits, cell.depthUnits);
 }
 
 /**
@@ -204,8 +227,17 @@ function attachmentKeepOuts(params: BinParams, dim: BinDimensions): WorldKeepOut
  * A tilted divider contributes its axis-aligned bounding box, which clears more
  * than the wall strictly covers — the safe direction, and the same convention
  * `dividerPatterns` uses for label tabs.
+ *
+ * `span` is the band of body Z the caller needs clear. A leaning divider
+ * answers with its true section over that band: `buildLeaningPrism` widens it
+ * past the thickness and slides it from the foot, at the floor slab's underside
+ * (Z=0), toward the top edge.
  */
-function standingFeatureKeepOuts(params: BinParams, dim: BinDimensions): WorldKeepOut[] {
+export function standingFeatureKeepOuts(
+  params: BinParams,
+  dim: BinDimensions,
+  span: { readonly z0: number; readonly z1: number }
+): WorldKeepOut[] {
   const { innerW, innerD, innerOffsetX, innerOffsetY } = dim;
   const out: WorldKeepOut[] = [];
 
@@ -229,15 +261,24 @@ function standingFeatureKeepOuts(params: BinParams, dim: BinDimensions): WorldKe
     );
     for (const seg of interiorDividerSegments(params, innerW, innerD, dividerHeight)) {
       const rad = (seg.rotateZ * Math.PI) / 180;
-      const halfX = Math.abs(Math.cos(rad)) * (seg.wallLen / 2) + Math.abs(Math.sin(rad)) * half;
-      const halfY = Math.abs(Math.sin(rad)) * (seg.wallLen / 2) + Math.abs(Math.cos(rad)) * half;
+      const driftX = seg.x - seg.footX;
+      const driftY = seg.y - seg.footY;
+      const swept = dividerHeight > 0;
+      const across = swept
+        ? (half * Math.hypot(Math.hypot(driftX, driftY), dividerHeight)) / dividerHeight
+        : half;
+      const halfX = Math.abs(Math.cos(rad)) * (seg.wallLen / 2) + Math.abs(Math.sin(rad)) * across;
+      const halfY = Math.abs(Math.sin(rad)) * (seg.wallLen / 2) + Math.abs(Math.cos(rad)) * across;
+      const at = (z: number): number => (swept ? Math.min(1, Math.max(0, z / dividerHeight)) : 0);
+      const t0 = at(span.z0);
+      const t1 = at(span.z1);
       // Keyed to the FOOT, not the top edge: this keep-out is the floor
       // footprint, and a leaning divider stands nowhere near `seg.x/y` there.
       out.push({
-        xMin: seg.footX - halfX,
-        xMax: seg.footX + halfX,
-        yMin: seg.footY - halfY,
-        yMax: seg.footY + halfY,
+        xMin: seg.footX - halfX + Math.min(driftX * t0, driftX * t1),
+        xMax: seg.footX + halfX + Math.max(driftX * t0, driftX * t1),
+        yMin: seg.footY - halfY + Math.min(driftY * t0, driftY * t1),
+        yMax: seg.footY + halfY + Math.max(driftY * t0, driftY * t1),
         zMin: 0,
         zMax: 0,
       });
@@ -284,7 +325,11 @@ function localKeepOuts(
  * Every returned window is already inset for the socket taper and the wall, so
  * the builder only has to fit elements inside it.
  */
-export function planFloorPattern(params: BinParams, dim: BinDimensions): FloorPatternPlan | null {
+export function planFloorPattern(
+  params: BinParams,
+  dim: BinDimensions,
+  extraKeepOuts: readonly WorldKeepOut[] = []
+): FloorPatternPlan | null {
   if (!floorPatternApplies(params, dim)) return null;
 
   const inset = floorWindowInset(params.wallThickness);
@@ -295,7 +340,9 @@ export function planFloorPattern(params: BinParams, dim: BinDimensions): FloorPa
   const worldKeepOuts = [
     ...attachmentKeepOuts(params, dim),
     ...pinKeepOuts(params, dim),
-    ...standingFeatureKeepOuts(params, dim),
+    // A hole runs up through the whole slab, where the divider's root sits.
+    ...standingFeatureKeepOuts(params, dim, { z0: 0, z1: dim.floorThickness }),
+    ...extraKeepOuts,
   ].map((k) => inflate(k, border));
 
   const windows: FloorPatternWindow[] = [];

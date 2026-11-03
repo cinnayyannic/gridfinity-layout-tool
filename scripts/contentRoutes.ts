@@ -30,4 +30,10 @@ export const CONTENT_SLUGS = [
   'gridfinity-kitchen-drawer',
   'gridfinity-software',
   'gridfinity-cutout-generator',
+  'gridfinity-drawers',
+  'gridfinity-ikea-alex',
+  'gridfinity-milwaukee-packout',
+  'gridfinity-ikea-kallax',
+  'gridfinity-ikea-malm',
+  'gridfinity-ikea-helmer',
 ] as const;

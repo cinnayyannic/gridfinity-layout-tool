@@ -12,6 +12,7 @@ import type {
   Cutout,
   CutoutArrayConfig,
   CutoutColorScope,
+  CutoutSplit,
   CutoutToggleProperties,
   ReorderDirection,
   GroupOp,
@@ -19,8 +20,8 @@ import type {
 import { DEFAULT_GROUP_OP, DEFAULT_CUTOUT_COLOR_SCOPE } from '../../types';
 import { canArray } from '@/shared/utils/cutoutArray';
 import { withTextFootprint } from '@/shared/utils/cutoutLabel';
-import type { MeshAsset } from '@/shared/generation/meshAsset';
-import { MAX_MESH_ASSETS_PER_DESIGN } from '@/shared/generation/meshAsset';
+import type { MeshAssetEntry } from '@/shared/generation/meshAsset';
+import { MAX_MESH_TRIANGLES_PER_DESIGN, meshTrianglesTotal } from '@/shared/generation/meshAsset';
 import {
   adoptedGroupArray,
   dissolveSingletonGroups,
@@ -29,9 +30,11 @@ import {
   withCutoutArray,
 } from '../helpers';
 import { generateLayoutId } from '@/shared/utils/uuid';
-import { translatePathPoints } from '../../utils/pathTransforms';
+import { mapPathRings, translatePathPoints } from '../../utils/pathTransforms';
 import {
+  canNestDeeper,
   groupChain,
+  insertGroupAt,
   parentGroups,
   remapGroupChain,
   sameChain,
@@ -40,7 +43,7 @@ import {
 import {
   cutoutList,
   cutoutOwner,
-  applyPathTransform,
+  mergeCutoutUpdate,
   expandIdsToGroups,
   gcMeshAssets,
   gcCutoutGroupNames,
@@ -342,20 +345,55 @@ export function createCutoutSlice(rawSet: Set) {
     },
 
     /**
-     * Add a mesh imprint cutout together with its stored asset (one history
-     * entry, so undo removes both). No-ops when the design is already at the
-     * asset cap — callers surface that limit before invoking.
+     * Add a finger cut beside `pocketId`, bound to the pocket in a new
+     * arrange-only container so the two move, align and arrange as one. A
+     * container leaves every boolean op as it was, which a boolean group would
+     * not. The binding is skipped, and the cut added loose, when the pocket's
+     * ancestry is already as deep as a chain can go.
      */
-    addMeshCutout: (cutout: Cutout, asset: MeshAsset) => {
+    addFingerAccess: (pocketId: string, finger: Cutout): boolean => {
+      let added = false;
+      set((state) => {
+        if (remainingCapacity(state) < 1) return;
+        const owner = cutoutOwner(state);
+        const pocket = owner.cutouts.find((c) => c.id === pocketId);
+        if (!pocket) return;
+        pushHistoryEntry(state);
+        const chain = parentGroups(pocket);
+        const placed = withTopZIndex(state, withGroupChain(finger, chain, false));
+        const unit = new Set(
+          pocket.groupId === null
+            ? [pocket.id]
+            : owner.cutouts.filter((c) => c.groupId === pocket.groupId).map((c) => c.id)
+        );
+        unit.add(placed.id);
+        let next = [...owner.cutouts, placed];
+        if (canNestDeeper(next.filter((c) => unit.has(c.id)))) {
+          const containerId = generateLayoutId();
+          next = next.map((c) =>
+            unit.has(c.id) ? insertGroupAt(c, containerId, chain.length) : c
+          );
+        }
+        owner.cutouts = next;
+        added = true;
+      });
+      return added;
+    },
+
+    /**
+     * Add a mesh imprint cutout together with its stored asset (one history
+     * entry, so undo removes both). No-ops when the asset would take the
+     * design past its triangle budget; callers surface that before invoking.
+     */
+    addMeshCutout: (cutout: Cutout, asset: MeshAssetEntry) => {
       const meshId = cutout.meshId;
       if (cutout.shape !== 'mesh' || meshId === undefined) return;
       set((state) => {
         const existing = state.params.meshAssets ?? {};
-        if (!(meshId in existing) && Object.keys(existing).length >= MAX_MESH_ASSETS_PER_DESIGN) {
-          return;
-        }
+        const next = { ...existing, [meshId]: asset };
+        if (meshTrianglesTotal(next) > MAX_MESH_TRIANGLES_PER_DESIGN) return;
         pushHistoryEntry(state);
-        state.params.meshAssets = { ...existing, [meshId]: asset };
+        state.params.meshAssets = next;
         // The bin's array regardless of the editor target: a lid cutout cannot be
         // a mesh imprint, and `gcMeshAssets` counts references there. The z-index
         // has to rank against that same array, or the imprint lands on the lid's
@@ -382,12 +420,22 @@ export function createCutoutSlice(rawSet: Set) {
       set((state) => {
         pushHistoryEntry(state);
         const owner = cutoutOwner(state);
+        owner.cutouts = owner.cutouts.map((c) =>
+          c.id === id ? withTextFootprint(mergeCutoutUpdate(c, updates)) : c
+        );
+      });
+    },
+
+    setCutoutSplit: (id: string, split: CutoutSplit | null) => {
+      set((state) => {
+        const target = cutoutList(state).find((c) => c.id === id);
+        if (!target || (split === null && target.split === undefined)) return;
+        pushHistoryEntry(state);
+        const owner = cutoutOwner(state);
         owner.cutouts = owner.cutouts.map((c) => {
           if (c.id !== id) return c;
-          const transformedPath = applyPathTransform(c, updates);
-          return withTextFootprint(
-            transformedPath ? { ...c, ...updates, path: transformedPath } : { ...c, ...updates }
-          );
+          const { split: _split, ...rest } = c;
+          return split === null ? rest : { ...rest, split };
         });
       });
     },
@@ -417,7 +465,7 @@ export function createCutoutSlice(rawSet: Set) {
         const duplicated = toDuplicate.map((c, i) => {
           // Path points are absolute, so shifting x/y must shift them too —
           // otherwise duplicates render with the original path geometry.
-          const translatedPath = c.path ? translatePathPoints(c.path, 5, 5) : c.path;
+          const translated = mapPathRings(c, (ring) => translatePathPoints(ring, 5, 5));
           return {
             ...remapGroupChain(c, groupMap, generateLayoutId),
             id: generateLayoutId(),
@@ -428,7 +476,7 @@ export function createCutoutSlice(rawSet: Set) {
             // its source with an identical area — a tie neither stacking
             // channel can break consistently.
             zIndex: topZ + i,
-            ...(translatedPath ? { path: translatedPath } : {}),
+            ...translated,
           };
         });
         // Truncate rather than refuse the whole batch: duplicating six shapes with
@@ -538,11 +586,7 @@ export function createCutoutSlice(rawSet: Set) {
         const owner = cutoutOwner(state);
         owner.cutouts = owner.cutouts.map((c) => {
           const u = updates.get(c.id);
-          if (!u) return c;
-          const transformedPath = applyPathTransform(c, u);
-          return withTextFootprint(
-            transformedPath ? { ...c, ...u, path: transformedPath } : { ...c, ...u }
-          );
+          return u ? withTextFootprint(mergeCutoutUpdate(c, u)) : c;
         });
       });
     },

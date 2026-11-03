@@ -6,6 +6,7 @@ import {
   hasLidBlocker,
 } from '@/features/bin-designer/utils/lidCompatibility';
 import { DEFAULT_LID_CONFIG } from '@/features/bin-designer/types/lid';
+import { lidTopAboveRimMm } from '@/shared/printSettings/assembledHeight';
 
 describe('DesignerStore - lid actions', () => {
   beforeEach(() => {
@@ -165,6 +166,27 @@ describe('DesignerStore - lid actions', () => {
       expect(useDesignerStore.getState().params.surfaceText).toBeUndefined();
     });
 
+    it('setLidTextRotation writes a turn, is undoable, and drops the key at 0', () => {
+      const { setLidText, setLidTextRotation, undo } = useDesignerStore.getState();
+      setLidText('Cables');
+      const epoch = useDesignerStore.getState().generation.epoch;
+      setLidTextRotation(90);
+      expect(useDesignerStore.getState().params.surfaceText?.lidTextRotation).toBe(90);
+      expect(useDesignerStore.getState().generation.epoch).toBeGreaterThan(epoch);
+      setLidTextRotation(0);
+      expect(useDesignerStore.getState().params.surfaceText).toEqual({ lidText: 'Cables' });
+      undo();
+      expect(useDesignerStore.getState().params.surfaceText?.lidTextRotation).toBe(90);
+    });
+
+    it('setLidTextRotation to the current turn pushes no history', () => {
+      const { setLidTextRotation } = useDesignerStore.getState();
+      const epoch = useDesignerStore.getState().generation.epoch;
+      setLidTextRotation(0);
+      expect(useDesignerStore.getState().generation.epoch).toBe(epoch);
+      expect(useDesignerStore.getState().params.surfaceText).toBeUndefined();
+    });
+
     it('clearing the text preserves a style override', () => {
       const { setLidText, setSurfaceTextStyle } = useDesignerStore.getState();
       setLidText('Cables');
@@ -286,6 +308,56 @@ describe('DesignerStore - lid actions', () => {
       clearWallText();
       // Nothing pushed, so undo falls through to the empty baseline.
       undo();
+      expect(useDesignerStore.getState().params.surfaceText).toBeUndefined();
+    });
+
+    it('setWallTextFace stores only inside faces and seeds a top-row inside anchor', () => {
+      const { setWallText, setSurfaceTextAnchor, setWallTextFace, undo } =
+        useDesignerStore.getState();
+      setWallText('back', 'Spoons');
+      setSurfaceTextAnchor('bottom-left');
+      setWallTextFace('back', 'inside');
+      expect(useDesignerStore.getState().params.surfaceText).toMatchObject({
+        wallFaces: { back: 'inside' },
+        insideStyle: { anchor: 'top-left' },
+      });
+
+      setWallTextFace('back', 'outside');
+      const back = useDesignerStore.getState().params.surfaceText;
+      expect(back?.wallFaces).toBeUndefined();
+      expect(back?.insideStyle).toBeUndefined();
+
+      undo();
+      expect(useDesignerStore.getState().params.surfaceText?.wallFaces).toEqual({
+        back: 'inside',
+      });
+    });
+
+    it('setWallTextFace keeps a chosen inside anchor while another wall flips', () => {
+      const { setWallTextFace, setInsideTextAnchor } = useDesignerStore.getState();
+      setWallTextFace('back', 'inside');
+      setInsideTextAnchor('center');
+      setWallTextFace('left', 'inside');
+      expect(useDesignerStore.getState().params.surfaceText).toMatchObject({
+        wallFaces: { back: 'inside', left: 'inside' },
+        insideStyle: { anchor: 'center' },
+      });
+    });
+
+    it('setWallTextFace and setInsideTextAnchor are no-ops when nothing changes', () => {
+      const { setWallTextFace, setInsideTextAnchor, undo } = useDesignerStore.getState();
+      setWallTextFace('front', 'outside');
+      setInsideTextAnchor('top');
+      expect(useDesignerStore.getState().params.surfaceText).toBeUndefined();
+      undo();
+      expect(useDesignerStore.getState().params.surfaceText).toBeUndefined();
+    });
+
+    it('clearWallText drops wall faces and the inside style', () => {
+      const { setWallText, setWallTextFace, clearWallText } = useDesignerStore.getState();
+      setWallText('back', 'Spoons');
+      setWallTextFace('back', 'inside');
+      clearWallText();
       expect(useDesignerStore.getState().params.surfaceText).toBeUndefined();
     });
 
@@ -450,6 +522,58 @@ describe('DesignerStore - lid actions', () => {
         updateLid({ clickRailCoverage: cov });
         expect(useDesignerStore.getState().params.lid.clickRailCoverage).toBe(cov);
       }
+    });
+  });
+
+  describe('lid height in units', () => {
+    const lidTopUnits = (): number => {
+      const { params } = useDesignerStore.getState();
+      return lidTopAboveRimMm(params) / params.heightUnitMm;
+    };
+
+    it('keeps the lid on its unit line as settings under it change', () => {
+      const { updateLid, updateBase, setParams } = useDesignerStore.getState();
+      updateLid({ enabled: true, heightUnits: 1 });
+      expect(lidTopUnits()).toBeCloseTo(1, 6);
+
+      updateLid({ stackableTop: true });
+      expect(lidTopUnits()).toBeCloseTo(1, 6);
+
+      // A 6 mm plate under a stack grid cannot be as short as one unit, but
+      // the 1u choice is kept for when it can be again.
+      updateLid({ topThicknessMm: 6 });
+      expect(lidTopUnits()).toBeCloseTo(2, 6);
+      expect(useDesignerStore.getState().params.lid.heightUnits).toBe(1);
+
+      updateLid({ attachment: 'hinge', stackableTop: false });
+      expect(lidTopUnits()).toBeCloseTo(2, 6);
+
+      updateBase({ lowProfile: true });
+      expect(lidTopUnits()).toBeCloseTo(2, 6);
+
+      setParams({ heightUnitMm: 10 });
+      expect(lidTopUnits()).toBeCloseTo(2, 6);
+
+      updateLid({ topThicknessMm: 0.8 });
+      expect(lidTopUnits()).toBeCloseTo(1, 6);
+    });
+
+    it('undoes a setting change together with the lid height it moved', () => {
+      const { updateLid, undo } = useDesignerStore.getState();
+      updateLid({ enabled: true, heightUnits: 1 });
+      const before = useDesignerStore.getState().params.lid.extraHeightMm;
+      updateLid({ stackableTop: true });
+      expect(useDesignerStore.getState().params.lid.extraHeightMm).not.toBe(before);
+      undo();
+      expect(useDesignerStore.getState().params.lid.stackableTop).toBe(false);
+      expect(useDesignerStore.getState().params.lid.extraHeightMm).toBe(before);
+    });
+
+    it('leaves the millimetre knob alone with units off', () => {
+      const { updateLid } = useDesignerStore.getState();
+      updateLid({ enabled: true, extraHeightMm: 3 });
+      updateLid({ stackableTop: true });
+      expect(useDesignerStore.getState().params.lid.extraHeightMm).toBe(3);
     });
   });
 });

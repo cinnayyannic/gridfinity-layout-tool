@@ -16,6 +16,8 @@ export type RateLimitAction =
   | 'auth.read'
   | 'sync.write'
   | 'sync.read'
+  | 'mesh.write'
+  | 'mesh.read'
   | 'scan.create'
   | 'scan.upload'
   | 'scan.poll'
@@ -25,6 +27,7 @@ export type RateLimitAction =
   | 'supporters.edit'
   | 'community.read'
   | 'community.publish'
+  | 'community.meshCheck'
   | 'community.manage'
   | 'community.like'
   | 'community.action'
@@ -70,6 +73,10 @@ const RATE_LIMITS: Record<RateLimitAction, RateLimitConfig> = {
   // protect against runaway clients.
   'sync.write': { limit: 60, windowSeconds: 60 }, // 60/minute per user
   'sync.read': { limit: 240, windowSeconds: 60 }, // 240/minute per user
+  // Mesh store, keyed by userId. Its own budget so uploading a library's
+  // meshes and the design writes that reference them never starve each other.
+  'mesh.write': { limit: 60, windowSeconds: 60 }, // 60/minute per user
+  'mesh.read': { limit: 240, windowSeconds: 60 }, // 240/minute per user
   // Phone-scan handoff — keyed by client IP. Create/upload are one-shot per
   // scan; poll is generous because the desktop polls every ~1.5s while waiting.
   'scan.create': { limit: 30, windowSeconds: 60 }, // 30/minute per IP
@@ -97,6 +104,10 @@ const RATE_LIMITS: Record<RateLimitAction, RateLimitConfig> = {
   // bigger budget pointless.
   'community.read': { limit: 240, windowSeconds: 60 }, // 240/minute per IP
   'community.publish': { limit: 10, windowSeconds: 24 * 60 * 60 }, // 10/day per user
+  // The held-file lookup a publish or update naming mesh files makes before its
+  // budget is charged, so a refusal the client resends inline costs no slot.
+  // Bounds how often it runs, since it skips the daily budgets.
+  'community.meshCheck': { limit: 30, windowSeconds: 60 }, // 30/minute per user
   // Remediation on existing designs (update, unpublish, admin purge) has its
   // own budget: sharing the scarce publish budget would lock a user who
   // published 10 times out of deleting their own designs, and cap an admin's

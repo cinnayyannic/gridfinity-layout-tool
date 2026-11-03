@@ -56,6 +56,8 @@ graph TB
 | `/api/sync/manifest`            | GET            | 240/min    | Per-user index + If-Modified-Since 304                           |
 | `/api/sync/export`              | GET            | 240/min    | ZIP of all live items + manifest                                 |
 | `/api/sync/account`             | DELETE         | 60/min     | Cascade-delete account + KV + blobs                              |
+| `/api/meshes/[hash]`            | PUT            | 60/min     | Store an imported mesh file once by its SHA-256                  |
+| `/api/meshes/[hash]`            | HEAD           | 240/min    | Whether this account holds a mesh file, with its Blob URL        |
 | `/api/kofi-webhook`             | POST           | 60/min     | Ko-fi payment ingest → supporters                                |
 | `/api/supporters`               | GET            | 120/min    | Public supporter list for /supporters                            |
 | `/api/supporters/me`            | GET            | 120/min    | The caller's own supporter status (200 for anonymous)            |
@@ -72,6 +74,10 @@ graph TB
 | `/api/community/prints`         | POST           | 10/hour    | `{ action: 'report' }` flag someone else's print report          |
 
 See [`auth/README.md`](./auth/README.md) for the OAuth setup and [`sync/README.md`](./sync/README.md) for sync semantics, quotas, and the LWW + tombstone state machine.
+
+## Mesh store
+
+Each imported mesh is one Blob file at `meshes/{hash}`, the SHA-256 of its bytes (layout in `src/shared/generation/meshFile.ts`, mirrored by `lib/meshFile.ts`). Public and write-once: the URL needs the hash, and the hash needs the content. Clients read it from the CDN. `users:{uid}:meshes` holds an account's hashes and sizes, with totals in `users:{uid}:meshUsage` checked against `MESH_QUOTA_BYTES` and `MESH_QUOTA_COUNT` in the same Lua step that records a hold; `mesh:holders:{hash}` is the refcount set. Off unless `MESH_STORE_ENABLED=true`, which also gates synced designs naming files by hash (`sync/README.md`).
 
 ## Ko-fi supporter ingest
 
@@ -115,7 +121,10 @@ quadratically on `"ononon…"` (120KB took 4.7s). Any new pattern there must not
 use an unbounded quantifier followed by a required literal.
 
 Seed the pre-webhook backfill once with `pnpm seed-supporters` (`--dry-run` to
-preview); see `src/features/supporters/README.md`.
+preview); see `src/features/supporters/README.md`. `pnpm restore-supporter-messages --csv`
+(also `--dry-run`) fills what a Ko-fi export still holds: a message the old
+140-character cap cut, or a message or join date never stored, always from the
+record's own donor.
 
 ## Supporter recognition (`lib/supporterLink.ts`)
 

@@ -10,10 +10,14 @@
 import { useDesignerStore } from '@/features/bin-designer/store';
 import { isPartialMask } from '@/shared/utils/cellMask';
 import { useTranslation } from '@/i18n';
+import { useCutEditorOpens } from './useCutEditorOpens';
 import { getFeatureStatus } from '@/shared/constraints';
-import { InteriorModeCard } from './InteriorModeCard';
+import { Badge } from '@/design-system';
+import { InteriorModeContent } from './InteriorModes';
+import { INTERIOR_MODE_META } from './interiorModeMeta';
 import { useInteriorSection } from './useInteriorSection';
-import { FeatureGate } from '../FeatureGate';
+import { ModeTiles } from '../shared';
+import { FeatureTip } from '../../FeatureTip';
 import { INTERIOR_CARDS } from '../../../types';
 import type { InteriorCard } from '../../../types';
 
@@ -31,11 +35,12 @@ const CARDS_REQUIRING_RECTANGULAR_SHAPE: ReadonlySet<InteriorCard> = new Set([
 export function InteriorSection() {
   const { state, handlers } = useInteriorSection();
   const t = useTranslation();
+  const cutEditorOpens = useCutEditorOpens();
   const isCustomShape = useDesignerStore((s) => isPartialMask(s.params.cellMask));
   const hasAngledDividers = useDesignerStore(
     (s) => (s.params.compartments.dividerOverrides?.length ?? 0) > 0
   );
-  const customShapeReason = t('binDesigner.shape.custom.hint');
+  const customShapeReason = t('binDesigner.shape.custom.unavailable');
   // Only the base can make slot mode unreachable. The solid/slotted exclusion
   // also reports here, but selecting the card resolves that one, so gating on
   // it would strand a Solid bin with no way back to Removable.
@@ -49,40 +54,46 @@ export function InteriorSection() {
   // instead of silently losing their tilts.
   const slottedAngledReason = t('binDesigner.angledDividers.slotIncompatible');
 
+  const disabledReason = (card: InteriorCard): string | undefined => {
+    if (isCustomShape && CARDS_REQUIRING_RECTANGULAR_SHAPE.has(card)) return customShapeReason;
+    if (card === 'slotted' && hasAngledDividers) return slottedAngledReason;
+    if (card === 'slotted' && slottedBlockedReason) return t(slottedBlockedReason);
+    return undefined;
+  };
+
+  const tip = (card: InteriorCard) => {
+    if (card === 'standard') {
+      return <FeatureTip tip="compartments" feature={t(INTERIOR_MODE_META[card].titleKey)} />;
+    }
+    // Scanning starts from the Cut Editor.
+    if (card === 'solid' && cutEditorOpens) {
+      return <FeatureTip tip="scanToPocket" feature={t('binDesigner.cutouts.scanImport.title')} />;
+    }
+    return undefined;
+  };
+
   return (
-    <div className="space-y-2">
-      {INTERIOR_CARDS.map((card) => {
-        const element = (
-          <InteriorModeCard
-            key={card}
-            card={card}
-            isExpanded={state.card === card}
-            onSelect={() => handlers.selectCard(card)}
-          />
-        );
-        if (isCustomShape && CARDS_REQUIRING_RECTANGULAR_SHAPE.has(card)) {
-          return (
-            <FeatureGate key={card} disabled reason={customShapeReason}>
-              {element}
-            </FeatureGate>
-          );
-        }
-        if (card === 'slotted' && hasAngledDividers) {
-          return (
-            <FeatureGate key={card} disabled reason={slottedAngledReason}>
-              {element}
-            </FeatureGate>
-          );
-        }
-        if (card === 'slotted' && slottedBlockedReason) {
-          return (
-            <FeatureGate key={card} disabled reason={t(slottedBlockedReason)}>
-              {element}
-            </FeatureGate>
-          );
-        }
-        return element;
-      })}
-    </div>
+    <ModeTiles
+      ariaLabel={t('binDesigner.group.interior')}
+      value={state.card}
+      onChange={handlers.selectCard}
+      columns={2}
+      options={INTERIOR_CARDS.map((card) => ({
+        value: card,
+        icon: INTERIOR_MODE_META[card].icon,
+        label: t(INTERIOR_MODE_META[card].titleKey),
+        caption: t(INTERIOR_MODE_META[card].descriptionKey),
+        disabledReason: disabledReason(card),
+        tip: tip(card),
+        badge:
+          card === 'bento' ? (
+            <Badge tone="info" title={t('binDesigner.bento.experimentalHint')}>
+              {t('common.experimental')}
+            </Badge>
+          ) : undefined,
+      }))}
+    >
+      <InteriorModeContent card={state.card} />
+    </ModeTiles>
   );
 }

@@ -16,6 +16,14 @@ import { insertCutsFeature } from '../insertBuilder';
 import { slotCutsFeature } from '../slotBuilder';
 import { labelTabsFeature } from '../labelTabBuilder';
 import { handlesFeature } from '../handleBuilder';
+import {
+  pullTabFeature,
+  pullTabRecessFeature,
+  pullTabBackRecessFeature,
+  pullTabCenterFeature,
+  pullTabCenterRecessFeature,
+  pullTabCenterBackRecessFeature,
+} from '../pullTabBuilder';
 import { scoopRampsFeature } from '../scoopRampBuilder';
 import { interiorFilletFeature } from '../interiorFilletBuilder';
 import { floorRaiseFeature } from '../floorRaiseBuilder';
@@ -23,6 +31,7 @@ import { wallCutoutsFeature } from '../wallCutoutBuilder';
 import { slideRailsFeature } from '../slideRailBuilder';
 import { dividerBlendFeature } from '../dividerBlendBuilder';
 import { wallTextCutFeature, wallTextEmbossFeature } from '../wallTextBuilder';
+import { floorTextCutFeature, floorTextEmbossFeature } from '../floorTextBuilder';
 import { wallLabelSlotBossesFeature, wallLabelSlotCutsFeature } from '../wallLabelSlotBuilder';
 
 export const BIN_FEATURE_BUILDERS: readonly FeatureBuilder[] = [
@@ -32,6 +41,12 @@ export const BIN_FEATURE_BUILDERS: readonly FeatureBuilder[] = [
   slotCutsFeature,
   labelTabsFeature,
   handlesFeature,
+  pullTabFeature,
+  pullTabRecessFeature,
+  pullTabBackRecessFeature,
+  pullTabCenterFeature,
+  pullTabCenterRecessFeature,
+  pullTabCenterBackRecessFeature,
   scoopRampsFeature,
   interiorFilletFeature,
   wallCutoutsFeature,
@@ -39,6 +54,8 @@ export const BIN_FEATURE_BUILDERS: readonly FeatureBuilder[] = [
   dividerBlendFeature,
   wallTextCutFeature,
   wallTextEmbossFeature,
+  floorTextCutFeature,
+  floorTextEmbossFeature,
   wallLabelSlotBossesFeature,
   wallLabelSlotCutsFeature,
 ] as const;

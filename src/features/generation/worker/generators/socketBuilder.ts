@@ -51,6 +51,7 @@ import {
   magnetPositionsForCell,
 } from './baseplateMagnets';
 import { buildMagnetHoleCutter } from './magnetHoleCutter';
+import { outerCornerHoleFilter } from '@/shared/generation/cornerHoles';
 import type { MagnetHoleStyle } from '@/shared/generation/magnetHoleStyle';
 import { PLAIN_MAGNET_HOLE, magnetHoleStyleKey } from '@/shared/generation/magnetHoleStyle';
 import type { MagnetAnchor } from '@/core/types';
@@ -63,7 +64,7 @@ import {
   type CellMask,
 } from '@/shared/utils/cellMask';
 import type { FootLattice } from '@/shared/types/bin';
-import { isFractional } from '@/core/constants';
+import { DEFAULT_SOCKET_CELL_PLAN, type SocketCellPlan } from '@/shared/generation/socketCellPlan';
 
 /**
  * Smallest printable edge foot, in mm. A fractional bin whose trailing strip is
@@ -91,72 +92,11 @@ export const DEFAULT_FRACTIONAL_EDGE: FractionalEdge = { x: 'end', y: 'end' };
  */
 export type { FootLattice };
 
-/**
- * The foot layout the socket walk builds, resolved from the user's base
- * settings and the bin's mask.
- *
- * A foot has to land inside one pocket — adjacent pockets are separated by a
- * ridge — so which layout seats depends on where the bin sits, PER AXIS. Half-bin
- * mode can place a bin half a unit off-grid on one axis and on-grid on the
- * other, and a layout applied to both axes at once straddles ridges on whichever
- * one it got wrong.
- */
-export interface SocketCellPlan {
-  /** Uniform 0.5u feet everywhere: seats at either offset, at the most feet. */
-  readonly halfSockets: boolean;
-  readonly latticeX: FootLattice;
-  readonly latticeY: FootLattice;
-}
-
-/** Plain full-cell feet on both axes — the older layout. */
-export const DEFAULT_SOCKET_CELL_PLAN: SocketCellPlan = {
-  halfSockets: false,
-  latticeX: 'grid',
-  latticeY: 'grid',
-};
-
-/**
- * A fractional axis ignores the `half` lattice.
- *
- * Such an axis already carries a half cell, and `fractionalEdge` decides which
- * end it sits on — which covers BOTH placements on its own ('end' seats on-grid,
- * 'start' seats half-offset). The lattice can only add a layout that seats at
- * one of them and perches at the other, and `computeMatchedFootLattice`
- * deliberately skips fractional axes, so nothing would warn about it.
- */
-function axisLattice(lattice: FootLattice | undefined, units: number): FootLattice {
-  return lattice === 'half' && !isFractional(units) ? 'half' : 'grid';
-}
-
-/**
- * Fold the base settings, the bin's size and its mask into the plan the socket
- * walk consumes.
- *
- * `halfSockets` overrides both lattices: uniform 0.5u feet already seat at
- * either offset, so a lattice choice on top would only cost feet.
- *
- * A partial `cellMask` also forces `grid`. The mask is authored against the
- * standard grid, and the `half` lattice moves every interior boundary half a
- * unit off it — the mask's fill test would then straddle two authored cells and
- * silently drop feet along an inner corner. The UI says so rather than offering
- * a lattice that would not be honoured.
- */
-export function resolveSocketCellPlan(
-  halfSockets: boolean,
-  latticeX: FootLattice | undefined,
-  latticeY: FootLattice | undefined,
-  mask: CellMask | undefined,
-  gridW: number,
-  gridD: number
-): SocketCellPlan {
-  if (halfSockets) return { halfSockets: true, latticeX: 'grid', latticeY: 'grid' };
-  if (isPartialMask(mask)) return DEFAULT_SOCKET_CELL_PLAN;
-  return {
-    halfSockets: false,
-    latticeX: axisLattice(latticeX, gridW),
-    latticeY: axisLattice(latticeY, gridD),
-  };
-}
+export {
+  DEFAULT_SOCKET_CELL_PLAN,
+  resolveSocketCellPlan,
+  type SocketCellPlan,
+} from '@/shared/generation/socketCellPlan';
 
 /** Stable key fragment for a plan; empty for the older default. */
 export function socketCellPlanKey(plan: SocketCellPlan): string {
@@ -477,7 +417,8 @@ export function baseSocketShapeKey(
   fractionalEdge: FractionalEdge = DEFAULT_FRACTIONAL_EDGE,
   anchor: MagnetAnchor = DEFAULT_MAGNET_ANCHOR,
   holeStyle: MagnetHoleStyle = PLAIN_MAGNET_HOLE,
-  socketHeight: number = SOCKET_HEIGHT
+  socketHeight: number = SOCKET_HEIGHT,
+  cornersOnly = false
 ): string {
   const usingMask = isPartialMask(cellMask);
   return socketCacheKey(
@@ -497,7 +438,8 @@ export function baseSocketShapeKey(
     fractionalEdge.y,
     anchor,
     withMagnet ? magnetHoleStyleKey(holeStyle) : '',
-    socketHeight
+    socketHeight,
+    cornersOnly && (withMagnet || withScrew)
   );
 }
 
@@ -516,7 +458,8 @@ export function buildBaseSocket(
   fractionalEdge: FractionalEdge = DEFAULT_FRACTIONAL_EDGE,
   anchor: MagnetAnchor = DEFAULT_MAGNET_ANCHOR,
   holeStyle: MagnetHoleStyle = PLAIN_MAGNET_HOLE,
-  socketHeight: number = SOCKET_HEIGHT
+  socketHeight: number = SOCKET_HEIGHT,
+  cornersOnly = false
 ): Shape3D {
   // Treat a fully-filled mask as a rectangle so the cache key and iteration
   // path match the existing rectangular code.
@@ -540,7 +483,8 @@ export function buildBaseSocket(
     fractionalEdge,
     anchor,
     holeStyle,
-    socketHeight
+    socketHeight,
+    cornersOnly
   );
   const cached = getSocketCache(key);
   if (cached) {
@@ -629,6 +573,7 @@ export function buildBaseSocket(
       // Cutter bounding radius (magnet is wider than the screw; both concentric).
       const holeRadius = Math.max(withMagnet ? magnetRadius : 0, withScrew ? screwRadius : 0);
 
+      const holeCells: Array<{ positions: Array<[number, number]>; chamfer: boolean }> = [];
       forEachCell(
         gridW,
         gridD,
@@ -639,17 +584,25 @@ export function buildBaseSocket(
           // foot (e.g. a 25mm-wide cell) gets the corners that fit, else a single
           // centered hole — so magnet/screw holes never breach the foot's side.
           const positions = magnetPositionsForCell(cell, holeRadius, unitX, unitY, anchor);
+          // Judged on the cell's full pattern: `chamferFitsCell` compares it
+          // position by position against the widened one.
           const chamfer =
             withMagnet &&
             holeStyle.chamfer &&
             chamferFitsCell(cell, holeRadius, unitX, unitY, anchor, positions);
-          const cutout = cutoutFor(chamfer);
-          for (const [x, y] of positions) {
-            holeTools.push(translate(cutout, [x, y, -socketHeight]));
-          }
+          holeCells.push({ positions, chamfer });
         },
         { gridUnitMm, fractionalEdgeX: fractionalEdge.x, fractionalEdgeY: fractionalEdge.y }
       );
+      const keep = cornersOnly
+        ? outerCornerHoleFilter(holeCells.flatMap((c) => c.positions))
+        : () => true;
+      for (const { positions, chamfer } of holeCells) {
+        for (const site of positions) {
+          if (!keep(site)) continue;
+          holeTools.push(translate(cutoutFor(chamfer), [site[0], site[1], -socketHeight]));
+        }
+      }
     }
 
     // Use booleanPipeline for small sockets (fuse cells → cut holes in one

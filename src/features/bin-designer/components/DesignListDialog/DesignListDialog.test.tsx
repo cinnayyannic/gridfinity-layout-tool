@@ -3,9 +3,15 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { DesignListDialog } from '@/features/bin-designer/components/DesignListDialog';
 import { useDesignerStore } from '@/features/bin-designer/store/designer';
 import { DEFAULT_BIN_PARAMS } from '@/features/bin-designer/constants/defaults';
-import { ok } from '@/core/result';
+import { err, ok, storageUnavailable } from '@/core/result';
+import { INITIAL_TOAST_STATE, useToastStore } from '@/core/store/toast';
 import type { SavedDesign } from '@/features/bin-designer/types';
 import { designId } from '@/core/types';
+import { loadRegistry, upsertRegistryEntry } from '@/features/bin-designer/store/customBinRegistry';
+import {
+  registerOpenDesignFlush,
+  trackDesignWrite,
+} from '@/features/bin-designer/hooks/designSaveGate';
 
 vi.mock('@/features/bin-designer/storage/DesignerStorage');
 
@@ -97,34 +103,53 @@ describe('DesignListDialog', () => {
     expect(screen.getByText('Active')).toBeInTheDocument();
   });
 
-  it('loads a design by clicking on the item', async () => {
+  // The load itself belongs to useDesignerUrlSync, which waits for the open
+  // design's edits to land before reading the one picked here.
+  it('opens a design through its URL by clicking on the item', async () => {
     render(<DesignListDialog open={true} onClose={onClose} />);
 
     await waitFor(() => {
       expect(screen.getByText('Screw Bin')).toBeInTheDocument();
     });
 
-    // Click on the design item itself to load it
     fireEvent.click(screen.getByText('Screw Bin'));
 
-    expect(useDesignerStore.getState().currentDesignId).toBe('design-2');
-    expect(useDesignerStore.getState().designName).toBe('Screw Bin');
+    expect(window.location.pathname).toBe('/designer');
+    expect(window.location.search).toBe('?id=design-2');
+    expect(useDesignerStore.getState().currentDesignId).toBe('design-1');
     expect(onClose).toHaveBeenCalled();
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('goes back to the active design when it is picked while another pick is loading', async () => {
+    render(<DesignListDialog open={true} onClose={onClose} />);
+    await waitFor(() => {
+      expect(screen.getByText('Screw Bin')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('Screw Bin'));
+    fireEvent.click(screen.getByText('Tool Holder'));
+
+    expect(window.location.search).toBe('?id=design-1');
+    window.history.replaceState(null, '', '/');
   });
 
   it('closes dialog when clicking the active design', async () => {
+    window.history.replaceState(null, '', '/designer?id=design-1');
+    const pushState = vi.spyOn(window.history, 'pushState');
     render(<DesignListDialog open={true} onClose={onClose} />);
 
     await waitFor(() => {
       expect(screen.getByText('Tool Holder')).toBeInTheDocument();
     });
 
-    // Click on the active design - should just close the dialog
     fireEvent.click(screen.getByText('Tool Holder'));
 
-    // Should stay on the same design but close
+    expect(pushState).not.toHaveBeenCalled();
     expect(useDesignerStore.getState().currentDesignId).toBe('design-1');
     expect(onClose).toHaveBeenCalled();
+    pushState.mockRestore();
+    window.history.replaceState(null, '', '/');
   });
 
   it('creates new design and closes dialog', async () => {
@@ -136,9 +161,51 @@ describe('DesignListDialog', () => {
 
     fireEvent.click(screen.getByText('New Design'));
 
-    expect(useDesignerStore.getState().currentDesignId).toBeNull();
+    await waitFor(() => {
+      expect(useDesignerStore.getState().currentDesignId).toBeNull();
+    });
     expect(useDesignerStore.getState().designName).toBe('Untitled Bin');
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('drops a new design asked for before the dialog was dismissed', async () => {
+    let land = (): void => {};
+    trackDesignWrite(
+      new Promise<boolean>((resolve) => {
+        land = () => resolve(true);
+      })
+    );
+    const { rerender } = render(<DesignListDialog open={true} onClose={onClose} />);
+    await waitFor(() => {
+      expect(screen.getByText('Tool Holder')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('New Design'));
+    rerender(<DesignListDialog open={false} onClose={onClose} />);
+    land();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(useDesignerStore.getState().currentDesignId).toBe('design-1');
+  });
+
+  it('keeps the open design when its edits could not be saved before a new one', async () => {
+    const unregister = registerOpenDesignFlush(() => {
+      trackDesignWrite(Promise.resolve(false));
+    });
+    render(<DesignListDialog open={true} onClose={onClose} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Tool Holder')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('New Design'));
+
+    await waitFor(() => {
+      expect(useToastStore.getState().toasts.some((toast) => toast.message === 'Save failed')).toBe(
+        true
+      );
+    });
+    expect(useDesignerStore.getState().currentDesignId).toBe('design-1');
+    unregister();
   });
 
   it('opens overflow menu and shows actions', async () => {
@@ -186,6 +253,63 @@ describe('DesignListDialog', () => {
     await waitFor(() => {
       expect(DesignerStorage.duplicateDesign).toHaveBeenCalledWith('design-1');
     });
+  });
+
+  it('opens a new variant through its URL, after the parent has been saved', async () => {
+    const DesignerStorage = await import('@/features/bin-designer/storage/DesignerStorage');
+    const order: string[] = [];
+    const unregister = registerOpenDesignFlush(() => {
+      order.push('settle');
+    });
+    vi.mocked(DesignerStorage.createVariant).mockImplementation(() => {
+      order.push('create');
+      return Promise.resolve(
+        ok({ ...mockDesigns[0], id: designId('design-variant'), name: 'Tool Holder (Variant)' })
+      );
+    });
+    render(<DesignListDialog open={true} onClose={onClose} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Tool Holder')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: /more actions/i })[0]);
+    await waitFor(() => {
+      expect(screen.getByRole('menuitem', { name: /create variant/i })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: /create variant/i }));
+
+    await waitFor(() => {
+      expect(window.location.search).toBe('?id=design-variant');
+    });
+    expect(order).toEqual(['settle', 'create']);
+    expect(useDesignerStore.getState().currentDesignId).toBe('design-1');
+    window.history.replaceState(null, '', '/');
+    unregister();
+  });
+
+  it("does not create a variant while the parent's edits could not be saved", async () => {
+    const DesignerStorage = await import('@/features/bin-designer/storage/DesignerStorage');
+    const unregister = registerOpenDesignFlush(() => {
+      trackDesignWrite(Promise.resolve(false));
+    });
+    render(<DesignListDialog open={true} onClose={onClose} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Tool Holder')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: /more actions/i })[0]);
+    await waitFor(() => {
+      expect(screen.getByRole('menuitem', { name: /create variant/i })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: /create variant/i }));
+
+    await waitFor(() => {
+      expect(useToastStore.getState().toasts.some((toast) => toast.message === 'Save failed')).toBe(
+        true
+      );
+    });
+    expect(DesignerStorage.createVariant).not.toHaveBeenCalled();
+    unregister();
   });
 
   it('deletes a design with two-click confirmation', async () => {
@@ -239,6 +363,82 @@ describe('DesignListDialog', () => {
     const input = screen.getByRole('textbox', { name: 'Design name' });
     expect(input).toBeInTheDocument();
     expect(input).toHaveValue('Tool Holder');
+  });
+
+  describe('renaming from the library', () => {
+    const registryName = (): string | undefined =>
+      loadRegistry().find((r) => r.id === 'design-1')?.name;
+
+    async function renameFirstDesign(name: string): Promise<void> {
+      render(<DesignListDialog open={true} onClose={onClose} />);
+      await waitFor(() => {
+        expect(screen.getByText('Tool Holder')).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getAllByRole('button', { name: /more actions/i })[0]);
+      await waitFor(() => {
+        expect(screen.getByRole('menuitem', { name: /rename/i })).toBeInTheDocument();
+      });
+      fireEvent.click(screen.getByRole('menuitem', { name: /rename/i }));
+      const input = screen.getByRole('textbox', { name: 'Design name' });
+      fireEvent.change(input, { target: { value: name } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+    }
+
+    beforeEach(() => {
+      localStorage.clear();
+      useToastStore.setState(INITIAL_TOAST_STATE);
+      upsertRegistryEntry({
+        id: designId('design-1'),
+        name: 'Tool Holder',
+        width: 3,
+        depth: 2,
+        height: 6,
+        updatedAt: '2026-01-22T12:00:00.000Z',
+      });
+    });
+
+    it('renames the layout palette entry along with the design', async () => {
+      await renameFirstDesign('Pliers');
+
+      await waitFor(() => {
+        expect(registryName()).toBe('Pliers');
+      });
+    });
+
+    it('keeps the old name everywhere when the design cannot be saved', async () => {
+      const DesignerStorage = await import('@/features/bin-designer/storage/DesignerStorage');
+      vi.mocked(DesignerStorage.saveDesign).mockResolvedValueOnce(
+        err(storageUnavailable('indexedDB'))
+      );
+
+      await renameFirstDesign('Pliers');
+
+      await waitFor(() => {
+        expect(useToastStore.getState().toasts.map((toast) => toast.type)).toEqual(['error']);
+      });
+      expect(registryName()).toBe('Tool Holder');
+      expect(screen.getByText('Tool Holder')).toBeInTheDocument();
+      expect(screen.queryByText('Pliers')).not.toBeInTheDocument();
+      expect(useDesignerStore.getState().designName).toBe('Tool Holder');
+    });
+
+    it('still renames the design when its palette entry cannot be written', async () => {
+      const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new DOMException('full', 'QuotaExceededError');
+      });
+      try {
+        await renameFirstDesign('Pliers');
+
+        await waitFor(() => {
+          expect(useToastStore.getState().toasts.map((toast) => toast.type)).toEqual(['error']);
+        });
+        expect(screen.getByText('Pliers')).toBeInTheDocument();
+        expect(useDesignerStore.getState().designName).toBe('Pliers');
+      } finally {
+        setItem.mockRestore();
+      }
+      expect(registryName()).toBe('Tool Holder');
+    });
   });
 
   it('closes on backdrop click', async () => {

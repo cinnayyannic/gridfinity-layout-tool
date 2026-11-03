@@ -6,7 +6,8 @@
  */
 
 import type { Layout, SharePermission } from '@/core/types';
-import type { Result, ApiError, ValidationError } from '@/core/result';
+import type { LinkedDesignExport } from '@/core/storage';
+import type { Result, ApiError, StorageMeshMissingError, ValidationError } from '@/core/result';
 import {
   ok,
   err,
@@ -16,6 +17,16 @@ import {
   validationImportFailed,
 } from '@/core/result';
 import { isApiErrorResponse, mapApiErrorResponse } from './mapApiError';
+import { MISSING_DEPENDENCY_STATUS } from '@/core/sync/payloadKey';
+import { useSessionStore } from '@/core/sync/session/useSession';
+import { isMeshAssetRef, type MeshAssetEntry } from '@/shared/generation/meshAsset';
+import {
+  accountHoldsMeshFiles,
+  forgetHeldMeshes,
+  meshCloudSession,
+  parseMeshFiles,
+  readMissingMeshes,
+} from '@/shared/generation/meshCloud';
 import { validateImport } from '@/shared/utils/validation';
 import { generateLayoutId } from '@/shared/utils/uuid';
 
@@ -49,34 +60,117 @@ export interface FetchShareResponse {
   layout: Layout;
   /** Bin designs the layout's bins reference. Absent on older shares. */
   linkedDesigns?: SharedLinkedDesign[];
+  /** CDN URL of each mesh file the linked designs name by ref, by hash. */
+  meshFiles?: Record<string, string>;
   metadata: ShareMetadata;
 }
 
 /**
- * Mirrors MAX_LINKED_DESIGNS_BYTES in api/lib/validation.ts. Trimming here
- * keeps an oversized design set (realistically: imported-mesh designs carrying
- * base64 geometry) from turning the whole share into a 400.
+ * The header `apiFetch` sends: the share endpoints run the CSRF check on a
+ * share naming mesh files, since that one speaks for the signed-in account.
+ */
+const SHARE_HEADERS = { 'X-Requested-With': 'gflt' };
+
+/**
+ * Mirrors MAX_LINKED_DESIGNS_BYTES in api/lib/sharedDesignsValidation.ts.
+ * Trimming here keeps an oversized design set (realistically: imported-mesh
+ * designs carrying base64 geometry) from turning the whole share into a 400.
  */
 const LINKED_DESIGNS_BUDGET_BYTES = 512 * 1024;
+
+/**
+ * Mirror the server's per-design caps: MAX_ASSEMBLY_DESIGN_BYTES in
+ * api/lib/sharedDesignsValidation.ts, and CONSTRAINTS.MAX_PAYLOAD_BYTES in
+ * api/lib/designerValidationConstants.ts for a bin without inline mesh assets
+ * (a bin carrying them is bounded by the total). One entry over either fails
+ * the whole share, so it is skipped instead.
+ */
+const ASSEMBLY_DESIGN_BUDGET_BYTES = 100 * 1024;
+const BIN_DESIGN_BUDGET_BYTES = 100_000;
+
+function exceedsSingleDesignBudget(design: LinkedDesignExport): boolean {
+  if (design.kind === 'assembly') {
+    const size = JSON.stringify({ envelope: design.envelope, structure: design.structure }).length;
+    return size > ASSEMBLY_DESIGN_BUDGET_BYTES;
+  }
+  if (meshAssetsOf(design).some((asset) => !isMeshAssetRef(asset))) return false;
+  return JSON.stringify(design.params ?? null).length > BIN_DESIGN_BUDGET_BYTES;
+}
+
+function meshAssetsOf(design: { readonly params?: unknown }): MeshAssetEntry[] {
+  const params = design.params as { meshAssets?: Record<string, MeshAssetEntry> } | undefined;
+  return params?.meshAssets ? Object.values(params.meshAssets) : [];
+}
 
 /**
  * Resolve a layout's linked designs, dropping any that would push the payload
  * past the server's budget. Order is preserved so the result is deterministic;
  * a single oversized design is skipped rather than starving the rest.
+ *
+ * Each entry is measured whole, which slightly overcounts against the server
+ * (it counts only params, or envelope + structure), so a set within this
+ * budget is always within the server's total.
  */
-async function collectDesignsForShare(layout: Layout): Promise<SharedLinkedDesign[]> {
+async function collectDesignsForShare(
+  layout: Layout,
+  options: { readonly meshRefs?: boolean } = {}
+): Promise<Result<SharedLinkedDesign[], StorageMeshMissingError>> {
   const { collectLinkedDesigns } = await import('@/core/storage/ShareService');
-  const designs = await collectLinkedDesigns(layout);
+  const designs = await collectLinkedDesigns(layout, options);
+  if (isErr(designs)) return designs;
 
   const withinBudget: SharedLinkedDesign[] = [];
   let bytes = 0;
-  for (const design of designs) {
-    const size = JSON.stringify(design.params).length;
+  for (const design of designs.value) {
+    if (exceedsSingleDesignBudget(design)) continue;
+    const size = JSON.stringify(design).length;
     if (bytes + size > LINKED_DESIGNS_BUDGET_BYTES) continue;
     bytes += size;
-    withinBudget.push({ id: design.id, name: design.name, params: design.params });
+    withinBudget.push(design);
   }
-  return withinBudget;
+  return ok(withinBudget);
+}
+
+/**
+ * The linked designs naming their meshes by ref, once the signed-in account
+ * holds every file they name, or null when the meshes must travel inline: a
+ * signed-out sharer, a server without a mesh store, a file it would not take,
+ * or one this device lacks.
+ */
+async function designsWithMeshRefs(layout: Layout): Promise<SharedLinkedDesign[] | null> {
+  if (useSessionStore.getState().status !== 'authenticated') return null;
+  // Taken before the designs are read, so files read for this account are
+  // never uploaded under one that signs in meanwhile.
+  const session = meshCloudSession();
+  const collected = await collectDesignsForShare(layout, { meshRefs: true });
+  if (isErr(collected)) return null;
+  const hashes = collected.value.flatMap((design) =>
+    meshAssetsOf(design).flatMap((asset) => (isMeshAssetRef(asset) ? [asset.hash] : []))
+  );
+  // With no file to name, refs gain nothing, and a design the ref budget
+  // skipped may still fit inline, where its mesh lifts the per-design cap.
+  if (hashes.length === 0) return null;
+  return (await accountHoldsMeshFiles(hashes, session)) ? collected.value : null;
+}
+
+/**
+ * Send the linked designs with their meshes by ref when the account holds the
+ * files, else inline. A 424 lists files the server found unheld after all (an
+ * upload this page remembered from another account), so the share goes again
+ * inline and the next upload of those files starts over.
+ */
+async function sendLinkedDesigns(
+  layout: Layout,
+  send: (linkedDesigns: SharedLinkedDesign[]) => Promise<Response>
+): Promise<Result<Response, StorageMeshMissingError>> {
+  const withRefs = await designsWithMeshRefs(layout);
+  if (withRefs) {
+    const response = await send(withRefs);
+    if (response.status !== MISSING_DEPENDENCY_STATUS) return ok(response);
+    forgetHeldMeshes(await readMissingMeshes(response));
+  }
+  const inline = await collectDesignsForShare(layout);
+  return isErr(inline) ? inline : ok(await send(inline.value));
 }
 
 export interface UpdateShareResponse {
@@ -169,7 +263,15 @@ function validateFetchShareResponse(
       })
     : undefined;
 
-  return { valid: true, data: { ...data, linkedDesigns } };
+  return {
+    valid: true,
+    data: {
+      ...data,
+      layout: layoutValidation.layout,
+      linkedDesigns,
+      meshFiles: parseMeshFiles(data.meshFiles),
+    },
+  };
 }
 
 function isSuccessMessage(data: unknown): data is { success: true; message: string } {
@@ -250,24 +352,24 @@ export async function createShare(
   layout: Layout,
   permission: SharePermission = 'view',
   authorName?: string
-): Promise<Result<ShareResponse, ApiError>> {
-  return withNetworkErrors(async () => {
-    const linkedDesigns = await collectDesignsForShare(layout);
-    const post = (shareId: string): Promise<Response> =>
-      fetch(
-        '/api/share',
-        jsonInit('POST', { layoutId: shareId, layout, permission, authorName, linkedDesigns })
-      );
-
-    let response = await post(layoutId);
-    // Only a layout with no local share record POSTs. A 409 therefore means
-    // the layout's id is already taken by a share whose delete token this
-    // device does not have, so that share can never be updated from here.
-    // Retrying under a fresh id gives the layout a share it can manage.
-    if (response.status === 409) {
-      response = await post(generateLayoutId());
-    }
-    return readShare(response, isShareResponse);
+): Promise<Result<ShareResponse, ApiError | StorageMeshMissingError>> {
+  return withNetworkErrors<ShareResponse, ApiError | StorageMeshMissingError>(async () => {
+    const post = async (linkedDesigns: SharedLinkedDesign[]): Promise<Response> => {
+      const init = (shareId: string): RequestInit =>
+        jsonInit(
+          'POST',
+          { layoutId: shareId, layout, permission, authorName, linkedDesigns },
+          SHARE_HEADERS
+        );
+      const response = await fetch('/api/share', init(layoutId));
+      // Only a layout with no local share record POSTs. A 409 therefore means
+      // the layout's id is already taken by a share whose delete token this
+      // device does not have, so that share can never be updated from here.
+      // Retrying under a fresh id gives the layout a share it can manage.
+      return response.status === 409 ? fetch('/api/share', init(generateLayoutId())) : response;
+    };
+    const sent = await sendLinkedDesigns(layout, post);
+    return isErr(sent) ? sent : readShare(sent.value, isShareResponse);
   });
 }
 
@@ -279,14 +381,15 @@ export async function updateShare(
   deleteToken: string,
   layout: Layout,
   permission?: SharePermission
-): Promise<Result<UpdateShareResponse, ApiError>> {
-  return withNetworkErrors(async () => {
-    const linkedDesigns = await collectDesignsForShare(layout);
-    return requestShare(
-      `/api/share/${id}`,
-      jsonInit('PUT', { layout, permission, deleteToken, linkedDesigns }),
-      isUpdateShareResponse
+): Promise<Result<UpdateShareResponse, ApiError | StorageMeshMissingError>> {
+  return withNetworkErrors<UpdateShareResponse, ApiError | StorageMeshMissingError>(async () => {
+    const sent = await sendLinkedDesigns(layout, (linkedDesigns) =>
+      fetch(
+        `/api/share/${id}`,
+        jsonInit('PUT', { layout, permission, deleteToken, linkedDesigns }, SHARE_HEADERS)
+      )
     );
+    return isErr(sent) ? sent : readShare(sent.value, isUpdateShareResponse);
   });
 }
 

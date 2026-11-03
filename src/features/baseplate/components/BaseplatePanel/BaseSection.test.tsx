@@ -45,6 +45,7 @@ describe('BaseSection', () => {
     render(<BaseSection />);
     expect(screen.getByText('baseplate.magnetHoles')).toBeInTheDocument();
     expect(screen.getByText('baseplate.solidFloor')).toBeInTheDocument();
+    expect(screen.getByText('baseplate.ecoPlate')).toBeInTheDocument();
     expect(screen.getByText('baseplate.cornerRadius')).toBeInTheDocument();
   });
 
@@ -57,6 +58,7 @@ describe('BaseSection', () => {
     expect(screen.getByText('baseplate.cornerRadius')).toBeInTheDocument();
     // Magnets are still stripped (and hidden) while stacking.
     expect(screen.queryByText('baseplate.magnetHoles')).not.toBeInTheDocument();
+    expect(screen.queryByText('baseplate.ecoPlate')).not.toBeInTheDocument();
   });
 
   it('toggling magnet holes writes through to the layout store', () => {
@@ -66,6 +68,12 @@ describe('BaseSection', () => {
       DEFAULT_BASEPLATE_PARAMS.magnetHoles;
     fireEvent.click(screen.getByRole('switch', { name: 'baseplate.magnetHoles' }));
     expect(useLayoutStore.getState().layout.baseplateParams?.magnetHoles).toBe(!before);
+  });
+
+  it('enables eco plate in the layout settings', () => {
+    render(<BaseSection />);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'baseplate.ecoPlate' }));
+    expect(useLayoutStore.getState().layout.baseplateParams?.ecoPlate).toBe(true);
   });
 
   describe('all-edge slots (issue #2866)', () => {
@@ -180,7 +188,42 @@ describe('BaseSection', () => {
         enabled: true,
         diameter: 3.4,
         headStyle: 'countersink',
+        headDiameter: 6,
       });
+    });
+
+    it('leaves a saved config without a head width without one, so it keeps its ø8', () => {
+      useLayoutStore.getState().setBaseplateParams({
+        ...DEFAULT_BASEPLATE_PARAMS,
+        screwHoles: { enabled: false, diameter: mm(3.4), headStyle: 'countersink' },
+      });
+      render(<BaseSection />);
+      fireEvent.click(screen.getByRole('switch', { name: 'baseplate.screwHoles.label' }));
+      expect(useLayoutStore.getState().layout.baseplateParams?.screwHoles).toEqual({
+        enabled: true,
+        diameter: 3.4,
+        headStyle: 'countersink',
+      });
+    });
+
+    it('resets the head width to the new style default on a style switch', () => {
+      enableScrews('countersink');
+      render(<BaseSection />);
+      // The style control sits behind the collapsed "Customize" disclosure.
+      fireEvent.click(
+        screen.getByRole('radio', {
+          name: 'baseplate.screwHoles.headStyle.counterbore',
+          hidden: true,
+        })
+      );
+      expect(useLayoutStore.getState().layout.baseplateParams?.screwHoles?.headDiameter).toBe(5.5);
+      fireEvent.click(
+        screen.getByRole('radio', {
+          name: 'baseplate.screwHoles.headStyle.countersink',
+          hidden: true,
+        })
+      );
+      expect(useLayoutStore.getState().layout.baseplateParams?.screwHoles?.headDiameter).toBe(6);
     });
 
     it('adds the screw summary to the section header beside the magnet one', () => {
@@ -193,6 +236,18 @@ describe('BaseSection', () => {
       expect(
         screen.getByText(/ø6\.5mm × 2mm · baseplate\.screwHoles\.summary/)
       ).toBeInTheDocument();
+    });
+
+    it('writes the inner cell corner through to the layout store', () => {
+      enableScrews('countersink');
+      render(<BaseSection />);
+      fireEvent.click(
+        screen.getByRole('radio', { name: 'baseplate.screwHoles.cellCorner.inner', hidden: true })
+      );
+      expect(useLayoutStore.getState().layout.baseplateParams?.screwHoles?.cellCorner).toBe(
+        'inner'
+      );
+      expect(screen.getByText('baseplate.screwHoles.edgeInset.label')).toBeInTheDocument();
     });
 
     it('shows the counterbore depth only for a counterbore head', () => {
@@ -208,6 +263,56 @@ describe('BaseSection', () => {
       expect(
         screen.queryByText('baseplate.screwHoles.counterboreDepth.label')
       ).not.toBeInTheDocument();
+    });
+  });
+
+  describe('mount magnets', () => {
+    it('writes the defaults through to the layout store on toggle', () => {
+      render(<BaseSection />);
+      fireEvent.click(screen.getByRole('switch', { name: 'baseplate.mountMagnets.label' }));
+      expect(useLayoutStore.getState().layout.baseplateParams?.mountMagnets).toEqual({
+        enabled: true,
+        diameter: 6.5,
+        depth: 2,
+      });
+    });
+
+    it('hides the toggle while stacking, which strips the magnets', () => {
+      useLayoutStore.getState().setBaseplateParams({
+        ...DEFAULT_BASEPLATE_PARAMS,
+        stackPrint: { enabled: true, copies: 2, gapMm: mm(0.2) },
+      });
+      render(<BaseSection />);
+      expect(screen.queryByText('baseplate.mountMagnets.label')).not.toBeInTheDocument();
+    });
+
+    it('warns when the hole is too deep for a low-profile plate', () => {
+      useLayoutStore.setState((s) => ({ layout: { ...s.layout, lowProfileBase: true } }));
+      useLayoutStore.getState().setBaseplateParams({
+        ...DEFAULT_BASEPLATE_PARAMS,
+        mountMagnets: { enabled: true, diameter: mm(6), depth: mm(2.5) },
+      });
+      render(<BaseSection />);
+      expect(screen.getByText('baseplate.mountMagnets.tooDeep')).toBeInTheDocument();
+    });
+
+    it('writes the chamfer through on toggle', () => {
+      useLayoutStore.getState().setBaseplateParams({
+        ...DEFAULT_BASEPLATE_PARAMS,
+        mountMagnets: { enabled: true, diameter: mm(6.5), depth: mm(2.5) },
+      });
+      render(<BaseSection />);
+      fireEvent.click(screen.getByLabelText('baseplate.magnetChamfer'));
+      expect(useLayoutStore.getState().layout.baseplateParams?.mountMagnets?.chamfer).toBe(true);
+    });
+
+    it('does not warn for the ø6.5 × 2.5mm cap on a standard plate', () => {
+      useLayoutStore.getState().setBaseplateParams({
+        ...DEFAULT_BASEPLATE_PARAMS,
+        mountMagnets: { enabled: true, diameter: mm(6.5), depth: mm(2.5) },
+      });
+      render(<BaseSection />);
+      expect(screen.queryByText('baseplate.mountMagnets.tooDeep')).not.toBeInTheDocument();
     });
   });
 

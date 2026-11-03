@@ -17,6 +17,8 @@ import { generateBinDirect, canBinUseDirectMesh } from '@/shared/generation/dire
 import { handleWasmLoadFailure } from '@/shared/generation/captureWasmLoadFailure';
 import { isUnsupportedWasmError } from '@/shared/generation/wasmLoadError';
 import { withSocketNozzle } from '@/shared/generation/socketNozzle';
+import { holderMeshHashes } from '@/shared/generation/meshRefs';
+import { subscribeMeshFileArrivals } from '@/shared/generation/meshStore';
 import {
   binMeshCacheKey,
   loadPersistedBinMesh,
@@ -57,6 +59,7 @@ function toMeshPayload(result: BridgeResult): GenerationResult {
     slideTrayMesh: result.mesh.slideTrayMesh,
     detachableFeetMesh: result.mesh.detachableFeetMesh,
     knifeRestMesh: result.mesh.knifeRestMesh,
+    slantSupportMesh: result.mesh.slantSupportMesh,
     labelPlates: result.mesh.labelPlates,
     labelTextOverflow: result.mesh.labelTextOverflow,
     typeStemWarning: result.mesh.typeStemWarning,
@@ -88,6 +91,7 @@ function meshDataToPayload(mesh: MeshData): GenerationResult {
     slideTrayMesh: mesh.slideTrayMesh,
     detachableFeetMesh: mesh.detachableFeetMesh,
     knifeRestMesh: mesh.knifeRestMesh,
+    slantSupportMesh: mesh.slantSupportMesh,
     labelPlates: mesh.labelPlates,
     labelTextOverflow: mesh.labelTextOverflow,
     typeStemWarning: mesh.typeStemWarning,
@@ -286,7 +290,8 @@ export function useGeneration(): void {
       // a heavy design, and skipping the draft there strands a multi-second
       // exact with no interim feedback.
       const lastExactSlow = lastExactMsRef.current >= FORCE_DRAFT_AFTER_EXACT_MS;
-      const preview = previewBridgeRef.current;
+      const preview =
+        genParams.base.rimFillet && !genParams.base.stackingLip ? null : previewBridgeRef.current;
 
       // Draft-only fallback: when the device-aware estimate says the exact would
       // blow the preview time ceiling on THIS device, running it just burns the
@@ -351,10 +356,12 @@ export function useGeneration(): void {
         // entry the layout later reads back — the designer rebuilds them cheaply
         // on the next generation.
         const { labelPlates, ...withoutPlates } = result.mesh;
-        savePersistedBinMesh(
-          binMeshCacheKey(genParams, getActiveKernel()),
-          labelPlates ? withoutPlates : result.mesh
-        );
+        if (!result.meshesPending) {
+          savePersistedBinMesh(
+            binMeshCacheKey(genParams, getActiveKernel()),
+            labelPlates ? withoutPlates : result.mesh
+          );
+        }
 
         // Once the user pauses, speculatively warm the export-quality shell so
         // the first export skips the deferred socket↔body fuse. (Any prior timer
@@ -552,6 +559,18 @@ export function useGeneration(): void {
       void runGeneration(params);
     }
   }, [epoch, params, itemKind, structure, envelope, runGeneration, runItemGeneration]);
+
+  // A mesh built while one of the design's files was not on this device shows
+  // that pocket uncut, and nothing else would rebuild it once the file arrives.
+  useEffect(() => {
+    const item = itemKind !== 'bin' && structure && envelope ? { envelope, structure } : null;
+    const hashes = new Set(holderMeshHashes(item ? { structure } : { params }));
+    if (hashes.size === 0) return;
+    return subscribeMeshFileArrivals((hash) => {
+      if (!initializedRef.current || !hashes.has(hash)) return;
+      void (item ? runItemGeneration(item) : runGeneration(params));
+    });
+  }, [itemKind, params, structure, envelope, runGeneration, runItemGeneration]);
 
   // Re-generate when the print nozzle changes. Nozzle is not part of the design
   // (so it doesn't bump the epoch), but a socket bin's pocket clearance scales

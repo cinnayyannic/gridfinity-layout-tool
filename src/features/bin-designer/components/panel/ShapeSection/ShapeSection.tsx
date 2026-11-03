@@ -9,6 +9,7 @@
 import { useCallback } from 'react';
 import { Button } from '@/design-system';
 import { FeatureToggle } from '@/shared/components/FeatureToggle';
+import { FeatureTip } from '../../FeatureTip';
 import { useShapeSection } from './useShapeSection';
 import { ShapeGrid } from './ShapeGrid';
 
@@ -31,6 +32,13 @@ export function ShapeSection() {
       label={t('binDesigner.shape.customShape')}
       checked={state.editingEnabled}
       onChange={handlers.toggleEditingEnabled}
+      badge={
+        <FeatureTip
+          tip="customShape"
+          feature={t('binDesigner.shape.customShape')}
+          detail={t('binDesigner.shape.custom.hint')}
+        />
+      }
       primaryControls={
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -64,9 +72,6 @@ export function ShapeSection() {
             ariaLabel={t('binDesigner.shape.grid.ariaLabel')}
             cellLabel={cellLabel}
           />
-          {state.isCustom && (
-            <p className="text-label text-content-tertiary">{t('binDesigner.shape.custom.hint')}</p>
-          )}
         </div>
       }
     />

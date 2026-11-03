@@ -195,6 +195,10 @@ export const LID_EXTRA_HEIGHT_MIN_MM = 0;
 export const LID_EXTRA_HEIGHT_MAX_MM = 100;
 export const LID_EXTRA_HEIGHT_STEP_MM = 1;
 
+/** Bounds for {@link LidConfig.heightUnits}; the reachable range is narrower. */
+export const LID_HEIGHT_UNITS_MIN = 1;
+export const LID_HEIGHT_UNITS_MAX = 50;
+
 /**
  * Available click-rail coverage options as a percentage of edge length.
  * Lower values save filament; higher values give more grip surface.
@@ -796,16 +800,38 @@ export function hingeAxisAboveLipTopMm(params: HingeAxisSource): number {
 }
 
 /**
+ * Axis height (mm) above the lip top on a stock hinged lid: no extra height
+ * and the standard height unit.
+ */
+export function hingeStockAxisAboveLipTopMm(): number {
+  return -LID_TOP_THICKNESS_BASE - lidAnchorZ(GRIDFINITY_SPEC.HEIGHT_UNIT, LID_FIT_CLEARANCE);
+}
+
+/**
+ * Height (mm) of the hinge axis above the corner the lid stops against: the
+ * top outer corner of the bin's hinge wall.
+ *
+ * Wherever the axis sits higher above the rim than on a stock lid, from extra
+ * height or a taller height unit, the bin's hinge wall rises to make up the
+ * difference, so this never exceeds the stock height. Keeping it there keeps
+ * the stop lobe, the plate floor and the trim plane as small and as steep as
+ * on a stock lid.
+ */
+export function hingeAxisAboveStopMm(params: HingeAxisSource): number {
+  return Math.min(hingeAxisAboveLipTopMm(params), hingeStockAxisAboveLipTopMm());
+}
+
+/**
  * Radius (mm) of the stop lobe, measured from the axis.
  *
- * The lid comes to rest when its trim face meets the bin's lip-top outer
- * corner, `LID_HINGE_AXIS_INSET_MM` outboard of the axis and
- * {@link hingeAxisAboveLipTopMm} below it. The lobe only has to REACH that
+ * The lid comes to rest when its trim face meets the stop corner,
+ * `LID_HINGE_AXIS_INSET_MM` outboard of the axis and
+ * {@link hingeAxisAboveStopMm} below it. The lobe only has to REACH that
  * corner: its angle is the trim plane's business.
  */
 export function hingeStopRadiusMm(params: HingeAxisSource): number {
   return (
-    Math.hypot(LID_HINGE_AXIS_INSET_MM, hingeAxisAboveLipTopMm(params)) + LID_HINGE_STOP_MARGIN_MM
+    Math.hypot(LID_HINGE_AXIS_INSET_MM, hingeAxisAboveStopMm(params)) + LID_HINGE_STOP_MARGIN_MM
   );
 }
 
@@ -814,9 +840,8 @@ export function hingeStopRadiusMm(params: HingeAxisSource): number {
  *
  * The export lays the lid on its top face, so the plate has to be the tallest
  * thing on it: the stop lobe, which points up at rest, has to sit under that
- * face or the plate balances on it and prints on supports. Grows with the
- * extra-height knob, because the axis does and the corner the lobe reaches for
- * does not. Rounded up to the thickness step so the stepper can land on it.
+ * face or the plate balances on it and prints on supports. Rounded up to the
+ * thickness step so the stepper can land on it.
  */
 export function hingePlateFloorMm(params: HingeAxisSource): number {
   const need = hingeStopRadiusMm(params) + LID_HINGE_PLATE_CLEARANCE_MM;
@@ -1187,6 +1212,15 @@ export interface LidConfig {
    */
   readonly extraHeightMm: number;
   /**
+   * Lid height in whole height units. When set, `extraHeightMm` is derived
+   * from it so the lid's top (its stack grid's top, when it has one) stands
+   * exactly this many units above the bin's stacking-lip top: level with the
+   * rim of a bin that many units taller. The store re-derives it after every
+   * edit and `paramMigration` on every load, so `extraHeightMm` stays the one
+   * field geometry reads. Absent means the millimetre knob is authoritative.
+   */
+  readonly heightUnits?: number;
+  /**
    * Floor plate thickness (mm) — the solid slab between the lid's top face
    * and its mating cavity. A FLOOR, not a cap: magnet pockets
    * and a tray recess still raise the plate above this when they need more
@@ -1227,6 +1261,18 @@ export interface LidConfig {
    * Got: those were features, and this is the resolution of a defect.
    */
   readonly relieveInterior: boolean;
+  /**
+   * Fill the lid's hollow with a plug flush with its mating edge — the skirt
+   * bottom, or the magnet bosses' face — just above the divider tops, so small
+   * parts stay in their compartment with the lid on. Friction and magnetic
+   * lids only; read it through {@link lidHasFill}.
+   *
+   * Changes the BIN as well: a filled lid's bin skips the interior relief ring, whose
+   * notches at every divider end would otherwise leave a passage along the walls.
+   *
+   * ABSENT when off, for the fingerprint reason {@link slide} documents.
+   */
+  readonly fill?: true;
   /**
    * Sliding-lid geometry. Read only when {@link attachment} is `'slide'`, so
    * switching modes preserves it exactly as the per-side `clickRails` selection
@@ -1836,6 +1882,45 @@ export function lidGripModeAllowed(params: LidGeometrySource, mode: LidGripMode)
  */
 export function hasAnyLidGripSide(sides: LidGripSides): boolean {
   return LID_RAIL_SIDES.some((side) => sides[side]);
+}
+
+/**
+ * Whether the lid carries a fill plug and the bin keeps its
+ * divider ends whole. Click rails are excluded because they need the relief
+ * ring; a slide or hinge lid has no cavity to fill or would sweep the plug
+ * through the dividers.
+ */
+export function lidHasFill(params: LidGeometrySource): boolean {
+  const { lid } = params;
+  return (
+    lid.enabled &&
+    lid.fill === true &&
+    attachmentTakesFill(lid.attachment) &&
+    params.base.stackingLip
+  );
+}
+
+export function attachmentTakesFill(attachment: LidAttachment): boolean {
+  return attachment === 'friction' || attachment === 'magnetic';
+}
+
+/**
+ * The fill plug's underside in lid-local Z, or null without a plug: flush with
+ * the magnet bosses' face on a magnetic lid, the skirt's bottom otherwise. The
+ * seated lid drops `mateRelief * √2` below its anchor, so the plane is taken one
+ * settle high, as `retentionBossFaceZ` takes the bosses.
+ */
+export function lidFillBottomZ(params: LidGeometrySource): number | null {
+  if (!lidHasFill(params)) return null;
+  const { heightUnitMm } = params;
+  const cavityExtra = resolveLidCavityExtraMm(params);
+  // The worker's `retentionMagnets`, narrowed by `lidHasFill`: no hinge catch,
+  // and a lipless bin never reaches here.
+  const edgeZ =
+    params.lid.attachment === 'magnetic' && !isPartialMask(params.cellMask)
+      ? lidRetentionInterfaceZ(heightUnitMm, cavityExtra, params.lid.retentionMagnet.depth)
+      : lidWallBottomZ(heightUnitMm, LID_FIT_CLEARANCE, cavityExtra);
+  return edgeZ + resolveLidMateRelief(params) * Math.SQRT2;
 }
 
 /** Whether this design generates any grip relief at all. */

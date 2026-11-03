@@ -10,6 +10,7 @@ import type {
   StackPrintParams,
   SplitOverride,
   ScrewHoleParams,
+  MountMagnetParams,
   FractionalEdge,
 } from './types';
 import {
@@ -62,12 +63,19 @@ export const SCREW_HOLE_MIN_DIAMETER_MM = 2;
 export const SCREW_HOLE_MAX_DIAMETER_MM = 8;
 
 /**
- * Head recess defaults (mm), from kennetek's `standard.scad` so plates match the
- * wider ecosystem: countersink widens the shaft by 2×2.3mm, counterbore is a
- * flat ø5.5 × 3mm pocket for a socket-head cap.
+ * Head recess defaults (mm) a new screw config starts at: an M3 flat head is
+ * ø6, which still seats in the solid post where four pockets meet on a stock
+ * plate, so the screws cost no height. The counterbore is a flat ø5.5 × 3mm
+ * pocket for an M3 socket-head cap.
  */
-export const SCREW_COUNTERSINK_DEFAULT_DIAMETER_MM = 8;
+export const SCREW_COUNTERSINK_DEFAULT_DIAMETER_MM = 6;
 export const SCREW_COUNTERBORE_DEFAULT_DIAMETER_MM = 5.5;
+/**
+ * Head width a stored countersink WITHOUT `headDiameter` resolves to. Plates
+ * that omit the field were built at ø8 (kennetek's `standard.scad` cone), so
+ * this must stay 8 or they change shape on load. New configs store their width.
+ */
+export const SCREW_COUNTERSINK_UNSET_DIAMETER_MM = 8;
 export const SCREW_COUNTERBORE_DEFAULT_DEPTH_MM = 3;
 export const SCREW_HEAD_MIN_DIAMETER_MM = 3;
 export const SCREW_HEAD_MAX_DIAMETER_MM = 16;
@@ -104,6 +112,33 @@ export const SCREWS_PER_PIECE_DEFAULT = 4;
 export const SCREWS_PER_PIECE_MIN = 1;
 export const SCREWS_PER_PIECE_MAX = 8;
 
+export const SCREW_EDGE_INSET_CELLS_DEFAULT = 0;
+export const SCREW_EDGE_INSET_CELLS_MIN = 0;
+export const SCREW_EDGE_INSET_CELLS_MAX = 4;
+
+/**
+ * Underside mount-magnet bounds + defaults (mm), sized for a ø6 × 2mm magnet.
+ * The hole is 0.5mm wider than the magnet but exactly as deep, so the magnet
+ * sits flush with the underside and touches the steel it holds to. A standard
+ * plate keeps the default clear of the pocket corners; a low-profile plate
+ * without a floor may not, so the generator checks each junction and the panel
+ * warns.
+ */
+export const MOUNT_MAGNET_DEFAULT_DIAMETER_MM = 6.5;
+export const MOUNT_MAGNET_MIN_DIAMETER_MM = 2;
+export const MOUNT_MAGNET_MAX_DIAMETER_MM = 6.5;
+export const MOUNT_MAGNET_DEFAULT_DEPTH_MM = 2;
+export const MOUNT_MAGNET_MIN_DEPTH_MM = 0.5;
+export const MOUNT_MAGNET_MAX_DEPTH_MM = 2.5;
+
+/**
+ * Mount magnets per split piece. The ceiling bounds the stored value only; a
+ * piece never takes more than its interior junctions, so "max" means "all".
+ */
+export const MOUNT_MAGNETS_PER_PIECE_DEFAULT = 4;
+export const MOUNT_MAGNETS_PER_PIECE_MIN = 1;
+export const MOUNT_MAGNETS_PER_PIECE_MAX = 64;
+
 /** Default baseplate parameters: no magnets, no padding */
 export const DEFAULT_BASEPLATE_PARAMS: StoredBaseplateParams = {
   magnetHoles: false,
@@ -139,6 +174,7 @@ export function migrateBaseplateParams(stored: unknown): StoredBaseplateParams {
   const stackPrint = migrateStackPrint(obj.stackPrint);
   const splitOverride = migrateSplitOverride(obj.splitOverride);
   const screwHoles = migrateScrewHoles(obj.screwHoles);
+  const mountMagnets = migrateMountMagnets(obj.mountMagnets);
   const radii = obj.cornerRadii;
   const hasRadii =
     radii !== null &&
@@ -151,6 +187,8 @@ export function migrateBaseplateParams(stored: unknown): StoredBaseplateParams {
     magnetHoles: typeof obj.magnetHoles === 'boolean' ? obj.magnetHoles : false,
     magnetDiameter: mm(clampNumber(obj.magnetDiameter, 0.5, 20, 6.5)),
     magnetDepth: mm(clampNumber(obj.magnetDepth, 0.5, 10, 2)),
+    ...(obj.magnetCrushRibs === true ? { magnetCrushRibs: true } : {}),
+    ...(obj.magnetChamfer === true ? { magnetChamfer: true } : {}),
     paddingLeft: mm(clampNumber(obj.paddingLeft, 0, 100, 0)),
     paddingRight: mm(clampNumber(obj.paddingRight, 0, 100, 0)),
     paddingFront: mm(clampNumber(obj.paddingFront, 0, 100, 0)),
@@ -189,6 +227,7 @@ export function migrateBaseplateParams(stored: unknown): StoredBaseplateParams {
         }
       : {}),
     ...(typeof obj.lightweight === 'boolean' ? { lightweight: obj.lightweight } : {}),
+    ...(typeof obj.ecoPlate === 'boolean' ? { ecoPlate: obj.ecoPlate } : {}),
     ...(typeof obj.solidFloor === 'boolean' ? { solidFloor: obj.solidFloor } : {}),
     ...(typeof obj.solidFloorThickness === 'number'
       ? {
@@ -239,6 +278,7 @@ export function migrateBaseplateParams(stored: unknown): StoredBaseplateParams {
     ...(isFractionalEdge(obj.fractionalEdgeY) ? { fractionalEdgeY: obj.fractionalEdgeY } : {}),
     ...(splitOverride ? { splitOverride } : {}),
     ...(screwHoles ? { screwHoles } : {}),
+    ...(mountMagnets ? { mountMagnets } : {}),
   };
 }
 
@@ -315,6 +355,58 @@ function migrateScrewHoles(value: unknown): ScrewHoleParams | undefined {
           ),
         }
       : {}),
+    ...(typeof o.edgeInsetCells === 'number' && Number.isFinite(o.edgeInsetCells)
+      ? {
+          edgeInsetCells: Math.round(
+            clampNumber(
+              o.edgeInsetCells,
+              SCREW_EDGE_INSET_CELLS_MIN,
+              SCREW_EDGE_INSET_CELLS_MAX,
+              SCREW_EDGE_INSET_CELLS_DEFAULT
+            )
+          ),
+        }
+      : {}),
+    ...(o.cellCorner === 'outer' || o.cellCorner === 'inner' ? { cellCorner: o.cellCorner } : {}),
+  };
+}
+
+/** Validate + clamp persisted mount-magnet params, or undefined if absent/invalid. */
+function migrateMountMagnets(value: unknown): MountMagnetParams | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const o = value as Record<string, unknown>;
+  if (typeof o.enabled !== 'boolean') return undefined;
+  return {
+    enabled: o.enabled,
+    diameter: mm(
+      clampNumber(
+        o.diameter,
+        MOUNT_MAGNET_MIN_DIAMETER_MM,
+        MOUNT_MAGNET_MAX_DIAMETER_MM,
+        MOUNT_MAGNET_DEFAULT_DIAMETER_MM
+      )
+    ),
+    depth: mm(
+      clampNumber(
+        o.depth,
+        MOUNT_MAGNET_MIN_DEPTH_MM,
+        MOUNT_MAGNET_MAX_DEPTH_MM,
+        MOUNT_MAGNET_DEFAULT_DEPTH_MM
+      )
+    ),
+    ...(typeof o.perPiece === 'number' && Number.isFinite(o.perPiece)
+      ? {
+          perPiece: Math.round(
+            clampNumber(
+              o.perPiece,
+              MOUNT_MAGNETS_PER_PIECE_MIN,
+              MOUNT_MAGNETS_PER_PIECE_MAX,
+              MOUNT_MAGNETS_PER_PIECE_DEFAULT
+            )
+          ),
+        }
+      : {}),
+    ...(o.chamfer === true ? { chamfer: true } : {}),
   };
 }
 
@@ -354,7 +446,7 @@ function clampNumber(value: unknown, min: number, max: number, defaultVal: numbe
   return Math.min(max, Math.max(min, value));
 }
 
-const PADDING_ANCHOR_VALUES = new Set<string>([
+export const PADDING_ANCHOR_VALUES = new Set<string>([
   'tl',
   'tc',
   'tr',

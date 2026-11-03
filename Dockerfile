@@ -5,12 +5,13 @@
 
 # glibc on purpose: it is the toolchain CI and Vercel build with, and the
 # native TypeScript compiler has no musl build.
-FROM --platform=$BUILDPLATFORM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS build
+FROM --platform=$BUILDPLATFORM node:26-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS build
 WORKDIR /app
 ENV PNPM_HOME=/pnpm COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=true
 # corepack reads the pinned pnpm from package.json; it runs before .npmrc lands
 # because that file's min-release-age would refuse a fresh exact pin under npm.
-RUN corepack enable
+# Node 25+ no longer bundles corepack, so it is installed first.
+RUN npm install -g corepack@0.36.0 && corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY patches ./patches
 COPY packages ./packages
@@ -27,7 +28,7 @@ RUN pnpm run build && find dist -name '*.map' -delete
 
 # COPY-only stage: nothing executes here, so the arm64 image builds without
 # emulation. The dist is arch-independent.
-FROM nginxinc/nginx-unprivileged:1.31.5-alpine-slim@sha256:736aa11ab9f9c320825722e411661c64559881e15e77f37137eef168ebe9515c
+FROM nginxinc/nginx-unprivileged:1.31.7-alpine-slim@sha256:a8cb0f33d51fa107c96fd2bd3a71aaf564ec131e9d2bdf8700944f0ed8b170d7
 ARG GIT_SHA=""
 ARG VERSION="dev"
 LABEL org.opencontainers.image.source="https://github.com/andymai/gridfinity-layout-tool" \

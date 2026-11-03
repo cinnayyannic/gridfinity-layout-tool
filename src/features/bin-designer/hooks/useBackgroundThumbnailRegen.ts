@@ -4,7 +4,9 @@
  * Runs one boot-time pass through saved designs and regenerates any missing
  * or outdated thumbnails on idle time. Without this, fresh / imported / version-
  * bumped designs only get their thumbnail on the user's *next* modal open —
- * which is exactly when they notice it's missing.
+ * which is exactly when they notice it's missing. The same pass registers any
+ * stored Workshop assembly or imported mesh that has no registry entry, and
+ * brings every entry's slant facts up to its design.
  *
  * Coordination contract:
  *  - **Sync**: signed-in users wait for the sync store to leave `'syncing'`
@@ -22,7 +24,8 @@
  */
 
 import { useEffect } from 'react';
-import { isOk } from '@/core/result';
+import { isErr, isOk } from '@/core/result';
+import { createLogger } from '@/core/logger';
 import { bridgeManager } from '@/shared/generation/bridge';
 import { trackEvent } from '@/shared/analytics/posthog';
 import { useSessionStore } from '@/core/sync/session/useSession';
@@ -30,16 +33,18 @@ import { useSyncStatusStore } from '@/core/sync/status';
 import { useDesignerStore } from '../store';
 import { listDesigns, updateDesignThumbnail } from '../storage/DesignerStorage';
 import {
+  loadRegistry,
   upsertRegistryEntry,
-  registryEdgeFields,
-  registryHeightFields,
-  registryOverhangFields,
-  registryKnifeRestFields,
+  registryItemEntry,
+  registryParamsEntry,
+  refreshRegistrySlants,
 } from '../store/customBinRegistry';
 import { regenerateThumbnail } from '../utils/thumbnailRegenerator';
 import { updateThumbnailCache } from './useDesignThumbnail';
 import { THUMBNAIL_VERSION } from '../types';
 import type { SavedDesign } from '../types';
+
+const logger = createLogger('ThumbnailRegen');
 
 /** localStorage key for the persisted preview color (mirrors PreviewCanvas). */
 const PREVIEW_COLOR_KEY = 'gridfinity-designer-preview-color';
@@ -110,6 +115,22 @@ function readPreviewColor(): string {
     return window.localStorage.getItem(PREVIEW_COLOR_KEY) ?? DEFAULT_PREVIEW_COLOR;
   } catch {
     return DEFAULT_PREVIEW_COLOR;
+  }
+}
+
+/**
+ * Register stored assemblies and imported meshes that have no registry entry.
+ * `saveDesign` never registers, so one stored with the designer closed (a sync
+ * pull) can lack one: an assembly would read as a parametric bin in the
+ * layout, and an imported mesh would be missing from its palette. An existing
+ * entry is left exactly as it is, which also makes a second pass a no-op.
+ */
+function registerUnlistedItems(designs: readonly SavedDesign[]): void {
+  const registered = new Set(loadRegistry().map((ref) => ref.id));
+  for (const design of designs) {
+    if (registered.has(design.id)) continue;
+    const entry = registryItemEntry(design);
+    if (entry) upsertRegistryEntry(entry);
   }
 }
 
@@ -209,18 +230,8 @@ async function runBatch(
       }
 
       regenerated += 1;
-      upsertRegistryEntry({
-        id: design.id,
-        name: design.name,
-        width: design.params.width,
-        depth: design.params.depth,
-        height: design.params.height,
-        ...registryEdgeFields(design.params),
-        ...registryHeightFields(design.params),
-        ...registryOverhangFields(design.params),
-        ...registryKnifeRestFields(design.params),
-        updatedAt: writeResult.value.updatedAt,
-      });
+      const entry = registryParamsEntry(writeResult.value);
+      if (entry) upsertRegistryEntry(entry);
       updateThumbnailCache(design.id, thumbnail);
 
       // Yield to the event loop between designs so user input doesn't pile up.
@@ -257,6 +268,17 @@ export function useBackgroundThumbnailRegen(): void {
 
         const listResult = await listDesigns();
         if (!isOk(listResult)) return;
+
+        registerUnlistedItems(listResult.value);
+        // An entry written before it carried slant facts reads as an upright
+        // design on default units, so the layout reserves no end support for
+        // a design that leans, and previews its overhung placements leaning.
+        const refreshed = refreshRegistrySlants(
+          listResult.value.flatMap((d) => (d.params ? [{ id: d.id, params: d.params }] : []))
+        );
+        if (isErr(refreshed)) {
+          logger.warn('Registry slant refresh failed', { code: refreshed.error.code });
+        }
 
         const stale = listResult.value.filter(needsRegen);
         if (stale.length === 0) return;

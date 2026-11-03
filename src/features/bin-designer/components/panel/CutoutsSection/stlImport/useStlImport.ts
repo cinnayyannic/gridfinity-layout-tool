@@ -21,7 +21,12 @@ import type {
   MeshImportErrorReason,
   MeshImportRotation,
 } from '@/shared/generation/meshAsset';
-import { MAX_MESH_ASSETS_PER_DESIGN, MAX_MESH_FILE_BYTES } from '@/shared/generation/meshAsset';
+import {
+  MAX_MESH_FILE_BYTES,
+  MAX_MESH_TRIANGLES_PER_DESIGN,
+  meshTrianglesTotal,
+} from '@/shared/generation/meshAsset';
+import { storeMeshAsset } from '@/shared/generation/meshRefs';
 import { defaultEntryChamfer } from '@/features/bin-designer/types';
 import { cutoutInterior } from '@/features/bin-designer/utils/binDimensions';
 import { generateUUID } from '@/shared/utils/uuid';
@@ -46,6 +51,8 @@ export interface PendingStlImport {
   readonly rotation: MeshImportRotation;
   /** True when the footprint exceeds the bin interior (warn, never scale). */
   readonly oversized: boolean;
+  /** Triangles the design's meshes already declare, before this one. */
+  readonly designTriangles: number;
 }
 
 export interface UseStlImportReturn {
@@ -55,11 +62,16 @@ export interface UseStlImportReturn {
   readonly pending: PendingStlImport | null;
   /** True while the worker is parsing/repairing/decimating. */
   readonly importing: boolean;
+  /** True while the pending mesh is being stored for placement. */
+  readonly placing: boolean;
   /** Re-run the import with the given axis set to an absolute angle (degrees). */
   readonly setAxisRotation: (axis: keyof MeshImportRotation, degrees: number) => void;
-  /** Place the pending mesh as a cutout at the interior center. */
-  readonly place: () => void;
-  /** Discard the pending import. */
+  /**
+   * Place the pending mesh as a cutout at the interior center, its mesh stored
+   * as a file. A second call while one is storing does nothing.
+   */
+  readonly place: () => Promise<void>;
+  /** Discard the pending import, including a placement still storing its mesh. */
   readonly cancel: () => void;
 }
 
@@ -70,6 +82,9 @@ export function useStlImport(): UseStlImportReturn {
 
   const [pending, setPending] = useState<PendingStlImport | null>(null);
   const [importing, setImporting] = useState(false);
+  const [placing, setPlacing] = useState(false);
+  /** The import a placement in progress claimed; cancel() releases it. */
+  const placingRef = useRef<PendingStlImport | null>(null);
   /** Raw file bytes retained while the dialog is open, for rotation re-runs. */
   const bufferRef = useRef<ArrayBuffer | null>(null);
   const fileNameRef = useRef<string>('');
@@ -96,7 +111,8 @@ export function useStlImport(): UseStlImportReturn {
             return;
           }
           const { asset } = outcome;
-          const { innerW, innerD } = cutoutInterior(useDesignerStore.getState().params);
+          const current = useDesignerStore.getState().params;
+          const { innerW, innerD } = cutoutInterior(current);
           setPending({
             asset,
             positions: outcome.positions,
@@ -105,6 +121,7 @@ export function useStlImport(): UseStlImportReturn {
             fileName: fileNameRef.current,
             rotation,
             oversized: asset.sizeMm.x > innerW || asset.sizeMm.y > innerD,
+            designTriangles: meshTrianglesTotal(current.meshAssets),
           });
         } finally {
           bridgeManager.release();
@@ -129,12 +146,10 @@ export function useStlImport(): UseStlImportReturn {
         trackEvent('stl_import', { success: false, error_code: 'too_large' });
         return;
       }
-      const meshAssetCount = Object.keys(
-        useDesignerStore.getState().params.meshAssets ?? {}
-      ).length;
-      if (meshAssetCount >= MAX_MESH_ASSETS_PER_DESIGN) {
-        addToast(t('toast.stlImport.assetLimit', { count: MAX_MESH_ASSETS_PER_DESIGN }), 'error');
-        trackEvent('stl_import', { success: false, error_code: 'asset_limit' });
+      const used = meshTrianglesTotal(useDesignerStore.getState().params.meshAssets);
+      if (used >= MAX_MESH_TRIANGLES_PER_DESIGN) {
+        addToast(t('toast.stlImport.budgetFull'), 'error');
+        trackEvent('stl_import', { success: false, error_code: 'budget_full' });
         return;
       }
       void file.arrayBuffer().then((buffer) => {
@@ -148,7 +163,7 @@ export function useStlImport(): UseStlImportReturn {
 
   const setAxisRotation = useCallback(
     (axis: keyof MeshImportRotation, degrees: number) => {
-      if (!pending || importing) return;
+      if (!pending || importing || placingRef.current) return;
       const normalized = Number.isFinite(degrees) ? ((degrees % 360) + 360) % 360 : 0;
       if (normalized === pending.rotation[axis]) return;
       void runImport({ ...pending.rotation, [axis]: normalized });
@@ -156,11 +171,39 @@ export function useStlImport(): UseStlImportReturn {
     [pending, importing, runImport]
   );
 
-  const place = useCallback(() => {
-    if (!pending) return;
+  const cancel = useCallback(() => {
+    placingRef.current = null;
+    setPlacing(false);
+    bufferRef.current = null;
+    setPending(null);
+  }, []);
+
+  const place = useCallback(async () => {
+    if (!pending || placingRef.current) return;
+    const claimed = pending;
+    const claimedFor = useDesignerStore.getState().currentDesignId;
+    placingRef.current = claimed;
+    setPlacing(true);
+    const stored = await storeMeshAsset(claimed.asset);
+    if (placingRef.current !== claimed) return;
+    // A new design gains its id when first saved and is still the same design.
+    const designNow = useDesignerStore.getState().currentDesignId;
+    if (claimedFor !== null && designNow !== claimedFor) {
+      cancel();
+      return;
+    }
+    placingRef.current = null;
+    setPlacing(false);
     const meshId = generateUUID();
-    const { asset, suggestedCutDepth } = pending;
+    const { asset, suggestedCutDepth } = claimed;
     const current = useDesignerStore.getState().params;
+    // The dialog holds Place back past the budget, but the design may have
+    // gained a mesh since it opened. Refreshing the count shows the user why.
+    const designTriangles = meshTrianglesTotal(current.meshAssets);
+    if (designTriangles + asset.triangleCount > MAX_MESH_TRIANGLES_PER_DESIGN) {
+      setPending({ ...claimed, designTriangles });
+      return;
+    }
     const { innerW, innerD } = cutoutInterior(current);
     addMeshCutout(
       {
@@ -182,22 +225,17 @@ export function useStlImport(): UseStlImportReturn {
           suggestedCutDepth
         ),
       },
-      asset
+      stored ?? asset
     );
     trackEvent('stl_import', {
       success: true,
       triangle_count: asset.triangleCount,
-      oversized: pending.oversized,
+      oversized: claimed.oversized,
     });
     addToast(t('toast.stlImport.success', { name: asset.name }), 'success');
     bufferRef.current = null;
     setPending(null);
-  }, [pending, addMeshCutout, addToast, t]);
-
-  const cancel = useCallback(() => {
-    bufferRef.current = null;
-    setPending(null);
-  }, []);
+  }, [pending, cancel, addMeshCutout, addToast, t]);
 
   // Hidden file input (mirrors useSvgImport)
   const handleFileRef = useRef<(file: File) => void>(() => {});
@@ -228,5 +266,5 @@ export function useStlImport(): UseStlImportReturn {
     fileInputRef.current?.click();
   }, []);
 
-  return { triggerImport, pending, importing, setAxisRotation, place, cancel };
+  return { triggerImport, pending, importing, placing, setAxisRotation, place, cancel };
 }

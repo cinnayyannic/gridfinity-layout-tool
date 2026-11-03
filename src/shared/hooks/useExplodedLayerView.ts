@@ -1,15 +1,32 @@
 import { useMemo } from 'react';
-import type { Bin, Layer, Category, LayerId, DesignId } from '@/core/types';
+import type { Bin, Layer, Category, LayerId, DesignId, SlantSide } from '@/core/types';
 import { STAGING_ID, DEFAULT_CATEGORY_COLOR } from '@/core/constants';
-import { getLayerZStartResult } from '@/shared/utils/collision';
-import { isOk } from '@/core/result';
-import type { BinDividersSpec } from '@/shared/hooks/useBinGeometry';
+import { useRestingStack } from './useRestingStack';
+import { useSlantLayout } from './useSlantLayout';
+import { slantRenderFields } from '@/shared/utils/slantRender';
+import type { BinDividersSpec, BinShear } from '@/shared/hooks/useBinGeometry';
 
 /** Gap between layers in grid units when exploded. */
 const EXPLODE_GAP = 2.5;
 
 /** Opacity for inactive (non-active) layers in exploded mode. */
 const EXPLODE_DIM_OPACITY = 0.35;
+
+/**
+ * A slanted bin's end support for the stylized preview: its cells, in grid
+ * units, and the wedge standing on them, in scene units.
+ */
+export interface SlantSupportRender {
+  readonly side: SlantSide;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly depth: number;
+  /** How far past the bin the leaning top reaches, in grid units along the lean. */
+  readonly reach: number;
+  readonly pivot: number;
+  readonly top: number;
+}
 
 /** Renderable data for a single bin (matches binsToRender shape in IsometricPreview). */
 export interface BinRenderData {
@@ -23,17 +40,23 @@ export interface BinRenderData {
   opacity: number;
   /** Compartment dividers from the bin's linked design, if any. */
   dividers?: BinDividersSpec;
+  /** A slanted bin's lean, drawn on the stylized box. */
+  shear?: BinShear;
+  /** A slanted bin's end support, standing past its leaning side. */
+  slantSupport?: SlantSupportRender;
 }
 
 /** Per-layer grouping for exploded view rendering. */
 export interface LayerRenderGroup {
   layer: Layer;
-  baseZ: number;
+  /** Lowest resting base among the layer's bins; 0 when it has none. */
+  floorZ: number;
+  /** Midway between the layer's lowest base and highest top, for its label. */
+  labelZ: number;
   explodedZOffset: number;
   bins: BinRenderData[];
   isActive: boolean;
   opacity: number;
-  labelHeightMm: number;
 }
 
 interface UseExplodedLayerViewOptions {
@@ -41,7 +64,6 @@ interface UseExplodedLayerViewOptions {
   layers: Layer[];
   categories: Category[];
   heightToGridScale: number;
-  heightUnitMm: number;
   activeLayerId: LayerId;
   isExplodedView: boolean;
   isExitAnimating?: boolean;
@@ -58,13 +80,14 @@ export function useExplodedLayerView({
   layers,
   categories,
   heightToGridScale,
-  heightUnitMm,
   activeLayerId,
   isExplodedView,
   isExitAnimating = false,
   designDividers,
 }: UseExplodedLayerViewOptions): LayerRenderGroup[] | null {
   const categoryMap = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
+  const stack = useRestingStack(bins, layers);
+  const slantLayout = useSlantLayout();
 
   // Keep groups mounted during exit animation (offsets → 0) so useFrame can lerp back
   const shouldRender = isExplodedView || isExitAnimating;
@@ -75,31 +98,34 @@ export function useExplodedLayerView({
     const layerIndexMap = new Map(layers.map((l, idx) => [l.id, idx]));
 
     const groups: LayerRenderGroup[] = layers.map((layer, idx) => {
-      const zStartResult = getLayerZStartResult(layer.id, layers);
-      const baseZ = isOk(zStartResult) ? zStartResult.value * heightToGridScale : 0;
       const isActive = layer.id === activeLayerId;
 
       return {
         layer,
-        baseZ,
+        floorZ: 0,
+        labelZ: (layer.height * heightToGridScale) / 2,
         explodedZOffset: isExplodedView ? idx * EXPLODE_GAP : 0,
         bins: [],
         isActive,
         opacity: isExplodedView && !isActive ? EXPLODE_DIM_OPACITY : 1,
-        labelHeightMm: layer.height * heightUnitMm,
       };
     });
+    const extents = layers.map(() => ({ low: Infinity, high: -Infinity }));
 
     // Partition bins into their layer groups
     for (const bin of bins) {
       if (bin.layerId === STAGING_ID) continue;
 
       const layerIdx = layerIndexMap.get(bin.layerId);
-      if (layerIdx === undefined) continue;
+      const rest = stack.bins.get(bin.id);
+      if (layerIdx === undefined || !rest) continue;
 
       const group = groups[layerIdx];
       const category = categoryMap.get(bin.category);
       const color = category?.color || DEFAULT_CATEGORY_COLOR;
+      const extent = extents[layerIdx];
+      extent.low = Math.min(extent.low, rest.zStart);
+      extent.high = Math.max(extent.high, rest.zStart + bin.height);
 
       // Selected bins are handled separately by IsometricPreview (BinMesh with glow).
       // Include them in the group data so the parent can split them out.
@@ -107,15 +133,23 @@ export function useExplodedLayerView({
         bin,
         x: bin.x,
         y: bin.y,
-        z: group.baseZ,
+        z: rest.zStart * heightToGridScale,
         height: bin.height * heightToGridScale,
         clearanceHeight: (bin.clearanceHeight || 0) * heightToGridScale,
         color,
         opacity: group.opacity,
         dividers:
           bin.linkedDesignId !== undefined ? designDividers?.get(bin.linkedDesignId) : undefined,
+        ...slantRenderFields(bin, slantLayout),
       });
     }
+
+    groups.forEach((group, idx) => {
+      const { low, high } = extents[idx];
+      if (low === Infinity) return;
+      group.floorZ = low * heightToGridScale;
+      group.labelZ = ((low + high) / 2) * heightToGridScale;
+    });
 
     for (const group of groups) {
       group.bins.sort((a, b) => {
@@ -135,10 +169,11 @@ export function useExplodedLayerView({
     isExplodedView,
     bins,
     layers,
+    stack,
     categoryMap,
     heightToGridScale,
-    heightUnitMm,
     activeLayerId,
     designDividers,
+    slantLayout,
   ]);
 }

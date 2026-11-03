@@ -82,6 +82,7 @@ export function selectGenerationTriggers(state: LayoutState) {
   // neither family's fields can change the mesh while it is on.
   const stackingOn = bp.stackPrint?.enabled === true;
   const screwsOn = !stackingOn && bp.screwHoles?.enabled === true;
+  const mountMagnetsOn = !stackingOn && bp.mountMagnets?.enabled === true;
   // The underside cross cutters run on magnet plates and screw-pad cells.
   const lightweightRelevant = (!stackingOn && bp.magnetHoles) || screwsOn;
   return {
@@ -139,6 +140,8 @@ export function selectGenerationTriggers(state: LayoutState) {
     magnetHoles: bp.magnetHoles,
     magnetDiameter: bp.magnetDiameter,
     magnetDepth: bp.magnetDepth,
+    magnetCrushRibs: bp.magnetHoles && bp.magnetCrushRibs === true,
+    magnetChamfer: bp.magnetHoles && bp.magnetChamfer === true,
     // Layout-scoped magnet anchor (edge vs legacy center). Changes hole XY on
     // grids >42mm, so it must re-trigger BREP like the other magnet params.
     magnetAnchor: state.layout.magnetAnchor,
@@ -165,11 +168,19 @@ export function selectGenerationTriggers(state: LayoutState) {
         ? bp.screwHoles.counterboreDepth
         : undefined,
     screwsPerPiece: screwsOn ? bp.screwHoles.screwsPerPiece : undefined,
+    screwEdgeInsetCells: screwsOn ? bp.screwHoles.edgeInsetCells : undefined,
+    screwCellCorner: screwsOn ? bp.screwHoles.cellCorner : undefined,
+    mountMagnetsEnabled: mountMagnetsOn,
+    mountMagnetDiameter: mountMagnetsOn ? bp.mountMagnets.diameter : undefined,
+    mountMagnetDepth: mountMagnetsOn ? bp.mountMagnets.depth : undefined,
+    mountMagnetsPerPiece: mountMagnetsOn ? bp.mountMagnets.perPiece : undefined,
+    mountMagnetChamfer: mountMagnetsOn && bp.mountMagnets.chamfer === true,
     // Nothing in the UI writes `lightweight` today, but synced/imported params
     // can carry it, and the underside cross cutters consume it on magnet
     // plates and screw-pad cells alike — fold it out when neither can
     // (stacking strips both, so it folds out there too).
     lightweight: lightweightRelevant ? bp.lightweight !== false : true,
+    ecoPlate: !stackingOn && bp.ecoPlate === true,
     paddingLeft: bp.paddingLeft,
     paddingRight: bp.paddingRight,
     paddingFront: bp.paddingFront,

@@ -13,6 +13,7 @@ import {
   useFormatting,
   getStaticTranslation,
   _setLoadedEn,
+  _resetActiveTranslations,
 } from '@/i18n/context';
 import en from '@/i18n/locales/en';
 
@@ -54,6 +55,22 @@ describe('getStaticTranslation', () => {
   it('converts non-string variable values to strings', () => {
     const result = getStaticTranslation('toast.binsDeleted', { count: 42 });
     expect(result).toBe('Deleted 42 bin(s)');
+  });
+});
+
+describe('getStaticTranslation under a loaded locale', () => {
+  afterEach(() => {
+    _resetActiveTranslations();
+  });
+
+  it('follows the locale the provider loaded', async () => {
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <LocaleProvider initialLocale="de">{children}</LocaleProvider>
+    );
+    const { result } = renderHook(() => useTranslation(), { wrapper });
+
+    await waitFor(() => expect(result.current('common.save')).not.toBe('Save'));
+    expect(getStaticTranslation('common.save')).toBe(result.current('common.save'));
   });
 });
 
@@ -145,6 +162,43 @@ describe('LocaleProvider + useLocale', () => {
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
     });
+  });
+});
+
+describe('fallback strings', () => {
+  afterEach(() => {
+    _setLoadedEn(en);
+  });
+
+  it.each([
+    'layout.drawerLinkName',
+    'toast.drawerLinkOpened',
+    'toast.drawerLinkInvalid',
+    'toast.layoutCreateFailed',
+  ])('resolves %s exactly as en.ts does before any locale loads', (key) => {
+    _setLoadedEn(null);
+    _resetActiveTranslations();
+    expect(getStaticTranslation(key)).toBe(en[key]);
+  });
+});
+
+describe('LocaleProvider readiness', () => {
+  afterEach(() => {
+    _resetActiveTranslations();
+  });
+
+  it('is not ready on first render and becomes ready once the locale loads', async () => {
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <LocaleProvider initialLocale="de">{children}</LocaleProvider>
+    );
+
+    const { result } = renderHook(() => useLocale(), { wrapper });
+    expect(result.current.isReady).toBe(false);
+
+    await waitFor(() => {
+      expect(result.current.isReady).toBe(true);
+    });
+    expect(result.current.t('toast.layoutCreated')).toBe('Neues Layout erstellt');
   });
 });
 

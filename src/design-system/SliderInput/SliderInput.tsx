@@ -7,6 +7,7 @@
  */
 
 import { useId, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Slider } from '../Slider';
 import { cn } from '../cn';
 import { EditableValueBadge } from './EditableValueBadge';
@@ -18,6 +19,11 @@ export interface SliderInputProps {
   value: number;
   /** Called when value changes */
   onChange: (value: number) => void;
+  /**
+   * Called once a change is finished: a drag released, a key step, or a typed
+   * value accepted. Use it to close one undo step over a whole drag.
+   */
+  onCommit?: (value: number) => void;
   /** Minimum value */
   min: number;
   /** Maximum value */
@@ -28,6 +34,8 @@ export interface SliderInputProps {
   unit?: string;
   /** Secondary info shown below the label */
   info?: string;
+  /** Rendered beside the label, e.g. an info button. */
+  labelAddon?: ReactNode;
   /** Whether the control is disabled */
   disabled?: boolean;
   /** Transient emphasis ring — e.g. flashed when a preset sets this value. */
@@ -38,11 +46,13 @@ export function SliderInput({
   label,
   value,
   onChange,
+  onCommit,
   min,
   max,
   step = 1,
   unit,
   info,
+  labelAddon,
   disabled = false,
   highlight = false,
 }: SliderInputProps) {
@@ -52,6 +62,11 @@ export function SliderInput({
   const [isEditing, setIsEditing] = useState(false);
 
   const infoId = `${id}-info`;
+  const labelElement = (
+    <label htmlFor={isEditing ? id : undefined} className="text-label text-content-secondary">
+      {label}
+    </label>
+  );
   const valueText = unit ? `${value} ${unit}` : String(value);
 
   return (
@@ -64,14 +79,22 @@ export function SliderInput({
     >
       {/* Label row with editable value badge */}
       <div className="flex items-center justify-between mb-1">
-        <label htmlFor={isEditing ? id : undefined} className="text-label text-content-secondary">
-          {label}
-        </label>
+        {labelAddon === undefined ? (
+          labelElement
+        ) : (
+          <span className="flex items-center gap-1.5">
+            {labelElement}
+            {labelAddon}
+          </span>
+        )}
 
         <EditableValueBadge
           label={label}
           value={value}
-          onChange={onChange}
+          onChange={(typed) => {
+            onChange(typed);
+            onCommit?.(typed);
+          }}
           min={min}
           max={max}
           step={step}
@@ -92,6 +115,7 @@ export function SliderInput({
       <Slider
         value={value}
         onChange={onChange}
+        onCommit={onCommit}
         min={min}
         max={max}
         step={step}

@@ -229,6 +229,12 @@ it, and the designer's ghost overlay draws it in 3D. Font access arrives through
 injected `TypeMeasurer` (opentype via `brepjs/text`), which is what lets the main thread
 run the same solver the kernel does.
 
+An inside-face caption (`surfaceText.wallFaces`) takes its regions from
+`insideWallTextPlan`. The inner face carries dividers, shelves, rails, magnet pads and
+scoop ends, which one obstacle union swallows whole, so its regions are maximal empty
+rectangles per divider stretch. `wallTextBuilder` keys it on the solved placement,
+because no list of inputs stays complete.
+
 Four traps, each invisible to the obvious check:
 
 1. `sketchText` NEGATES `startX` and does not negate `startY`, so every pen position is
@@ -256,3 +262,15 @@ New designs start on `TEXT_PRESETS.engineering` while `migrateParams` backfills 
 NEUTRAL `DEFAULT_TEXT_STYLE_DEFAULTS`, so a design saved before the type system renders
 as it always did. Test fixtures measuring a host's own math must pin the neutral style
 too, or every threshold in them re-tunes the next time the shipped look changes.
+
+### Lip notches are the pockets' ridge
+
+`buildNotchedTopShapeLoft` (`boxTopShape.ts`) cuts the lip with one baseplate pocket
+per perimeter cell rather than one footprint-wide profile; the ridge two pockets leave
+is the notch. Its top stays `LIP_NOTCH_TOP_DROP_MM` below the peak: carried higher, it
+meets the knife edge at a cusp and every `lipTip` fillet or chamfer silently falls back
+to sharp. `resolveLipNotches` (`@/shared/utils/lipNotchPlan`) is the one gate:
+`deriveDimensions` resolves it to `dims.lipNotches` for the shell key and both lip
+builders, and the direct-mesh allowlist calls it. A notched cut that throws falls back
+to the plain lip. A tool cut through the lip must clear `lipInnerReachMm` (divider slots:
+`LipCutInfo.inwardReach`), not `LIP_TAPER_WIDTH`, or a thin wall leaves notch inside it.

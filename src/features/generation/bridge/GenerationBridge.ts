@@ -29,6 +29,7 @@ import type {
   WorkerMessage,
   WorkerResponse,
   ExportFormat,
+  FitTestExportOptions,
   LabelPlateExportOptions,
   LabelPlateExportSpec,
 } from './types';
@@ -61,6 +62,10 @@ import { isUnsupportedWasmError } from '@/shared/generation/wasmLoadError';
 import { extractThreadingInfo } from './bridgeHelpers';
 import { GenerationResultCache } from './resultCache';
 import { installMessageHandler } from './bridgeMessageHandler';
+import { MeshDelivery, prepareMeshes } from './meshDelivery';
+import type { PreparedMeshes } from './meshDelivery';
+import { isOk } from '@/core/result';
+import type { Result, StorageMeshMissingError } from '@/core/result';
 import {
   exportBin as exportBinImpl,
   exportDividers as exportDividersImpl,
@@ -150,6 +155,12 @@ export class GenerationBridge {
     }
   >();
   private importSeq = 0;
+
+  /** The mesh files this bridge's worker holds. */
+  private readonly meshDelivery = new MeshDelivery();
+
+  /** Latest call per export slot, counted at call time. */
+  private readonly exportCalls = new Map<ExportSlot, number>();
 
   constructor(kernel: KernelName = 'occt-wasm') {
     this.kernel = kernel;
@@ -241,6 +252,7 @@ export class GenerationBridge {
         this.worker = new Worker(new URL('../worker/generation.worker.ts', import.meta.url), {
           type: 'module',
         });
+        this.meshDelivery.reset();
 
         // A worker that loads but then stalls inside WASM init emits neither a
         // message nor an error event, so without this the promise never settles:
@@ -313,7 +325,15 @@ export class GenerationBridge {
         this.pendingEstimates.delete(requestId);
         resolve(predictedMs);
       });
-      this.postMessage({ type: 'ESTIMATE', payload: { params, requestId } });
+      const message: WorkerMessage = { type: 'ESTIMATE', payload: { params, requestId } };
+      void this.prepareMeshes(message).then(
+        (prepared) => {
+          if (isOk(prepared) && this.pendingEstimates.has(requestId)) {
+            this.postPrepared(prepared.value, message);
+          }
+        },
+        () => {}
+      );
     });
   }
 
@@ -353,7 +373,20 @@ export class GenerationBridge {
     if (this.isWarming || this.currentRequestId) return;
     this.isWarming = true;
     const requestId = `warm-${++this.warmSeq}`;
-    this.postMessage({ type: 'WARM', payload: { params, requestId } });
+    const message: WorkerMessage = { type: 'WARM', payload: { params, requestId } };
+    // A warm without a mesh's file would build a solid no export can use.
+    void this.prepareMeshes(message).then(
+      (prepared) => {
+        if (!isOk(prepared) || prepared.value.pending || this.currentRequestId) {
+          this.isWarming = false;
+        } else {
+          this.postPrepared(prepared.value, message);
+        }
+      },
+      () => {
+        this.isWarming = false;
+      }
+    );
   }
 
   /** Cancel any in-flight generation request */
@@ -618,11 +651,7 @@ export class GenerationBridge {
   exportFitTest(
     params: BinParams,
     format: ExportFormat,
-    options?: {
-      thicknessMm?: number;
-      stamp?: { designName?: string };
-      bed?: { width: number; depth: number };
-    }
+    options?: FitTestExportOptions
   ): Promise<FitTestExportResult> {
     return exportFitTestImpl(this, params, format, options);
   }
@@ -638,6 +667,12 @@ export class GenerationBridge {
   }
 
   // ── Internal helpers (used by sibling modules + this class) ───────
+
+  claimExportSlot(slot: ExportSlot): () => boolean {
+    const call = (this.exportCalls.get(slot) ?? 0) + 1;
+    this.exportCalls.set(slot, call);
+    return () => this.exportCalls.get(slot) === call;
+  }
 
   /**
    * Prepare an export slot: check destroyed state, ensure worker is initialized,
@@ -750,6 +785,18 @@ export class GenerationBridge {
 
   postMessage(message: WorkerMessage): void {
     this.worker?.postMessage(message);
+  }
+
+  prepareMeshes(message: WorkerMessage): Promise<Result<PreparedMeshes, StorageMeshMissingError>> {
+    return prepareMeshes(message);
+  }
+
+  /** Send the worker the files `prepared` names that it lacks, then `message`. */
+  postPrepared(prepared: PreparedMeshes, message: WorkerMessage): void {
+    for (const put of this.meshDelivery.messagesFor(prepared.files)) {
+      this.worker?.postMessage(put.message, put.transfer);
+    }
+    this.postMessage(prepared.apply(message));
   }
 
   nextRequestId(): string {

@@ -1,6 +1,8 @@
 import { ErrorCode, isValidShareId, MAX_NAME_LENGTH } from '../../lib/shared.js';
 import { validateDesignerShare } from '../../lib/designerValidation.js';
+import { meshRefHashes } from '../../lib/designerCutoutValidation.js';
 import { validateAssemblyContent } from '../../lib/assemblyValidation.js';
+import { validateImportedMeshContent } from '../../lib/importedMeshValidation.js';
 import { sanitizeString } from '../../lib/validation.js';
 import { createSyncResourceHandler } from '../lib/resourceHandler.js';
 
@@ -92,6 +94,35 @@ export default createSyncResourceHandler<DesignVersionEnvelope>({
       MAX_NAME_LENGTH
     );
 
+    if (inner.kind === 'importedMesh') {
+      const preBytes = Buffer.byteLength(JSON.stringify(body), 'utf8');
+      const mesh = validateImportedMeshContent(
+        { envelope: inner.envelope, structure: inner.structure },
+        { preBytes, sizeLabel: 'design version' }
+      );
+      if (!mesh.ok) return mesh;
+      const stored = {
+        designId,
+        name,
+        createdAt,
+        origin,
+        ...(pinned ? { pinned } : {}),
+        content: {
+          name: contentName,
+          kind: inner.kind,
+          envelope: mesh.envelope,
+          structure: mesh.structure,
+        },
+      };
+      return {
+        ok: true,
+        envelope: { designVersion: stored, modifiedAt, schemaVersion: SCHEMA_VERSION },
+        sizeBytes: Buffer.byteLength(JSON.stringify(stored), 'utf8'),
+        tiebreakerCandidate: stored,
+        meshHashes: mesh.meshHashes,
+      };
+    }
+
     if (inner.kind !== undefined && inner.kind !== 'bin') {
       const preBytes = Buffer.byteLength(JSON.stringify(body), 'utf8');
       const assembly = validateAssemblyContent(
@@ -129,7 +160,9 @@ export default createSyncResourceHandler<DesignVersionEnvelope>({
       JSON.stringify({ name: contentName, ...validationPayload }),
       'utf8'
     );
-    const validation = validateDesignerShare(validationPayload, preValidationBytes);
+    const validation = validateDesignerShare(validationPayload, preValidationBytes, {
+      meshRefs: true,
+    });
     if (!validation.valid) {
       return {
         ok: false,
@@ -152,6 +185,7 @@ export default createSyncResourceHandler<DesignVersionEnvelope>({
       envelope: { designVersion: stored, modifiedAt, schemaVersion: SCHEMA_VERSION },
       sizeBytes: Buffer.byteLength(JSON.stringify(stored), 'utf8'),
       tiebreakerCandidate: stored,
+      meshHashes: meshRefHashes(validation.payload.params.meshAssets),
     };
   },
   storedComparable: (stored) => stored.designVersion,

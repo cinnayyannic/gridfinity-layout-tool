@@ -8,6 +8,8 @@ import {
   validateShareLayout,
   validateExpiration,
   validateSharedDesigns,
+  sharedDesignMeshHashes,
+  withoutLibraryPlacement,
 } from '../../api/lib/validation.js';
 
 interface TestBin {
@@ -24,6 +26,12 @@ interface TestBin {
   customProperties?: Record<string, string>;
   linkedDesignId?: string;
   locked?: boolean;
+  clearanceHeight?: unknown;
+  items?: unknown;
+  extendToMargin?: unknown;
+  marginTaper?: unknown;
+  overhang?: unknown;
+  slant?: unknown;
 }
 
 /**
@@ -76,6 +84,67 @@ function createValidLayout() {
 }
 
 describe('validateShareLayout', () => {
+  it('keeps a bin’s items and drops a malformed one alone', () => {
+    const layout = createValidLayout();
+    layout.bins[0] = {
+      ...layout.bins[0],
+      items: [{ id: 'i1', name: 'M3 screws', qty: 40 }, { id: 'i2' }],
+    };
+    const result = validateShareLayout(layout, 1000);
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.layout.bins[0].items).toEqual([{ id: 'i1', name: 'M3 screws', qty: 40 }]);
+    }
+  });
+
+  describe('per-bin drawer-fit fields', () => {
+    const fit = {
+      clearanceHeight: 2,
+      extendToMargin: true,
+      marginTaper: { profile: 'chamfer', bandHeight: 10, flare: 2 },
+      overhang: { enabled: true, left: 0, right: 10.5, front: 0, back: 0 },
+    };
+
+    it('keeps them on every bin they arrive on', () => {
+      const layout = createValidLayout();
+      layout.bins[0] = { ...layout.bins[0], ...fit };
+      const result = validateShareLayout(layout, 1000);
+      expect(result.valid).toBe(true);
+      if (result.valid) expect(result.layout.bins[0]).toMatchObject(fit);
+    });
+
+    it('drops a malformed one and keeps the bin and its other fields', () => {
+      const layout = createValidLayout();
+      layout.bins[0] = { ...layout.bins[0], ...fit, overhang: { left: 99 } };
+      const result = validateShareLayout(layout, 1000);
+      expect(result.valid).toBe(true);
+      if (!result.valid) return;
+      expect(result.layout.bins).toHaveLength(1);
+      expect(result.layout.bins[0]).not.toHaveProperty('overhang');
+      expect(result.layout.bins[0]).toMatchObject({ clearanceHeight: 2, extendToMargin: true });
+    });
+  });
+
+  describe('per-bin slant', () => {
+    it('keeps a well-formed slant and drops a malformed one alone', () => {
+      const layout = createValidLayout();
+      layout.bins[0] = {
+        ...layout.bins[0],
+        slant: { angleDeg: 40, side: 'back', endSupport: true },
+      };
+      const kept = validateShareLayout(layout, 1000);
+      expect(kept.valid && kept.layout.bins[0].slant).toEqual({
+        angleDeg: 40,
+        side: 'back',
+        endSupport: true,
+      });
+      layout.bins[0] = { ...layout.bins[0], slant: { angleDeg: 99, side: 'back' } };
+      const dropped = validateShareLayout(layout, 1000);
+      expect(dropped.valid).toBe(true);
+      if (dropped.valid) expect(dropped.layout.bins[0]).not.toHaveProperty('slant');
+    });
+  });
+
   describe('folder placement', () => {
     it('carries a well-formed folder id through for sync', () => {
       const layout = { ...createValidLayout(), folderId: 'folder_1700000000000_ab12cd' };
@@ -89,6 +158,90 @@ describe('validateShareLayout', () => {
         const result = validateShareLayout({ ...createValidLayout(), folderId }, 1000);
         expect(result.valid).toBe(true);
         if (result.valid) expect(result.layout).not.toHaveProperty('folderId');
+      }
+    });
+  });
+
+  describe('baseplate', () => {
+    const plate = {
+      magnetHoles: false,
+      magnetDiameter: 6,
+      magnetDepth: 2,
+      paddingLeft: 10.5,
+      paddingRight: 10.5,
+      paddingFront: 0,
+      paddingBack: 21,
+      syncWithLayout: true,
+    };
+    const designId = 'baseplate_1700000000000_ab12cd';
+
+    it('keeps the plate settings', () => {
+      const result = validateShareLayout({ ...createValidLayout(), baseplateParams: plate }, 1000);
+      expect(result.valid).toBe(true);
+      if (result.valid) expect(result.layout.baseplateParams).toEqual(plate);
+    });
+
+    it('keeps the plate settings when only the underside magnet setting is malformed', () => {
+      const result = validateShareLayout(
+        {
+          ...createValidLayout(),
+          baseplateParams: { ...plate, mountMagnets: { enabled: true, diameter: 6.5, depth: 9 } },
+        },
+        1000
+      );
+      expect(result.valid).toBe(true);
+      if (result.valid) expect(result.layout.baseplateParams).toEqual(plate);
+    });
+
+    it('drops plate settings that fail validation without rejecting the layout', () => {
+      const result = validateShareLayout(
+        { ...createValidLayout(), baseplateParams: { ...plate, magnetDiameter: 500 } },
+        1000
+      );
+      expect(result.valid).toBe(true);
+      if (result.valid) expect(result.layout).not.toHaveProperty('baseplateParams');
+    });
+
+    it('keeps the design link for sync', () => {
+      const result = validateShareLayout(
+        { ...createValidLayout(), baseplateParams: plate, activeBaseplateId: designId },
+        1000
+      );
+      expect(result.valid).toBe(true);
+      if (result.valid) expect(result.layout.activeBaseplateId).toBe(designId);
+    });
+
+    it('leaves the design link out of a share, where it points into the sharer’s library', () => {
+      const result = validateShareLayout(
+        { ...createValidLayout(), baseplateParams: plate, activeBaseplateId: designId },
+        1000
+      );
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        const shared = withoutLibraryPlacement(result.layout);
+        expect(shared).not.toHaveProperty('activeBaseplateId');
+        expect(shared.baseplateParams).toEqual(plate);
+      }
+    });
+
+    it('drops the design link along with plate settings that fail validation', () => {
+      const result = validateShareLayout(
+        {
+          ...createValidLayout(),
+          baseplateParams: { ...plate, magnetDiameter: 500 },
+          activeBaseplateId: designId,
+        },
+        1000
+      );
+      expect(result.valid).toBe(true);
+      if (result.valid) expect(result.layout).not.toHaveProperty('activeBaseplateId');
+    });
+
+    it('drops a design link that is not one of ours', () => {
+      for (const activeBaseplateId of ['../etc', 'baseplate_x', 42, null]) {
+        const result = validateShareLayout({ ...createValidLayout(), activeBaseplateId }, 1000);
+        expect(result.valid).toBe(true);
+        if (result.valid) expect(result.layout).not.toHaveProperty('activeBaseplateId');
       }
     });
   });
@@ -305,6 +458,26 @@ describe('validateShareLayout', () => {
       const result = validateShareLayout(layout, 1000);
 
       expect(result.valid).toBe(true);
+    });
+
+    it('keeps a measured drawer size in the stored layout', () => {
+      const layout = createValidLayout();
+      layout.drawer.measuredMm = { width: 541, depth: 496, height: 88 };
+      const result = validateShareLayout(layout, 1000);
+
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        expect(result.layout.drawer.measuredMm).toEqual({ width: 541, depth: 496, height: 88 });
+      }
+    });
+
+    it('keeps a measured drawer size without a height', () => {
+      const layout = createValidLayout();
+      layout.drawer.measuredMm = { width: 541, depth: 496 };
+      const result = validateShareLayout(layout, 1000);
+
+      expect(result.valid).toBe(true);
+      if (result.valid) expect(result.layout.drawer.measuredMm).toEqual({ width: 541, depth: 496 });
     });
 
     it('accepts a measured drawer size without height', () => {
@@ -987,6 +1160,27 @@ describe('validateSharedDesigns', () => {
     name: 'Socket Tray',
     params: validParams(),
     ...over,
+  });
+
+  it('accepts a design naming a mesh file by ref, and lists the file it names', () => {
+    const hash = 'a'.repeat(64);
+    const params = {
+      ...validParams(),
+      cutouts: [{ id: 'c1', shape: 'mesh', meshId: 'asset-1' }],
+      meshAssets: {
+        'asset-1': {
+          name: 'wrench',
+          hash,
+          triangleCount: 12,
+          sizeMm: { x: 20, y: 10, z: 5 },
+          bytes: 4_000,
+        },
+      },
+    };
+    const result = validateSharedDesigns([design({ params })]);
+
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(sharedDesignMeshHashes(result.designs)).toEqual([hash]);
   });
 
   it('treats absent designs as an empty set', () => {

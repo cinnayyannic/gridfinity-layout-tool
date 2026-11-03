@@ -2,14 +2,17 @@ import { describe, it, expect } from 'vitest';
 import { DEFAULT_BIN_PARAMS } from '../constants';
 import { GRIDFINITY_SPEC } from '@/shared/printSettings/gridfinityGeometry';
 import type { BinParams, LidSlideConfig } from '../types';
-import { DEFAULT_LID_SLIDE_CONFIG } from '../types/lid';
+import { DEFAULT_LID_HINGE_CONFIG, DEFAULT_LID_SLIDE_CONFIG } from '../types/lid';
 import type { CellMask } from '@/shared/utils/cellMask';
+import en from '@/i18n/locales/en';
 import {
+  LID_ISSUES_WITHOUT_DETAIL,
   checkLidCompatibility,
   computeDisabledRails,
   hasLidBlocker,
   isLidBlockedBySection,
 } from './lidCompatibility';
+import type { LidCompatibilityId, LidCompatibilitySeverity } from './lidCompatibility';
 
 function withOverrides(overrides: Partial<BinParams>): BinParams {
   return { ...DEFAULT_BIN_PARAMS, ...overrides };
@@ -1120,8 +1123,28 @@ describe('checkLidCompatibility — sliding attachment', () => {
     expect(hasLidBlocker(checkLidCompatibility(p))).toBe(true);
   });
 
-  it('blocks a solid bin, which has no cavity to cover', () => {
-    expect(ids(slideParams({ style: 'solid' }))).toContain('slideUnbuildable');
+  it('asks a solid bin filled to its rim to lower the fill', () => {
+    const p = slideParams({ style: 'solid', base: { ...DEFAULT_BIN_PARAMS.base, solid: true } });
+    expect(ids(p)).toEqual(['slideFillTooHigh']);
+    expect(hasLidBlocker(checkLidCompatibility(p))).toBe(true);
+  });
+
+  it('lets a solid bin take a sliding lid once its fill leaves room', () => {
+    const p = slideParams({
+      style: 'solid',
+      base: { ...DEFAULT_BIN_PARAMS.base, solid: true },
+      cutoutConfig: { ...DEFAULT_BIN_PARAMS.cutoutConfig, topOffset: 10 },
+    });
+    expect(hasLidBlocker(checkLidCompatibility(p))).toBe(false);
+  });
+
+  it('calls a solid bin no fill level can rescue unbuildable', () => {
+    const p = slideParams({
+      style: 'solid',
+      height: 1,
+      base: { ...DEFAULT_BIN_PARAMS.base, solid: true },
+    });
+    expect(ids(p)).toEqual(['slideUnbuildable']);
   });
 
   it('reports the interrupted rim on the entry wall only, for a finger catch', () => {
@@ -1235,5 +1258,112 @@ describe('checkLidCompatibility — sliding attachment', () => {
     const p = slideParams({ walls: allFourCutouts(50) }, { entrySide: 'front' });
     const issue = checkLidCompatibility(p).find((i) => i.id === 'slideChannelInterrupted');
     expect(issue?.sides).toEqual(['left', 'right']);
+  });
+});
+
+describe('checkLidCompatibility — hinged attachment', () => {
+  const hinged = (
+    depth: number,
+    extraHeightMm: number,
+    catchMode: 'none' | 'detent' | 'magnets'
+  ): BinParams =>
+    withOverrides({
+      width: 2,
+      depth,
+      height: 6,
+      lid: {
+        ...DEFAULT_BIN_PARAMS.lid,
+        enabled: true,
+        attachment: 'hinge',
+        extraHeightMm,
+        hinge: { ...DEFAULT_LID_HINGE_CONFIG, catchMode },
+      },
+    });
+
+  it('warns when the lid is too tall for its snap rail to stay on', () => {
+    const issues = checkLidCompatibility(hinged(1, 100, 'detent'));
+    expect(issues).toContainEqual({ id: 'hingeSnapTooTall', severity: 'warning' });
+    expect(hasLidBlocker(issues)).toBe(false);
+  });
+
+  it('warns about a grip on the hinge wall, which never lifts', () => {
+    const base = hinged(2, 0, 'none');
+    const gripOn = (back: boolean, front: boolean): BinParams => ({
+      ...base,
+      lid: {
+        ...base.lid,
+        grip: {
+          ...base.lid.grip,
+          mode: 'scallop',
+          sides: { front, back, left: false, right: false },
+        },
+      },
+    });
+    const ids = (p: BinParams) => checkLidCompatibility(p).map((i) => i.id);
+    expect(ids(gripOn(true, false))).toContain('hingeGripOnHinge');
+    expect(ids(gripOn(false, true))).not.toContain('hingeGripOnHinge');
+  });
+
+  it('stays quiet where the snap rail still fits, or there is none', () => {
+    for (const params of [hinged(2, 20, 'detent'), hinged(1, 100, 'none')]) {
+      expect(checkLidCompatibility(params).map((i) => i.id)).not.toContain('hingeSnapTooTall');
+    }
+  });
+});
+
+/**
+ * Every issue and the most severe it can be reported at, so a new one fails to
+ * type-check here until it is listed.
+ */
+const ALL_ISSUES: Record<LidCompatibilityId, LidCompatibilitySeverity> = {
+  wallCutouts: 'warning',
+  wallCutoutsAllSides: 'blocker',
+  knifeSlots: 'warning',
+  openSides: 'warning',
+  wallPattern: 'warning',
+  shortBin: 'warning',
+  tallLidShortBin: 'warning',
+  tallDividerPieces: 'blocker',
+  cellMaskHoles: 'warning',
+  compartmentDividers: 'warning',
+  labelTabs: 'warning',
+  handles: 'warning',
+  handlesAllSides: 'blocker',
+  topDownCutoutsAtLip: 'warning',
+  scoopFillsLip: 'warning',
+  magnetsPolygonUnsupported: 'warning',
+  magnetTooDeepForBin: 'blocker',
+  magnetBinTooSmall: 'blocker',
+  slideFlushNeedsNoLip: 'blocker',
+  slideUnbuildable: 'blocker',
+  slideFillTooHigh: 'blocker',
+  slideInteriorBlocked: 'warning',
+  slideLongSpan: 'warning',
+  slideRimInterrupted: 'warning',
+  slideCatchThin: 'warning',
+  slideChannelInterrupted: 'warning',
+  slideWallPattern: 'warning',
+  hingeUnbuildable: 'blocker',
+  hingeStackableTop: 'blocker',
+  hingeSnapTooTall: 'warning',
+  hingeGripOnHinge: 'warning',
+  slanted: 'blocker',
+};
+
+describe('lid compatibility notes', () => {
+  it('has a detail behind the dot for every note but the one-line ones', () => {
+    const ids = Object.keys(ALL_ISSUES) as LidCompatibilityId[];
+    expect(ids.map((id) => [id, `binDesigner.lid.compat.${id}Detail` in en])).toEqual(
+      ids.map((id) => [id, !LID_ISSUES_WITHOUT_DETAIL.has(id)])
+    );
+  });
+
+  it('names a fix for every blocker the lid toggle can report on its own', () => {
+    // A lone blocker reads `compat.fix.{id}` into the toggle's reason, and a
+    // missing key renders as the raw key. A slant states itself instead.
+    const blockers = (Object.keys(ALL_ISSUES) as LidCompatibilityId[]).filter(
+      (id) => ALL_ISSUES[id] === 'blocker' && id !== 'slanted'
+    );
+    expect(blockers.filter((id) => !(`binDesigner.lid.compat.fix.${id}` in en))).toEqual([]);
   });
 });

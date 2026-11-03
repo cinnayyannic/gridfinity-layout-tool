@@ -24,9 +24,24 @@ import {
   SCREWS_PER_PIECE_DEFAULT,
   SCREWS_PER_PIECE_MIN,
   SCREWS_PER_PIECE_MAX,
+  SCREW_EDGE_INSET_CELLS_DEFAULT,
+  SCREW_EDGE_INSET_CELLS_MIN,
+  SCREW_EDGE_INSET_CELLS_MAX,
+  MOUNT_MAGNET_DEFAULT_DIAMETER_MM,
+  MOUNT_MAGNET_DEFAULT_DEPTH_MM,
+  MOUNT_MAGNET_MIN_DIAMETER_MM,
+  MOUNT_MAGNET_MAX_DIAMETER_MM,
+  MOUNT_MAGNET_MIN_DEPTH_MM,
+  MOUNT_MAGNET_MAX_DEPTH_MM,
+  MOUNT_MAGNETS_PER_PIECE_DEFAULT,
+  MOUNT_MAGNETS_PER_PIECE_MIN,
+  MOUNT_MAGNETS_PER_PIECE_MAX,
 } from '@/core/baseplateDefaults';
 import { NOZZLE_BASELINE } from '@/shared/printSettings/connectorScaling';
-import { resolveScrewHeadDiameter } from '@/shared/generation/screwHolePlan';
+import {
+  defaultScrewHeadDiameter,
+  resolveScrewHeadDiameter,
+} from '@/shared/generation/screwHolePlan';
 import { useFeatureFlag } from '@/shared/hooks/useFeatureFlag';
 import { Checkbox } from '@/design-system/Checkbox/Checkbox';
 import { useTranslation } from '@/i18n';
@@ -41,8 +56,15 @@ import { ConnectorPicker } from './ConnectorPicker';
 import type { ConnectorChoice } from './ConnectorPicker';
 import { isSeatedConnectorStyle } from '@/shared/types/bin';
 import { maxCornerRadiusMm } from '../../utils/buildFullParams';
+import { maxMountMagnetDepthForPlate } from '../../utils/mountMagnetFit';
 import { snapClipFitsPlate } from '../../utils/snapClipFit';
-import type { ScrewHeadStyle, ScrewHoleParams } from '@/core/types';
+import { usePlateScrewPadMm } from '../../hooks/usePlateScrewPadMm';
+import type {
+  MountMagnetParams,
+  ScrewCellCorner,
+  ScrewHeadStyle,
+  ScrewHoleParams,
+} from '@/core/types';
 import { Stepper } from '@/design-system/Stepper';
 import {
   CONNECTOR_FIT_OFFSET_MIN,
@@ -79,6 +101,7 @@ export function BaseSection() {
   const tiling = useBaseplatePageStore((s) => s.tiling);
   const nozzleSizeMm = useSettingsStore((s) => s.settings.printSettings.nozzleSizeMm);
   const lowProfileBase = useLayoutStore((s) => s.layout.lowProfileBase === true);
+  const screwPadMm = usePlateScrewPadMm();
   const screwHolesAvailable = useFeatureFlag('baseplate_screw_holes');
 
   // Render when the section has any content: connectors (split), magnets/floor
@@ -96,12 +119,43 @@ export function BaseSection() {
     count: screwsPerPiece,
   });
 
+  // Only a config created here is given a head width. A saved one without it
+  // resolves to ø8, the width it was built with, and must keep resolving there.
   const updateScrewHoles = (patch: Partial<ScrewHoleParams>): void => {
     updateParam('screwHoles', {
+      ...(screwHoles ?? {
+        enabled: true,
+        diameter: mm(SCREW_HOLE_DEFAULT_DIAMETER_MM),
+        headStyle: 'countersink',
+        headDiameter: mm(defaultScrewHeadDiameter('countersink')),
+      }),
+      ...patch,
+    });
+  };
+
+  const mountMagnets = baseplateParams.mountMagnets;
+  const mountMagnetsOn = mountMagnets?.enabled === true;
+  const mountMagnetDiameter = mountMagnets?.diameter ?? mm(MOUNT_MAGNET_DEFAULT_DIAMETER_MM);
+  const mountMagnetDepth = mountMagnets?.depth ?? mm(MOUNT_MAGNET_DEFAULT_DEPTH_MM);
+  const mountMagnetsPerPiece = mountMagnets?.perPiece ?? MOUNT_MAGNETS_PER_PIECE_DEFAULT;
+  const mountMagnetMaxDepth = maxMountMagnetDepthForPlate(
+    baseplateParams,
+    mountMagnetDiameter,
+    lowProfileBase,
+    screwPadMm
+  );
+  const mountMagnetSummary = t('baseplate.mountMagnets.summary', {
+    diameter: mountMagnetDiameter,
+    depth: mountMagnetDepth,
+    count: mountMagnetsPerPiece,
+  });
+
+  const updateMountMagnets = (patch: Partial<MountMagnetParams>): void => {
+    updateParam('mountMagnets', {
       enabled: true,
-      diameter: mm(SCREW_HOLE_DEFAULT_DIAMETER_MM),
-      headStyle: 'countersink',
-      ...screwHoles,
+      diameter: mm(MOUNT_MAGNET_DEFAULT_DIAMETER_MM),
+      depth: mm(MOUNT_MAGNET_DEFAULT_DEPTH_MM),
+      ...mountMagnets,
       ...patch,
     });
   };
@@ -112,6 +166,9 @@ export function BaseSection() {
   }
   if (!stackEnabled && screwHolesAvailable && screwHolesOn) {
     summaryParts.push(screwSummary);
+  }
+  if (!stackEnabled && mountMagnetsOn) {
+    summaryParts.push(mountMagnetSummary);
   }
 
   return (
@@ -134,7 +191,7 @@ export function BaseSection() {
             disabledOptions={
               stackEnabled
                 ? { snapClip: t('baseplate.connectors.snapClipNoStack') }
-                : !snapClipFitsPlate(baseplateParams, lowProfileBase, nozzleSizeMm)
+                : !snapClipFitsPlate(baseplateParams, lowProfileBase, nozzleSizeMm, screwPadMm)
                   ? { snapClip: t('baseplate.connectors.snapClipTooThin') }
                   : undefined
             }
@@ -227,13 +284,23 @@ export function BaseSection() {
           !stackEnabled &&
           baseplateParams.connectorNubs === true &&
           baseplateParams.connectorStyle === 'snapClip' &&
-          !snapClipFitsPlate(baseplateParams, lowProfileBase, nozzleSizeMm) && (
+          !snapClipFitsPlate(baseplateParams, lowProfileBase, nozzleSizeMm, screwPadMm) && (
             <p className="text-label leading-relaxed text-warning">
               {t('baseplate.connectors.snapClipTooThin')}
             </p>
           )}
         {!stackEnabled && (
           <>
+            <div className="border-t border-stroke-subtle pt-3">
+              <Checkbox
+                checked={baseplateParams.ecoPlate === true}
+                onChange={(checked) => updateParam('ecoPlate', checked || undefined)}
+                label={t('baseplate.ecoPlate')}
+              />
+              <p className="text-label leading-relaxed text-content-tertiary pl-6">
+                {t('baseplate.ecoPlateHint')}
+              </p>
+            </div>
             <div className="border-t border-stroke-subtle pt-3">
               <FeatureToggle
                 label={t('baseplate.magnetHoles')}
@@ -349,11 +416,13 @@ export function BaseSection() {
                         },
                       ]}
                       value={screwHeadStyle}
-                      // Head width is dropped with the style: the two defaults
-                      // differ (ø8 cone vs ø5.5 pocket), so carrying an explicit
-                      // countersink width into a counterbore oversizes the pocket.
+                      // Head width resets with the style: carrying a countersink
+                      // width into a counterbore oversizes the pocket.
                       onChange={(style) =>
-                        updateScrewHoles({ headStyle: style, headDiameter: undefined })
+                        updateScrewHoles({
+                          headStyle: style,
+                          headDiameter: mm(defaultScrewHeadDiameter(style)),
+                        })
                       }
                     />
                   </SettingsRow>
@@ -388,9 +457,96 @@ export function BaseSection() {
                     step={1}
                     info={t('baseplate.screwHoles.perPiece.info')}
                   />
+                  <SliderInput
+                    label={t('baseplate.screwHoles.edgeInset.label')}
+                    value={screwHoles?.edgeInsetCells ?? SCREW_EDGE_INSET_CELLS_DEFAULT}
+                    onChange={(v) => updateScrewHoles({ edgeInsetCells: v })}
+                    min={SCREW_EDGE_INSET_CELLS_MIN}
+                    max={SCREW_EDGE_INSET_CELLS_MAX}
+                    step={1}
+                    info={t('baseplate.screwHoles.edgeInset.info')}
+                  />
+                  <SettingsRow
+                    label={t('baseplate.screwHoles.cellCorner.label')}
+                    tooltip={t('baseplate.screwHoles.cellCorner.info')}
+                  >
+                    <SegmentedControl<ScrewCellCorner>
+                      aria-label={t('baseplate.screwHoles.cellCorner.label')}
+                      size="sm"
+                      options={[
+                        { value: 'outer', label: t('baseplate.screwHoles.cellCorner.outer') },
+                        { value: 'inner', label: t('baseplate.screwHoles.cellCorner.inner') },
+                      ]}
+                      value={screwHoles?.cellCorner ?? 'outer'}
+                      onChange={(cellCorner) => updateScrewHoles({ cellCorner })}
+                    />
+                  </SettingsRow>
                 </FeatureToggle>
               </div>
             )}
+            <div className="border-t border-stroke-subtle pt-3">
+              <FeatureToggle
+                label={t('baseplate.mountMagnets.label')}
+                checked={mountMagnetsOn}
+                onChange={() => updateMountMagnets({ enabled: !mountMagnetsOn })}
+                valueSummary={mountMagnetSummary}
+                primaryControls={
+                  <p className="text-label leading-relaxed text-content-tertiary">
+                    {t('baseplate.mountMagnets.info')}
+                  </p>
+                }
+              >
+                <SliderInput
+                  label={t('baseplate.mountMagnets.diameter.label')}
+                  value={mountMagnetDiameter}
+                  onChange={(v) => updateMountMagnets({ diameter: mm(v) })}
+                  min={MOUNT_MAGNET_MIN_DIAMETER_MM}
+                  max={MOUNT_MAGNET_MAX_DIAMETER_MM}
+                  step={0.1}
+                  unit="mm"
+                  info={t('baseplate.mountMagnets.diameter.info')}
+                />
+                <SliderInput
+                  label={t('baseplate.mountMagnets.depth.label')}
+                  value={mountMagnetDepth}
+                  onChange={(v) => updateMountMagnets({ depth: mm(v) })}
+                  min={MOUNT_MAGNET_MIN_DEPTH_MM}
+                  max={MOUNT_MAGNET_MAX_DEPTH_MM}
+                  step={0.1}
+                  unit="mm"
+                  info={t('baseplate.mountMagnets.depth.info')}
+                />
+                {mountMagnetDepth > mountMagnetMaxDepth + 1e-9 && (
+                  <p className="text-label leading-relaxed text-warning">
+                    {mountMagnetMaxDepth > 0
+                      ? t('baseplate.mountMagnets.tooDeep', {
+                          diameter: mountMagnetDiameter,
+                          max: mountMagnetMaxDepth,
+                        })
+                      : t('baseplate.mountMagnets.tooWide', { diameter: mountMagnetDiameter })}
+                  </p>
+                )}
+                <div className="space-y-1">
+                  <Checkbox
+                    checked={mountMagnets?.chamfer === true}
+                    onChange={(checked) => updateMountMagnets({ chamfer: checked || undefined })}
+                    label={t('baseplate.magnetChamfer')}
+                  />
+                  <p className="text-label leading-relaxed text-content-tertiary pl-6">
+                    {t('baseplate.magnetChamferHint')}
+                  </p>
+                </div>
+                <SliderInput
+                  label={t('baseplate.mountMagnets.perPiece.label')}
+                  value={mountMagnetsPerPiece}
+                  onChange={(v) => updateMountMagnets({ perPiece: v })}
+                  min={MOUNT_MAGNETS_PER_PIECE_MIN}
+                  max={MOUNT_MAGNETS_PER_PIECE_MAX}
+                  step={1}
+                  info={t('baseplate.mountMagnets.perPiece.info')}
+                />
+              </FeatureToggle>
+            </div>
           </>
         )}
         {/* Corner rounding is zeroed whenever an outline is active (the shape

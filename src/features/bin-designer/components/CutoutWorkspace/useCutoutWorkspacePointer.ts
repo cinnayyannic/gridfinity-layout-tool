@@ -17,6 +17,7 @@ import { useCutoutSelection } from '@/features/bin-designer/store';
 import { isWithin } from '@/features/bin-designer/utils/cutoutHierarchy';
 import type { Cutout } from '@/features/bin-designer/types';
 import type { InteractionMode } from '../panel/CutoutsSection/cutoutInteractionTypes';
+import { focusOwnsKeys } from '../panel/CutoutsSection/handlers';
 
 interface UseCutoutWorkspacePointerArgs {
   mode: InteractionMode;
@@ -81,7 +82,7 @@ export function useCutoutWorkspacePointer({
   // Keyboard shortcuts: Space-to-pan, Ctrl+0 fit-to-view
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !e.repeat && !(e.target instanceof HTMLInputElement)) {
+      if (e.code === 'Space' && !e.repeat && !focusOwnsKeys(e.target)) {
         e.preventDefault();
         setSpaceHeld(true);
       }
@@ -126,7 +127,8 @@ export function useCutoutWorkspacePointer({
       // Ruler tool: sticky mode (toolbar) or Shift+drag quick measurement
       if (mode.type === 'ruler-ready' || (nativeEvent.shiftKey && mode.type === 'idle')) {
         const sticky = mode.type === 'ruler-ready';
-        setMode({ type: 'measuring', startX: worldX, startY: worldY, sticky });
+        const splitId = mode.type === 'ruler-ready' ? mode.splitId : undefined;
+        setMode({ type: 'measuring', startX: worldX, startY: worldY, sticky, splitId });
         return;
       }
 

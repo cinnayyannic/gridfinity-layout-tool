@@ -9,7 +9,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { Cutout } from '@/features/bin-designer/types';
 import type { CellMask } from '@/shared/utils/cellMask';
-import type { MeshAsset } from '@/shared/generation/meshAsset';
+import type { MeshAssetEntry } from '@/shared/generation/meshAsset';
 import type { MaskCellSize } from './maskFit';
 import { useShallow } from 'zustand/react/shallow';
 import { MAX_LID_CUTOUTS } from '@/features/bin-designer/types';
@@ -17,7 +17,12 @@ import { useToastStore } from '@/core/store/toast';
 import { useSettingsStore } from '@/core/store';
 import { useTranslation } from '@/i18n';
 import { cutoutFitsInMask } from './maskFit';
-import { addClonedCutouts, clampedOffset, clampedDelta } from './cutoutHelpers';
+import {
+  addClonedCutouts,
+  clampedOffset,
+  clampedDelta,
+  translateCutoutPreview,
+} from './cutoutHelpers';
 import { PASTE_OFFSET } from './cutoutInteractionTypes';
 import { trackEvent } from '@/shared/analytics/posthog';
 
@@ -57,7 +62,7 @@ interface UseCutoutClipboardOptions {
   readonly binDepth: number;
   readonly cellMask?: CellMask;
   readonly maskCellSize?: MaskCellSize;
-  readonly meshAssets?: Readonly<Record<string, MeshAsset>>;
+  readonly meshAssets?: Readonly<Record<string, MeshAssetEntry>>;
 }
 
 export interface CutoutClipboard {
@@ -124,7 +129,13 @@ export function useCutoutClipboard({
       cellMask && maskCellSize
         ? clipboard.filter((orig) => {
             const pos = clampedOffset(orig, offset, binWidth, binDepth);
-            return cutoutFitsInMask({ ...orig, ...pos }, cellMask, maskCellSize, meshAssets);
+            // The copy as it lands, a path's points and islands moved with its box.
+            return cutoutFitsInMask(
+              translateCutoutPreview(orig, pos),
+              cellMask,
+              maskCellSize,
+              meshAssets
+            );
           })
         : clipboard;
     if (placeable.length === 0) return;
@@ -179,7 +190,13 @@ export function useCutoutClipboard({
       cellMask && maskCellSize
         ? selected.filter((orig) => {
             const pos = clampedDelta(orig, dx, dy, binWidth, binDepth);
-            return cutoutFitsInMask({ ...orig, ...pos }, cellMask, maskCellSize, meshAssets);
+            // The copy as it lands, a path's points and islands moved with its box.
+            return cutoutFitsInMask(
+              translateCutoutPreview(orig, pos),
+              cellMask,
+              maskCellSize,
+              meshAssets
+            );
           })
         : selected;
     if (placeable.length === 0) return;

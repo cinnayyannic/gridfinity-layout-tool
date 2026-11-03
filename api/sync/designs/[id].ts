@@ -1,10 +1,23 @@
 import { ErrorCode, isValidShareId, MAX_NAME_LENGTH } from '../../lib/shared.js';
 import { validateDesignerShare, sanitizeTags } from '../../lib/designerValidation.js';
+import { meshRefHashes } from '../../lib/designerCutoutValidation.js';
 import { validateAssemblyContent } from '../../lib/assemblyValidation.js';
+import { validateImportedMeshContent } from '../../lib/importedMeshValidation.js';
 import { sanitizeString } from '../../lib/validation.js';
 import { createSyncResourceHandler } from '../lib/resourceHandler.js';
 
-export const SCHEMA_VERSION = 1 as const;
+/**
+ * A version-1 envelope predates the server keeping `params.overhang`, so a
+ * missing overhang there is unknown, not cleared. A write keeps the version its
+ * client declares: a tab on the previous build still sends designs without it.
+ */
+export const SCHEMA_VERSION = 2 as const;
+
+type DesignSchemaVersion = 1 | typeof SCHEMA_VERSION;
+
+function declaredSchemaVersion(body: Record<string, unknown>): DesignSchemaVersion {
+  return body.schemaVersion === SCHEMA_VERSION ? SCHEMA_VERSION : 1;
+}
 
 /** The PUT body / GET envelope key for this resource; mirrors `PAYLOAD_KEY.designs` in src/core/sync/payloadKey.ts. */
 export const PAYLOAD_KEY = 'design' as const;
@@ -16,7 +29,7 @@ interface DesignEnvelope {
   /** `{ name, params, tags, publishedId?, lineage? }` wrapper; readers parse with `unwrapDesignPayload`. */
   design: unknown;
   modifiedAt: number;
-  schemaVersion: typeof SCHEMA_VERSION;
+  schemaVersion: DesignSchemaVersion;
 }
 
 interface StoredLineage {
@@ -170,7 +183,7 @@ function sanitizeBranch(
 function unwrapDesignPayload(design: unknown): {
   name: string | null;
   params: unknown;
-  kind?: 'assembly';
+  kind?: 'assembly' | 'importedMesh';
   envelope?: unknown;
   structure?: unknown;
   tags: unknown;
@@ -215,14 +228,14 @@ function unwrapDesignPayload(design: unknown): {
     variantOf,
     overrides
   );
-  if (kind === 'assembly') {
+  if (kind === 'assembly' || kind === 'importedMesh') {
     if (name !== undefined && typeof name !== 'string') return null;
     if (typeof envelope !== 'object' || envelope === null) return null;
     if (typeof structure !== 'object' || structure === null) return null;
     return {
       name: name ?? null,
       params: null,
-      kind: 'assembly',
+      kind,
       envelope,
       structure,
       tags,
@@ -267,7 +280,7 @@ export default createSyncResourceHandler<DesignEnvelope>({
   isValidId: (id) => /^design_\d+_[a-z0-9]{6}$/.test(id) || isValidShareId(id),
   invalidIdError: 'Invalid design id',
   deletedError: 'Design was deleted on another device. Save again to restore.',
-  buildPut: (design, modifiedAt) => {
+  buildPut: (design, modifiedAt, _id, body) => {
     const unwrapped = unwrapDesignPayload(design);
     if (!unwrapped) {
       return {
@@ -339,9 +352,35 @@ export default createSyncResourceHandler<DesignEnvelope>({
       };
       return {
         ok: true,
-        envelope: { design: stored, modifiedAt, schemaVersion: SCHEMA_VERSION },
+        envelope: { design: stored, modifiedAt, schemaVersion: declaredSchemaVersion(body) },
         sizeBytes: Buffer.byteLength(JSON.stringify(stored), 'utf8'),
         tiebreakerCandidate: stored,
+      };
+    }
+
+    if (unwrapped.kind === 'importedMesh') {
+      const preBytes = Buffer.byteLength(JSON.stringify({ ...unwrapped, name, tags }), 'utf8');
+      const mesh = validateImportedMeshContent(
+        { envelope: unwrapped.envelope, structure: unwrapped.structure },
+        { preBytes, sizeLabel: 'imported mesh design' }
+      );
+      if (!mesh.ok) return mesh;
+      const stored = {
+        name,
+        kind: 'importedMesh' as const,
+        envelope: mesh.envelope,
+        structure: mesh.structure,
+        tags,
+        ...(publishedId !== undefined ? { publishedId } : {}),
+        ...(lineage !== undefined ? { lineage } : {}),
+        ...unwrapped.branch,
+      };
+      return {
+        ok: true,
+        envelope: { design: stored, modifiedAt, schemaVersion: declaredSchemaVersion(body) },
+        sizeBytes: Buffer.byteLength(JSON.stringify(stored), 'utf8'),
+        tiebreakerCandidate: stored,
+        meshHashes: mesh.meshHashes,
       };
     }
 
@@ -354,7 +393,9 @@ export default createSyncResourceHandler<DesignEnvelope>({
       JSON.stringify({ name, tags, publishedId, lineage, ...validationPayload }),
       'utf8'
     );
-    const validation = validateDesignerShare(validationPayload, preValidationBytes);
+    const validation = validateDesignerShare(validationPayload, preValidationBytes, {
+      meshRefs: true,
+    });
     if (!validation.valid) {
       return {
         ok: false,
@@ -393,9 +434,10 @@ export default createSyncResourceHandler<DesignEnvelope>({
     };
     return {
       ok: true,
-      envelope: { design: stored, modifiedAt, schemaVersion: SCHEMA_VERSION },
+      envelope: { design: stored, modifiedAt, schemaVersion: declaredSchemaVersion(body) },
       sizeBytes,
       tiebreakerCandidate: stored,
+      meshHashes: meshRefHashes(validation.payload.params.meshAssets),
     };
   },
   storedComparable: (stored) => stored.design,

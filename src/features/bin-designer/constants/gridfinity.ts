@@ -13,12 +13,6 @@ export { GRIDFINITY_SPEC as GRIDFINITY } from '@/shared/printSettings/gridfinity
 // import to read the socket height it has to clear.
 import { GRIDFINITY_SPEC } from '@/shared/printSettings/gridfinityGeometry';
 
-/** Wall thickness per bin style (mm) */
-export const STYLE_WALL_THICKNESS: Record<string, number> = {
-  standard: 0.95,
-  slotted: 0.95,
-} as const;
-
 /** Dimension constraints for bin parameters */
 export const DESIGNER_CONSTRAINTS = {
   MIN_DIMENSION: 0.5, // grid units
@@ -155,14 +149,12 @@ export const DESIGNER_CONSTRAINTS = {
   SCOOP_STEEP_WARN_RATIO: 2,
   // Per-side body overhang (fills the drawer-fit gap; outward-only)
   MIN_OVERHANG: 0, // mm
-  MAX_OVERHANG: 21, // mm (half a 42mm grid unit — beyond this, add a grid cell)
+  MAX_OVERHANG: 42, // mm (one 42mm grid unit; past it, a grid cell fits instead)
   OVERHANG_STEP: 0.5, // mm
   // Outer-wall flare (drawer-fit "curved" bins,). Per-side value is the
   // width added at the rim above the base overhang — chamfer inset or fillet
   // radius. Independent of that side's overhang.
   MIN_TAPER: 0, // mm
-  // Flare sits above the drawer's curve, where no extra grid cell could ever
-  // fit, so MAX_OVERHANG's "add a cell instead" ceiling doesn't apply to it.
   MAX_TAPER: 42, // mm (one full grid unit)
   TAPER_STEP: 0.5, // mm
   MIN_TAPER_BAND: 0, // mm — band height (how far up the wall the taper rises)

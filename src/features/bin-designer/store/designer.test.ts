@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { designId } from '@/core/types';
+import { DEFAULT_PULL_TAB } from '@/shared/utils/pullTabPlan';
 import type { SavedDesign } from '../types';
 import {
   DEFAULT_BIN_PARAMS,
@@ -40,6 +41,22 @@ describe('useDesignerStore', () => {
   });
 
   describe('setParam', () => {
+    it('regenerates pull tabs and restores their settings through undo and redo', () => {
+      const tab = {
+        ...DEFAULT_PULL_TAB,
+        enabled: true,
+        backRecess: true,
+        widthMode: 'percent' as const,
+        widthPercent: 80,
+      };
+      const before = useDesignerStore.getState().generation.epoch;
+      useDesignerStore.getState().setParam('pullTab', tab);
+      expect(useDesignerStore.getState().generation.epoch).toBeGreaterThan(before);
+      useDesignerStore.getState().undo();
+      expect(useDesignerStore.getState().params.pullTab).toBeUndefined();
+      useDesignerStore.getState().redo();
+      expect(useDesignerStore.getState().params.pullTab).toEqual(tab);
+    });
     it('should update a single param', () => {
       useDesignerStore.getState().setParam('width', 4);
       expect(useDesignerStore.getState().params.width).toBe(4);
@@ -199,6 +216,33 @@ describe('useDesignerStore', () => {
       expect(useDesignerStore.getState().generation.epoch).toBe(epochAfterChange);
       expect(useDesignerStore.getState().generation.mesh?.vertices).toBe(verts);
       expect(useDesignerStore.getState().generation.status).toBe('complete');
+    });
+
+    // The cache stands in for a whole generation, so it has to bring back every
+    // part the worker built with the bin, not only the bin itself.
+    it('restores the companion parts and colour groups on undo, not just the bin', () => {
+      const part = {
+        vertices: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+        normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+        indices: new Uint32Array([0, 1, 2]),
+        edgeVertices: new Float32Array(0),
+        triangleCount: 1,
+      };
+      const faceGroups = [{ start: 0, count: 3, tag: 4 }];
+      useDesignerStore.getState().setGenerationResult({
+        ...part,
+        faceGroups,
+        slantSupportMesh: part,
+        lidMesh: part,
+        error: null,
+        timingMs: 100,
+      });
+      useDesignerStore.getState().setParam('width', 5);
+      useDesignerStore.getState().undo();
+      const mesh = useDesignerStore.getState().generation.mesh;
+      expect(mesh?.slantSupportMesh).toBe(part);
+      expect(mesh?.lidMesh).toBe(part);
+      expect(mesh?.faceGroups).toEqual(faceGroups);
     });
 
     it('should increment epoch on undo without cached mesh', () => {
@@ -409,5 +453,30 @@ describe('useDesignerStore', () => {
       useDesignerStore.getState().loadDesign(saved());
       expect(reconcileMock).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe('slant and the stacking lip', () => {
+  beforeEach(() => {
+    useDesignerStore.setState(useDesignerStore.getInitialState());
+  });
+
+  it('drops the lip once an edit clears the slant blocker', () => {
+    const { setParams } = useDesignerStore.getState();
+    setParams({
+      slide: { ...useDesignerStore.getState().params.slide, enabled: true },
+      slant: { angleDeg: 30, side: 'back' },
+    });
+    expect(useDesignerStore.getState().params.base.stackingLip).toBe(true);
+    setParams({ slide: { ...useDesignerStore.getState().params.slide, enabled: false } });
+    expect(useDesignerStore.getState().params.base.stackingLip).toBe(false);
+  });
+
+  it('keeps the lip off on a slanted bin whatever the lip switch asks', () => {
+    const { setParams, updateBase } = useDesignerStore.getState();
+    setParams({ slant: { angleDeg: 30, side: 'back' } });
+    expect(useDesignerStore.getState().params.base.stackingLip).toBe(false);
+    updateBase({ stackingLip: true });
+    expect(useDesignerStore.getState().params.base.stackingLip).toBe(false);
   });
 });

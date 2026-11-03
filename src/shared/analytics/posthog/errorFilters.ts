@@ -138,6 +138,11 @@ const IGNORED_MESSAGE_PATTERNS: readonly RegExp[] = [
   /No Listener: tabs:/i,
   // Chrome extension API surfaces
   /Invalid call to runtime\.sendMessage/i,
+  // A Safari Web Extension's own storage call failing ("Invalid call to
+  // browser.storage.local.set(). Exceeded storage quota.", or a "Disk I/O
+  // error" reason). Page scripts cannot reach `browser.*`, and these arrive without
+  // frames, so the source check never sees them.
+  /Invalid call to browser\.[a-z]+\./i,
   /Extension context invalidated/i,
   // Generic same-origin script error from a script we didn't load
   /^Script error\.?$/,
@@ -153,6 +158,10 @@ const IGNORED_MESSAGE_PATTERNS: readonly RegExp[] = [
   // host app didn't register the handler the chain is undefined and the injected
   // script throws. No app code is involved — we never touch `webkit`.
   /webkit\.messageHandlers/,
+  // Crypto-wallet extensions inject a script that writes to `window.ethereum`
+  // (e.g. resetting `selectedAddress`) before or without defining it, and the
+  // throw lands in our handlers. The app never reads or writes `ethereum`.
+  /\bwindow\.ethereum\b/,
   // A writing-assistant extension's content script times out its own calls
   // (`appSettingsDistributor.getValue`, `getDictionariesByLanguageId`, ...) and
   // rejects each with a bare string, which posthog-js wraps as a non-Error

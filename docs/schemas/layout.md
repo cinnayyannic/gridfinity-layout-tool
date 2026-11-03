@@ -50,7 +50,7 @@ designs".
 ## Drawer
 
 The drawer envelope, in grid units. `height` is in height **units**, not mm,
-and must be at least the sum of the layer heights.
+and every stack of bins must fit under it.
 
 <!-- schema:Drawer -->
 
@@ -62,7 +62,7 @@ and must be at least the sum of the layer heights.
 | ----------------- | --------------------------------------- | -------- | ------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `width`           | `number`                                | yes      |         | >= 0.5, <= 50, step 0.5 | Drawer width in grid units. 0.5 increments allowed (half-bin mode).                                                                                                                                                                                                         |
 | `depth`           | `number`                                | yes      |         | >= 0.5, <= 50, step 0.5 | Drawer depth in grid units. 0.5 increments allowed.                                                                                                                                                                                                                         |
-| `height`          | `number`                                | yes      |         | >= 1                    | Drawer height in HEIGHT units, not mm. Must be at least the sum of layer heights.                                                                                                                                                                                           |
+| `height`          | `number`                                | yes      |         | >= 1                    | Drawer height in HEIGHT units, not mm. Every stack of bins must fit under it.                                                                                                                                                                                               |
 | `fractionalEdgeX` | `"start"` \| `"end"`                    |          | `"end"` |                         | Which side carries the half-unit column when width is fractional. 'start' = left, 'end' = right.                                                                                                                                                                            |
 | `fractionalEdgeY` | `"start"` \| `"end"`                    |          | `"end"` |                         | Which side carries the half-unit row when depth is fractional. 'start' = front/bottom, 'end' = back/top.                                                                                                                                                                    |
 | `outline`         | [`DrawerOutline`](#draweroutline)       |          |         |                         |                                                                                                                                                                                                                                                                             |
@@ -102,11 +102,11 @@ after you commit, and so the baseplate panel can pre-fill padding from it.
 
 <!-- generated:start -->
 
-| Field    | Type     | Required | Default | Constraint   | Notes                                                                             |
-| -------- | -------- | -------- | ------- | ------------ | --------------------------------------------------------------------------------- |
-| `id`     | `string` | yes      |         | length >= 1  | Unique id, referenced by Bin.layerId. Regenerated on import.                      |
-| `name`   | `string` | yes      |         | length <= 24 | Display name.                                                                     |
-| `height` | `number` | yes      |         | >= 2         | Layer height in height units. 1u is socket base only, so 2 is the minimum usable. |
+| Field    | Type     | Required | Default | Constraint   | Notes                                                                                                             |
+| -------- | -------- | -------- | ------- | ------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `id`     | `string` | yes      |         | length >= 1  | Unique id, referenced by Bin.layerId. Regenerated on import.                                                      |
+| `name`   | `string` | yes      |         | length <= 24 | Display name.                                                                                                     |
+| `height` | `number` | yes      |         | >= 2         | Default height, in height units, for new bins drawn on this layer; it positions nothing. 2 is the minimum usable. |
 
 <!-- generated:end -->
 
@@ -151,16 +151,18 @@ instead of placing it on the grid.
 | `y`                | `number`                                         | yes      |         | >= 0, step 0.5       | Bottom edge in grid units, 0-based, measured from the BOTTOM.                                                                                                                              |
 | `width`            | `number`                                         | yes      |         | > 0, <= 50, step 0.5 | Width in grid units. 0.5 increments allowed.                                                                                                                                               |
 | `depth`            | `number`                                         | yes      |         | > 0, <= 50, step 0.5 | Depth in grid units. 0.5 increments allowed.                                                                                                                                               |
-| `height`           | `number`                                         | yes      |         | >= 2                 | Height in height units. Must be at least the owning layer's height and must fit the space to the drawer top. The schema cannot check that; the importer does.                              |
+| `height`           | `number`                                         | yes      |         | >= 2                 | Height in height units. The bin rests on the tallest lower-layer bin under it, or the plate, and its stack should fit under the drawer top.                                                |
 | `clearanceHeight`  | `number`                                         |          |         | >= 0                 | Extra blocked space above the bin in height units, for contents taller than the bin.                                                                                                       |
 | `category`         | `string`                                         |          |         | length >= 1          | Category id. The exporter always writes one, and it MUST match an id in the categories array; a dangling reference fails import. Omitted is tolerated and backfills to an empty id.        |
 | `label`            | `string`                                         |          |         | length <= 24         | Short bin label. The exporter always writes one; omitted backfills to an empty string.                                                                                                     |
 | `notes`            | `string`                                         |          |         | length <= 256        | Longer note. The exporter always writes one; omitted backfills to an empty string.                                                                                                         |
 | `customProperties` | [`CustomProperties`](#customproperties)          |          |         |                      |                                                                                                                                                                                            |
+| `items`            | [`BinItem`](#binitem)[]                          |          |         | items <= 100         | What the bin holds, for finding it later. A malformed item is dropped on import while the rest load. Omit when empty.                                                                      |
 | `linkedDesignId`   | `string`                                         |          |         |                      | Id of a saved bin design. Should match a linkedDesigns[].id in the same file, otherwise the reference dangles after import.                                                                |
 | `extendToMargin`   | `boolean`                                        |          | `false` |                      | Let this bin's walls extend into the baseplate's drawer-fit margin on every drawer edge it abuts. A flag, not a distance: the per-side reach is derived live from baseplateParams padding. |
 | `marginTaper`      | [`MarginTaper`](#margintaper)                    |          |         |                      |                                                                                                                                                                                            |
 | `overhang`         | [`OverhangConfig`](bin-design.md#overhangconfig) |          |         |                      |                                                                                                                                                                                            |
+| `slant`            | [`SlantConfig`](bin-design.md#slantconfig)       |          |         |                      | Per-placement slant. Wins over the linked design's own, so the last bin of a slanted row can carry the end support its design does not.                                                    |
 | `locked`           | `boolean`                                        |          | `false` |                      | Freeze size. While true, width/depth/height edits are rejected and automatic resizes skip this bin. Position and descriptive fields stay editable.                                         |
 | `pairId`           | `string`                                         |          |         |                      | Groups a two-piece design (knife block plus handle rest) so both move, stash and delete together. An orphaned pairId is dropped on import.                                                 |
 | `pairRole`         | `"block"` \| `"rest"`                            |          |         |                      | Which piece of the pair this bin is.                                                                                                                                                       |
@@ -176,6 +178,27 @@ instead of placing it on the grid.
 A map of user metadata with no fixed keys, so there is nothing to enumerate.
 Keys and values are strings, bounded by `validateCustomProperties` in
 `src/shared/utils/validationProperties.ts`.
+
+### BinItem
+
+One thing a bin holds, so it can be found later. Ids are unique within a bin;
+on import a malformed item, or a second item reusing an id, is dropped while
+the rest load.
+
+<!-- schema:BinItem -->
+
+<a id="binitem"></a>
+
+<!-- generated:start -->
+
+| Field  | Type      | Required | Default | Constraint                | Notes                                        |
+| ------ | --------- | -------- | ------- | ------------------------- | -------------------------------------------- |
+| `id`   | `string`  | yes      |         | length >= 1, length <= 64 | Unique within its bin.                       |
+| `name` | `string`  | yes      |         | length >= 1, length <= 48 | What it is, as the user would search for it. |
+| `qty`  | `integer` |          |         | >= 0, <= 99999            | How many, if the user said.                  |
+| `note` | `string`  |          |         | length <= 120             | A short note about the item.                 |
+
+<!-- generated:end -->
 
 ### MarginTaper
 
@@ -324,6 +347,7 @@ anything in combination with them.
 | `wholeCellsOnly`                | `boolean`                                                                                           |          | `false`      |                         | Fit a custom perimeter by whole cells only, dropping any cell the outline crosses. Only meaningful with drawer.outline.                                                                                                                      |
 | `connectorNubs`                 | `boolean`                                                                                           |          | `false`      |                         | Enable registration connectors on split-piece join edges.                                                                                                                                                                                    |
 | `lightweight`                   | `boolean`                                                                                           |          | `true`       |                         | Remove centre floor material, keeping only magnet pads.                                                                                                                                                                                      |
+| `ecoPlate`                      | `boolean`                                                                                           |          | `false`      |                         | Relieve baseplate grid joints while preserving corner posts, connectors and a printable bottom bridge.                                                                                                                                       |
 | `solidFloor`                    | `boolean`                                                                                           |          | `false`      |                         | Leave a solid floor under every socket instead of cutting pockets through. Adds solidFloorThickness below the 5mm socket; pocket depth is unchanged.                                                                                         |
 | `solidFloorThickness`           | `number`                                                                                            |          | `0.8`        | >= 0.4, <= 5            | Thickness in mm of the solid floor. Only meaningful when solidFloor is true.                                                                                                                                                                 |
 | `syncWithLayout`                | `boolean`                                                                                           |          | `true`       |                         | Derive grid dimensions from the drawer. When false, baseplateWidth and baseplateDepth are used.                                                                                                                                              |
@@ -343,6 +367,7 @@ anything in combination with them.
 | `stackPrint`                    | [`StackPrintParams`](#stackprintparams)                                                             |          |              |                         |                                                                                                                                                                                                                                              |
 | `splitOverride`                 | [`SplitOverride`](#splitoverride)                                                                   |          |              |                         |                                                                                                                                                                                                                                              |
 | `screwHoles`                    | [`ScrewHoleParams`](#screwholeparams)                                                               |          |              |                         |                                                                                                                                                                                                                                              |
+| `mountMagnets`                  | [`MountMagnetParams`](#mountmagnetparams)                                                           |          |              |                         |                                                                                                                                                                                                                                              |
 
 <!-- generated:end -->
 
@@ -405,14 +430,34 @@ the override is dropped and the automatic plan is used instead, silently.
 
 <!-- generated:start -->
 
-| Field              | Type                               | Required | Default | Constraint  | Notes                                                                                               |
-| ------------------ | ---------------------------------- | -------- | ------- | ----------- | --------------------------------------------------------------------------------------------------- |
-| `enabled`          | `boolean`                          | yes      |         |             | Cut screw holes.                                                                                    |
-| `diameter`         | `number`                           |          |         | >= 2, <= 8  | Screw shaft hole diameter in mm.                                                                    |
-| `headStyle`        | `"countersink"` \| `"counterbore"` |          |         |             | Head recess style.                                                                                  |
-| `headDiameter`     | `number`                           |          |         | >= 3, <= 16 | Head recess diameter in mm. Absent uses the style default (8 for countersink, 5.5 for counterbore). |
-| `counterboreDepth` | `number`                           |          |         | >= 0, <= 6  | Counterbore depth in mm. Only meaningful for headStyle 'counterbore'.                               |
-| `screwsPerPiece`   | `integer`                          |          |         | >= 1, <= 8  | How many screw holes each split piece gets.                                                         |
+| Field              | Type                               | Required | Default | Constraint  | Notes                                                                                                                                              |
+| ------------------ | ---------------------------------- | -------- | ------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`          | `boolean`                          | yes      |         |             | Cut screw holes.                                                                                                                                   |
+| `diameter`         | `number`                           |          |         | >= 2, <= 8  | Screw shaft hole diameter in mm.                                                                                                                   |
+| `headStyle`        | `"countersink"` \| `"counterbore"` |          |         |             | Head recess style.                                                                                                                                 |
+| `headDiameter`     | `number`                           |          |         | >= 3, <= 16 | Head recess diameter in mm. Absent means 8 for countersink, 5.5 for counterbore.                                                                   |
+| `counterboreDepth` | `number`                           |          |         | >= 0, <= 6  | Counterbore depth in mm. Only meaningful for headStyle 'counterbore'.                                                                              |
+| `screwsPerPiece`   | `integer`                          |          |         | >= 1, <= 8  | How many screw holes each split piece gets.                                                                                                        |
+| `edgeInsetCells`   | `integer`                          |          |         | >= 0, <= 4  | Grid units kept free of screws along every edge of each piece, for a drawer lip. Above 0 it also rules out screws in the padding. Absent means 0.  |
+| `cellCorner`       | `"outer"` \| `"inner"`             |          |         |             | Which magnet position in its cell a pocket-floor screw takes: the one toward the piece edge, or the one diagonally opposite. Absent means 'outer'. |
+
+<!-- generated:end -->
+
+### MountMagnetParams
+
+<!-- schema:MountMagnetParams -->
+
+<a id="mountmagnetparams"></a>
+
+<!-- generated:start -->
+
+| Field      | Type      | Required | Default | Constraint     | Notes                                                                                                                      |
+| ---------- | --------- | -------- | ------- | -------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`  | `boolean` | yes      |         |                | Cut mount-magnet holes.                                                                                                    |
+| `diameter` | `number`  |          |         | >= 2, <= 6.5   | Magnet hole diameter in mm.                                                                                                |
+| `depth`    | `number`  |          |         | >= 0.5, <= 2.5 | Magnet hole depth in mm, measured up from the underside.                                                                   |
+| `perPiece` | `integer` |          |         | >= 1, <= 64    | How many magnets each split piece gets, capped by its interior junctions.                                                  |
+| `chamfer`  | `boolean` |          | `false` |                | 45 degree lead-in at each hole's mouth on the underside. Skipped where it would leave too thin a wall or too short a bore. |
 
 <!-- generated:end -->
 
@@ -500,8 +545,8 @@ involved, not the one you just wrote.
 }
 ```
 
-`label` and `notes` are required but may be empty strings. `height` must be at
-least the layer's height and must not exceed the space to the drawer top.
+`label` and `notes` are required but may be empty strings. `height` must keep
+the bin's stack under the drawer top.
 
 ### Stash a bin off-grid
 

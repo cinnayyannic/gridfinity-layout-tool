@@ -34,6 +34,15 @@ describe('importedMeshSchema', () => {
     expect(importedMeshSchema.safeParse(VALID_STRUCTURE).success).toBe(true);
   });
 
+  it('accepts a claim as tall as a bin can be', () => {
+    expect(
+      importedMeshSchema.safeParse({
+        ...VALID_STRUCTURE,
+        heightUnits: MAX_IMPORTED_MESH_HEIGHT_UNITS,
+      }).success
+    ).toBe(true);
+  });
+
   it('rejects non-integer or out-of-range heightUnits', () => {
     expect(importedMeshSchema.safeParse({ ...VALID_STRUCTURE, heightUnits: 2.5 }).success).toBe(
       false
@@ -85,6 +94,24 @@ describe('importedMeshDescriptor', () => {
 
   it('migrate() round-trips a valid structure unchanged', () => {
     expect(importedMeshDescriptor.migrate(VALID_STRUCTURE, ENVELOPE)).toEqual(VALID_STRUCTURE);
+  });
+
+  it('migrate() keeps a stored design whose asset is a ref into the mesh store', () => {
+    const stored: ImportedMeshStructure = {
+      ...VALID_STRUCTURE,
+      asset: {
+        name: 'widget_bin',
+        hash: 'a'.repeat(64),
+        triangleCount: 12,
+        sizeMm: { x: 83.5, y: 41.5, z: 21 },
+        bytes: 1234,
+      },
+    };
+    expect(importedMeshDescriptor.migrate(stored, ENVELOPE)).toEqual(stored);
+    expect(
+      importedMeshSchema.safeParse({ ...stored, asset: { ...stored.asset, hash: 'not-a-hash' } })
+        .success
+    ).toBe(false);
   });
 
   it('migrate() falls back to the placeholder for garbage input', () => {

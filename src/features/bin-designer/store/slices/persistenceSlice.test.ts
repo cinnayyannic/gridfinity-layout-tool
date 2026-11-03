@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useDesignerStore } from '@/features/bin-designer/store/designer';
+import { useHalfGridModeStore } from '@/core/store/halfGridMode';
 import { DEFAULT_BIN_PARAMS } from '@/features/bin-designer/constants';
+import { DEFAULT_PULL_TAB } from '@/shared/utils/pullTabPlan';
 import {
   saveDefaultParams,
   clearDefaultParams,
@@ -31,6 +33,20 @@ function buildMask(rows: (0 | 1)[][]): CellMask {
 describe('persistenceSlice.loadDesign — UI derivation from params', () => {
   beforeEach(() => {
     useDesignerStore.setState(useDesignerStore.getInitialState());
+  });
+
+  it('reloads pull-tab settings and mirrored recesses from a saved design', () => {
+    const pullTab = {
+      ...DEFAULT_PULL_TAB,
+      enabled: true,
+      backRecess: true,
+      widthMode: 'percent' as const,
+      widthPercent: 80,
+      recessInsideRadius: 2,
+    };
+    const saved = JSON.parse(JSON.stringify(makeSaved({ pullTab }))) as SavedDesign;
+    useDesignerStore.getState().loadDesign(saved);
+    expect(useDesignerStore.getState().params.pullTab).toEqual(pullTab);
   });
 
   it('enables halfGridMode when loading a design with fractional dimensions', () => {
@@ -166,44 +182,28 @@ describe('history restore normalises UI toggles', () => {
   });
 });
 
-describe('persistenceSlice.newDesign — coupling with layout-level half-grid mode (#1752)', () => {
+describe('persistenceSlice.newDesign — layout half-grid mode leaves the feet alone', () => {
   beforeEach(() => {
     useDesignerStore.setState(useDesignerStore.getInitialState());
-  });
-
-  it('defaults base.halfSockets to true when half-grid mode is on', async () => {
-    const { useHalfGridModeStore } = await import('@/core/store/halfGridMode');
     useHalfGridModeStore.setState({ halfGridMode: true });
-    try {
-      useDesignerStore.getState().newDesign();
-      expect(useDesignerStore.getState().params.base.halfSockets).toBe(true);
-    } finally {
-      useHalfGridModeStore.setState({ halfGridMode: false });
-    }
   });
 
-  it('keeps base.halfSockets at the default false when half-grid mode is off', () => {
+  afterEach(() => {
+    useHalfGridModeStore.setState({ halfGridMode: false });
+  });
+
+  it('starts a new design on full feet while half-grid mode is on', () => {
     useDesignerStore.getState().newDesign();
-    expect(useDesignerStore.getState().params.base.halfSockets).toBe(
-      DEFAULT_BIN_PARAMS.base.halfSockets
-    );
+    expect(useDesignerStore.getState().params.base.halfSockets).toBe(false);
   });
 
-  it('resetToDefaults also picks up the half-grid coupling', async () => {
-    const { useHalfGridModeStore } = await import('@/core/store/halfGridMode');
-    useHalfGridModeStore.setState({ halfGridMode: true });
-    try {
-      // Start from a design with halfSockets explicitly off
-      useDesignerStore.getState().newDesign();
-      useDesignerStore.setState((s) => ({
-        params: { ...s.params, base: { ...s.params.base, halfSockets: false } },
-      }));
-      // Reset should re-apply the coupling
-      useDesignerStore.getState().resetToDefaults();
-      expect(useDesignerStore.getState().params.base.halfSockets).toBe(true);
-    } finally {
-      useHalfGridModeStore.setState({ halfGridMode: false });
-    }
+  it('resets to full feet while half-grid mode is on', () => {
+    useDesignerStore.getState().newDesign();
+    useDesignerStore.setState((s) => ({
+      params: { ...s.params, base: { ...s.params.base, halfSockets: true } },
+    }));
+    useDesignerStore.getState().resetToDefaults();
+    expect(useDesignerStore.getState().params.base.halfSockets).toBe(false);
   });
 });
 
@@ -253,6 +253,15 @@ describe('newDesign / resetToDefaults — custom "default for new bins"', () => 
     expect(params.scoop.enabled).toBe(true);
     // Geometry reset to factory.
     expect(params.compartments).toEqual(DEFAULT_BIN_PARAMS.compartments);
+  });
+
+  it('newDesign keeps half sockets saved in the custom default', () => {
+    saveDefaultParams({
+      ...DEFAULT_BIN_PARAMS,
+      base: { ...DEFAULT_BIN_PARAMS.base, halfSockets: true },
+    });
+    useDesignerStore.getState().newDesign();
+    expect(useDesignerStore.getState().params.base.halfSockets).toBe(true);
   });
 
   it('newDesign derives halfGridMode from a fractional custom default', () => {

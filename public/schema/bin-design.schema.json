@@ -115,6 +115,10 @@
           "type": "boolean",
           "description": "45 degree lead-in at each magnet hole's mouth. Skipped where the surrounding wall is too thin. Absent means off."
         },
+        "cornerHolesOnly": {
+          "type": "boolean",
+          "description": "Drill the magnet and screw holes at the bin's outer corners only, instead of under every foot. Absent means every foot."
+        },
         "screwDiameter": {
           "type": "number",
           "minimum": 2,
@@ -124,6 +128,14 @@
             "maximum": "DESIGNER_CONSTRAINTS.MAX_SCREW_DIAMETER"
           },
           "description": "Screw hole diameter in mm."
+        },
+        "rimFillet": {
+          "type": "boolean"
+        },
+        "rimFilletRadius": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 5
         },
         "stackingLip": {
           "type": "boolean",
@@ -164,6 +176,10 @@
           "x-constant": {
             "enum": "LIP_TIP_STYLES"
           }
+        },
+        "lipNotches": {
+          "type": "boolean",
+          "description": "A small ridge on the stacking lip at each grid line, so a smaller bin stacked on top locks to a cell instead of sliding along the rim. Has no effect on a bin with a lid, a custom shape or an overhang, or one sized in steps other than half a unit. Absent means off."
         },
         "lightweightMode": {
           "enum": ["interior", "underside"],
@@ -234,6 +250,9 @@
         "compartments"
       ],
       "properties": {
+        "pullTab": {
+          "$ref": "#/$defs/PullTabConfig"
+        },
         "width": {
           "type": "number",
           "minimum": 0.5,
@@ -455,6 +474,9 @@
           },
           "description": "Extra exterior wall height in mm ABOVE the nominal bin height. Outer walls and stacking lip rise; the interior floor, cutouts, dividers, scoops and label tabs stay anchored at the original top plane. A collar of dead headroom. 0 reproduces the standard bin exactly."
         },
+        "slant": {
+          "$ref": "#/$defs/SlantConfig"
+        },
         "interiorFilletMm": {
           "type": "number",
           "minimum": 0.5,
@@ -659,7 +681,23 @@
         "cutDepth": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "description": "How deep the cut goes in mm."
+          "description": "How deep the cut goes in mm. Derived from the mode when depthMode is set, so a hand-written value is replaced on import."
+        },
+        "depthMode": {
+          "enum": ["floor", "through"],
+          "x-constant": {
+            "enum": "STORED_CUTOUT_DEPTH_MODES"
+          },
+          "description": "What the depth is held to when the bin changes. Absent: cutDepth below the fill surface, as written. 'floor': the lowest point of the pocket floor targets floorMm above the bin's underside, within the material the bin has. 'through': no floor, the cut opens out of the underside (not inside a group, on a tilted pocket, beside a tapered wall, over detachable feet, or on a Nesting body). Ignored for mesh and knifeSlot shapes."
+        },
+        "floorMm": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 350,
+          "x-constant": {
+            "maximum": "MAX_CUTOUT_FLOOR_MM"
+          },
+          "description": "Plastic under the pocket floor in mm, measured from the bin's underside and counting a socket's height. Read only when depthMode is 'floor'; absent there means the base's default floor."
         },
         "rotation": {
           "type": "number",
@@ -688,7 +726,9 @@
         },
         "parentGroups": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "maxItems": 9,
           "x-constant": {
             "maxItems": "MAX_PARENT_GROUPS"
@@ -718,7 +758,9 @@
               },
               {
                 "enum": ["front", "back", "left", "right"],
-                "x-constant": { "enum": "CUTOUT_OPEN_SIDES" },
+                "x-constant": {
+                  "enum": "CUTOUT_OPEN_SIDES"
+                },
                 "description": "A bare wall name, as the first release wrote it: the same as a spec with no width and no tunnel."
               }
             ]
@@ -747,6 +789,21 @@
             "$ref": "#/$defs/PathPoint"
           },
           "description": "Pen-tool path. Required for shape 'path'. Duplicate consecutive vertices make the worker fall back to a bounding box, which renders as a plain rectangle in 3D while looking correct in 2D."
+        },
+        "holes": {
+          "type": "array",
+          "maxItems": 64,
+          "x-constant": {
+            "maxItems": "MAX_CUTOUT_HOLES"
+          },
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "$ref": "#/$defs/PathPoint"
+            }
+          },
+          "description": "Islands in a path cutout: closed rings in the same frame as path, where the bin keeps its material to the full height. Clearance shrinks each one and the entry edge runs round it. Ignored for other shapes."
         },
         "sides": {
           "type": "integer",
@@ -778,7 +835,22 @@
           "x-constant": {
             "maximum": "MAX_CUTOUT_CHAMFER"
           },
-          "description": "Chamfer width in mm at the cut's mouth."
+          "description": "Size in mm of the entry edge at the cut's mouth: how far it flares out and how far it drops."
+        },
+        "entryProfile": {
+          "enum": ["chamfer", "round"],
+          "x-constant": {
+            "enum": "CUTOUT_ENTRY_PROFILES"
+          },
+          "description": "Shape of the entry edge sized by chamferWidth: a 45° bevel ('chamfer', the default when absent) or a quarter round tangent to the wall and the top ('round')."
+        },
+        "finger": {
+          "$ref": "#/$defs/CutoutFinger",
+          "description": "Makes a 'slot' or 'circle' a finger cut beside a pocket, so a fingertip can reach under the tool and lift it. Ignored on any other shape."
+        },
+        "split": {
+          "$ref": "#/$defs/CutoutSplit",
+          "description": "Divides the pocket along a straight line so each side is cut to its own depth from the same top, making a step. Side A keeps cutDepth, depthMode and floorMm; side B takes the split's. Ignored on a leaning pocket, a through cut, a group member, or a mesh, text, knifeSlot or finger cut, and where the line no longer crosses the outline twice."
         },
         "leanDeg": {
           "type": "number",
@@ -963,18 +1035,36 @@
       "properties": {
         "side": {
           "enum": ["front", "back", "left", "right"],
-          "x-constant": { "enum": "CUTOUT_OPEN_SIDES" },
+          "x-constant": {
+            "enum": "CUTOUT_OPEN_SIDES"
+          },
           "description": "The bin wall, in the bin's frame."
         },
         "widthMm": {
           "type": "number",
           "minimum": 1,
-          "x-constant": { "minimum": "MIN_OPEN_SIDE_WIDTH_MM" },
+          "x-constant": {
+            "minimum": "MIN_OPEN_SIDE_WIDTH_MM"
+          },
           "description": "Channel width across the exit in mm. Absent means the pocket's own width at that wall."
         },
         "tunnel": {
           "type": "boolean",
           "description": "Keep the wall above the pocket, so the channel stops at the fill surface and the stacking lip stays whole. Absent means open to the top."
+        }
+      }
+    },
+    "CutoutFinger": {
+      "type": "object",
+      "description": "How a finger cut is shaped below its outline.",
+      "required": ["bottom"],
+      "properties": {
+        "bottom": {
+          "enum": ["curved", "flat"],
+          "x-constant": {
+            "enum": "CUTOUT_FINGER_BOTTOMS"
+          },
+          "description": "'curved' rounds the floor with the largest fillet that fits: no wider than half the cut's narrow side, no taller than the wall below its entry edge. That makes a trough of a slot and a bowl of a circle. 'flat' keeps the cut's own scoop settings."
         }
       }
     },
@@ -998,6 +1088,65 @@
         "back": {
           "type": "boolean",
           "description": "Scoop the +Y edge."
+        }
+      }
+    },
+    "CutoutSplit": {
+      "type": "object",
+      "description": "A line across a pocket and the depth of the side to its right.",
+      "required": ["a", "b", "cutDepth"],
+      "properties": {
+        "a": {
+          "$ref": "#/$defs/CutoutSplitPoint",
+          "description": "Where the line starts. Side A lies to its left, looking from a to b."
+        },
+        "b": {
+          "$ref": "#/$defs/CutoutSplitPoint",
+          "description": "Another point on the line."
+        },
+        "cutDepth": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "How deep side B is cut in mm. Derived from depthMode when it is set, as the pocket's own cutDepth is."
+        },
+        "depthMode": {
+          "enum": ["floor"],
+          "x-constant": {
+            "enum": "SPLIT_DEPTH_MODES"
+          },
+          "description": "Absent: side B's cutDepth as written. 'floor': side B's floor is held to floorMm above the bin's underside. Side B never cuts through."
+        },
+        "floorMm": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 350,
+          "x-constant": {
+            "maximum": "MAX_CUTOUT_FLOOR_MM"
+          },
+          "description": "Plastic under side B's floor in mm, measured as the pocket's own floorMm is. Read only in floor mode."
+        }
+      }
+    },
+    "CutoutSplitPoint": {
+      "type": "object",
+      "description": "A point in the pocket's own frame: mm from its centre, before its rotation.",
+      "required": ["x", "y"],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": -1000,
+          "maximum": 1000,
+          "x-constant": {
+            "maximum": "MAX_SPLIT_POINT_MM"
+          }
+        },
+        "y": {
+          "type": "number",
+          "minimum": -1000,
+          "maximum": 1000,
+          "x-constant": {
+            "maximum": "MAX_SPLIT_POINT_MM"
+          }
         }
       }
     },
@@ -1603,6 +1752,16 @@
           },
           "description": "Extra lid height in mm. The lid mirror of BinParams.extraWallHeightMm."
         },
+        "heightUnits": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "x-constant": {
+            "minimum": "LID_HEIGHT_UNITS_MIN",
+            "maximum": "LID_HEIGHT_UNITS_MAX"
+          },
+          "description": "Lid height in whole height units: the lid's top (its stack grid's top, when it has one) sits this many units above the bin's stacking-lip top, level with the rim of a bin that many units taller. When set, extraHeightMm is recomputed from it on load. Omit to size the lid by extraHeightMm alone."
+        },
         "topThicknessMm": {
           "type": "number",
           "minimum": 0.8,
@@ -1625,6 +1784,10 @@
         "relieveInterior": {
           "type": "boolean",
           "description": "Hollow the lid interior to save filament."
+        },
+        "fill": {
+          "type": "boolean",
+          "description": "Fill the lid's hollow down to its mating edge, just above the divider tops, so small parts stay in their compartments. Friction and magnetic lids only. Omit when off."
         },
         "slide": {
           "$ref": "#/$defs/LidSlideConfig"
@@ -1862,7 +2025,7 @@
         "left": {
           "type": "number",
           "minimum": 0,
-          "maximum": 21,
+          "maximum": 42,
           "x-constant": {
             "minimum": "DESIGNER_CONSTRAINTS.MIN_OVERHANG",
             "maximum": "DESIGNER_CONSTRAINTS.MAX_OVERHANG"
@@ -1872,7 +2035,7 @@
         "right": {
           "type": "number",
           "minimum": 0,
-          "maximum": 21,
+          "maximum": 42,
           "x-constant": {
             "minimum": "DESIGNER_CONSTRAINTS.MIN_OVERHANG",
             "maximum": "DESIGNER_CONSTRAINTS.MAX_OVERHANG"
@@ -1882,7 +2045,7 @@
         "front": {
           "type": "number",
           "minimum": 0,
-          "maximum": 21,
+          "maximum": 42,
           "x-constant": {
             "minimum": "DESIGNER_CONSTRAINTS.MIN_OVERHANG",
             "maximum": "DESIGNER_CONSTRAINTS.MAX_OVERHANG"
@@ -1892,7 +2055,7 @@
         "back": {
           "type": "number",
           "minimum": 0,
-          "maximum": 21,
+          "maximum": 42,
           "x-constant": {
             "minimum": "DESIGNER_CONSTRAINTS.MIN_OVERHANG",
             "maximum": "DESIGNER_CONSTRAINTS.MAX_OVERHANG"
@@ -2026,6 +2189,33 @@
         "right": {
           "type": "boolean",
           "description": "+X side."
+        }
+      }
+    },
+    "SlantConfig": {
+      "type": "object",
+      "description": "Leans everything above the floor toward one side while the socket stays upright. A shear: each horizontal section keeps its shape and moves sideways by tan(angleDeg) per mm of rise. Ignored with an overhang, a custom shape, mesh pockets, a tray bottom, slide rails, a knife rest, a floor pattern, an open floor, detachable feet, removable dividers or a pull tab. A slanted bin has no stacking lip and no lid, and is never split.",
+      "required": ["angleDeg", "side"],
+      "properties": {
+        "angleDeg": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60,
+          "x-constant": {
+            "maximum": "SLANT_MAX_DEG"
+          },
+          "description": "Lean from vertical in degrees; 0 is upright. Past 45 the leaning wall's underside prints as unsupported overhang."
+        },
+        "side": {
+          "enum": ["front", "back", "left", "right"],
+          "x-constant": {
+            "enum": "SLANT_SIDES"
+          },
+          "description": "The side the top leans toward."
+        },
+        "endSupport": {
+          "type": "boolean",
+          "description": "Export a wedge the leaning top rests on, as a second part."
         }
       }
     },
@@ -2226,11 +2416,31 @@
     },
     "SurfaceTextConfig": {
       "type": "object",
-      "description": "Text on exterior surfaces: the lid top and the outer walls. Omit for designs without surface text so they serialize byte-identically.",
+      "description": "Text on the lid top, the interior floor, and either face of the outer walls. Omit for designs without surface text so they serialize byte-identically.",
       "properties": {
         "lidText": {
           "type": "string",
           "description": "Text engraved or embossed on the lid top. Deliberately monochrome."
+        },
+        "lidTextRotation": {
+          "enum": [0, 90, 180, 270],
+          "default": 0,
+          "description": "Turn of the lid text in degrees clockwise seen from above. The anchor and offset turn with it; 90 and 270 fit the text along the lid's other side.",
+          "x-constant": {
+            "enum": "TEXT_QUARTER_TURNS"
+          }
+        },
+        "floorText": {
+          "type": "string",
+          "description": "Text on the interior floor of a standard hollow bin. It takes the largest clear part of the floor."
+        },
+        "floorTextRotation": {
+          "enum": [0, 90, 180, 270],
+          "default": 0,
+          "description": "Turn of the floor text in degrees clockwise seen from above.",
+          "x-constant": {
+            "enum": "TEXT_QUARTER_TURNS"
+          }
         },
         "walls": {
           "type": "object",
@@ -2252,12 +2462,30 @@
         "lidStyle": {
           "$ref": "#/$defs/TextStyleOverride"
         },
+        "floorStyle": {
+          "$ref": "#/$defs/TextStyleOverride",
+          "description": "Style for the floor text, applied over style. A through-cut engraves instead."
+        },
         "wallStyles": {
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/TextStyleOverride"
           },
-          "description": "Per-wall style overrides keyed by side."
+          "description": "Per-wall style overrides keyed by side. Applied over insideStyle."
+        },
+        "wallFaces": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": ["outside", "inside"],
+            "x-constant": {
+              "enum": "WALL_TEXT_FACES"
+            }
+          },
+          "description": "Which face each wall's text is cut into, keyed by side. Inside text reads from inside the bin. Omit a side for outside."
+        },
+        "insideStyle": {
+          "$ref": "#/$defs/TextStyleOverride",
+          "description": "Style for inside-facing wall text, applied over style. Dropped on load when no wall faces inside."
         }
       }
     },
@@ -2581,7 +2809,7 @@
         },
         "shape": {
           "enum": ["u-shape", "scoop", "funnel"],
-          "description": "Cutout shape applied to all sides."
+          "description": "Cutout shape applied to all sides. A scoop is a circular arc reaching down the smaller of half its span and its depth, and has no bottom corner."
         },
         "width": {
           "type": "number",
@@ -2603,7 +2831,7 @@
         "cornerRadiusBottom": {
           "type": ["number", "null"],
           "minimum": 0,
-          "description": "Default bottom fillet in mm. null means the automatic 15%-of-span rule."
+          "description": "Default bottom fillet in mm. null means the automatic 15%-of-span rule. A scoop ignores it."
         },
         "front": {
           "$ref": "#/$defs/WallCutout"
@@ -2669,7 +2897,7 @@
         "cornerRadiusBottom": {
           "type": ["number", "null"],
           "minimum": 0,
-          "description": "Bottom fillet in mm. null defers to WallConfig.cornerRadiusBottom."
+          "description": "Bottom fillet in mm. null defers to WallConfig.cornerRadiusBottom. A scoop ignores it."
         }
       }
     },
@@ -2841,6 +3069,128 @@
           "description": "Magnitude on +Y in mm."
         }
       }
+    },
+    "PullTabConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "wall": {
+          "enum": ["width", "depth"],
+          "description": "A tab on the front (\"width\") or the right (\"depth\") alone. Read alone unless \"walls\" is present."
+        },
+        "walls": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["front", "back", "left", "right", "center"],
+            "x-constant": {
+              "enum": "PULL_TAB_WALLS"
+            }
+          },
+          "description": "Every wall carrying a tab, sharing one set of sizes. \"center\" is the divider nearest the middle of the bin. Omitted for a tab on the front or the right alone, which stores \"wall\" alone."
+        },
+        "centerAxis": {
+          "enum": ["width", "depth"],
+          "x-constant": {
+            "enum": "PULL_TAB_CENTER_AXES"
+          },
+          "description": "Which way the divider under a \"center\" tab runs: along the width (parallel to the front wall) or the depth. Omitted takes a width divider when there is one."
+        },
+        "backRecess": {
+          "type": "boolean",
+          "default": false,
+          "description": "Mirror the finger recess on the outside face. Each pocket uses the same depth, limited to leave 0.8 mm between them."
+        },
+        "thickness": {
+          "type": "number",
+          "minimum": 0.4,
+          "maximum": 4
+        },
+        "width": {
+          "type": "number",
+          "minimum": 12,
+          "maximum": 500
+        },
+        "height": {
+          "type": "number",
+          "minimum": 3,
+          "maximum": 40
+        },
+        "topRadius": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "rootRadius": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "recessHeight": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 80
+        },
+        "recessBorder": {
+          "type": "number",
+          "minimum": 0.8,
+          "maximum": 20,
+          "default": 1.2,
+          "description": "Equal top and side border in mm; smaller values widen the finger recess. Omitted in older designs."
+        },
+        "recessDepth": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 3.2
+        },
+        "recessRadius": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "recessEdgeRadius": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 6,
+          "description": "Circular blend radius in mm. Larger radii meet at a shallow angle without deepening the recess; limited by its height and width."
+        },
+        "recessInsideRadius": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 6,
+          "default": 0.4,
+          "description": "Circular blend radius in mm. Larger radii meet at a shallow angle without deepening the recess; limited by its height and width."
+        },
+        "widthMode": {
+          "enum": ["mm", "percent"],
+          "default": "mm"
+        },
+        "widthPercent": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 75,
+          "description": "Percentage of usable wall width when widthMode is percent. 100 fills the width between corner clearances."
+        }
+      },
+      "required": [
+        "enabled",
+        "wall",
+        "thickness",
+        "width",
+        "height",
+        "topRadius",
+        "rootRadius",
+        "recessHeight",
+        "recessDepth",
+        "recessRadius",
+        "recessEdgeRadius"
+      ]
     }
   }
 }

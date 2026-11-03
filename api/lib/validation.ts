@@ -7,13 +7,24 @@ import { sanitizeString } from './sanitize.js';
 export { sanitizeString } from './sanitize.js';
 import { isNumber, isObject, inRange, validationError } from './validationUtils.js';
 import { isValidDrawer, sanitizeDrawer } from './drawerValidation.js';
+import { isValidBaseplateId, validateBaseplateShare } from './baseplateValidation.js';
 import type { DrawerShape } from './drawerValidation.js';
 import { DESIGN_ID_MAX_LENGTH, RESERVED_PROPERTY_KEYS } from './sharedDesignsValidation.js';
 import { SHARE_CONSTRAINTS } from './shareConstraints.js';
+import { sanitizeBinFitFields } from './binFitValidation.js';
+import { sanitizeBinItems } from './binItemsValidation.js';
+import type { BinItemShape } from './binItemsValidation.js';
+import type { BinFitFields } from './binFitValidation.js';
 import type { ValidExpiration, ValidationError } from './shareConstraints.js';
+import { sanitizeSlant } from './slantValidation.js';
+import type { SlantShape } from './slantValidation.js';
 export { SHARE_CONSTRAINTS } from './shareConstraints.js';
 export type { ValidExpiration, ValidationError } from './shareConstraints.js';
-export { validateSharedDesigns, isSharedDesignsError } from './sharedDesignsValidation.js';
+export {
+  validateSharedDesigns,
+  isSharedDesignsError,
+  sharedDesignMeshHashes,
+} from './sharedDesignsValidation.js';
 export type { SharedDesignShape, SharedDesignsResult } from './sharedDesignsValidation.js';
 
 interface LayerShape {
@@ -22,7 +33,7 @@ interface LayerShape {
   height: number;
 }
 
-interface BinShape {
+interface BinShape extends BinFitFields {
   id: string;
   layerId: string;
   x: number;
@@ -36,10 +47,21 @@ interface BinShape {
   label: string;
   notes: string;
   customProperties?: Record<string, string>;
+  items?: BinItemShape[];
   linkedDesignId?: string;
   locked?: boolean;
   pairId?: string;
   pairRole?: 'block' | 'rest';
+  slant?: SlantShape;
+}
+
+/** Dropped alone when malformed, like the drawer-fit fields. */
+function binSlant(bin: unknown): { slant?: SlantShape } {
+  const slant =
+    typeof bin === 'object' && bin !== null
+      ? sanitizeSlant((bin as { slant?: unknown }).slant)
+      : null;
+  return slant ? { slant } : {};
 }
 
 interface CategoryShape {
@@ -62,6 +84,9 @@ interface LayoutShape {
   heightUnitMm?: number;
   magnetAnchor?: 'edge' | 'center';
   lowProfileBase?: true;
+  baseplateParams?: Record<string, unknown>;
+  /** The owner's library design; carried for cloud sync only, shares strip it. */
+  activeBaseplateId?: string;
   /** Library folder, carried for cloud sync only; shares strip it. */
   folderId?: string;
 }
@@ -72,12 +97,29 @@ export function isValidFolderId(value: unknown): value is string {
   return typeof value === 'string' && FOLDER_ID_PATTERN.test(value);
 }
 
-/** A share is public; the owner's library placement stays home. */
-export function withoutLibraryPlacement<T extends { folderId?: string }>(
-  layout: T
-): Omit<T, 'folderId'> {
-  const { folderId: _folderId, ...rest } = layout;
+/**
+ * A share is public; the owner's library placement and the design link into
+ * their own baseplate library stay home.
+ */
+export function withoutLibraryPlacement<
+  T extends { folderId?: string; activeBaseplateId?: string },
+>(layout: T): Omit<T, 'folderId' | 'activeBaseplateId'> {
+  const { folderId: _folderId, activeBaseplateId: _activeBaseplateId, ...rest } = layout;
   return rest;
+}
+
+/**
+ * Plate settings that fail validation are dropped rather than failing the
+ * layout: the drawer and bins still have to sync.
+ */
+function sanitizeBaseplateParams(value: unknown): Record<string, unknown> | undefined {
+  if (value === undefined) return undefined;
+  const payload = { type: 'baseplate', version: 1, params: value };
+  const result = validateBaseplateShare(
+    payload,
+    Buffer.byteLength(JSON.stringify(payload), 'utf8')
+  );
+  return result.valid ? result.payload.params : undefined;
 }
 
 export type ValidationResult =
@@ -267,6 +309,7 @@ export function validateShareLayout(data: unknown, jsonSize: number): Validation
       label: bin.label ? sanitizeString(bin.label, SHARE_CONSTRAINTS.LABEL_MAX_LENGTH) : '',
       notes: bin.notes ? sanitizeString(bin.notes, SHARE_CONSTRAINTS.NOTES_MAX_LENGTH) : '',
       customProperties: validatedCustomProperties,
+      items: sanitizeBinItems(bin.items),
       // Dropping this stripped the recipient's only handle on the bin's design
       //; the payload it points at travels alongside as `linkedDesigns`.
       linkedDesignId: bin.linkedDesignId
@@ -279,6 +322,8 @@ export function validateShareLayout(data: unknown, jsonSize: number): Validation
       // rest and every pair-expanding operation stops working on it.
       pairId: typeof bin.pairId === 'string' ? sanitizeString(bin.pairId, 64) : undefined,
       pairRole: bin.pairRole === 'block' || bin.pairRole === 'rest' ? bin.pairRole : undefined,
+      ...sanitizeBinFitFields(bin),
+      ...binSlant(bin),
     });
   }
 
@@ -294,6 +339,8 @@ export function validateShareLayout(data: unknown, jsonSize: number): Validation
       color: sanitizeColor(cat.color),
     });
   }
+
+  const baseplateParams = sanitizeBaseplateParams(layout.baseplateParams);
 
   // Return sanitized layout
   return {
@@ -321,6 +368,12 @@ export function validateShareLayout(data: unknown, jsonSize: number): Validation
           ? layout.magnetAnchor
           : undefined,
       ...(layout.lowProfileBase === true ? { lowProfileBase: true as const } : {}),
+      ...(baseplateParams ? { baseplateParams } : {}),
+      // The client only resolves a link alongside inline params; a link left
+      // without them would show a design while drawing default padding.
+      ...(baseplateParams && isValidBaseplateId(layout.activeBaseplateId)
+        ? { activeBaseplateId: layout.activeBaseplateId }
+        : {}),
       ...(isValidFolderId(layout.folderId) ? { folderId: layout.folderId } : {}),
     },
   };

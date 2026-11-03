@@ -6,6 +6,34 @@ import { useDesignerStore } from '@/features/bin-designer/store';
 import { DEFAULT_BIN_PARAMS, DEFAULT_UI_STATE } from '@/features/bin-designer/constants';
 
 describe('BaseSection', () => {
+  it('offers plain-rim rounding, stores its toggle, and limits radius for thinner walls', async () => {
+    useDesignerStore.setState({
+      params: {
+        ...DEFAULT_BIN_PARAMS,
+        wallThickness: 2,
+        base: { ...DEFAULT_BIN_PARAMS.base, stackingLip: false, rimFilletRadius: 0.8 },
+      },
+    });
+    const user = userEvent.setup();
+    render(<BaseSection />);
+    const toggle = screen.getByRole('switch', { name: 'Round top rim' });
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    expect(useDesignerStore.getState().params.base.rimFillet).toBe(true);
+    expect(screen.getByRole('slider', { name: 'Rim fillet radius' })).toHaveAttribute(
+      'aria-valuenow',
+      '0.8'
+    );
+    act(() => useDesignerStore.setState((s) => ({ params: { ...s.params, wallThickness: 1.2 } })));
+    expect(screen.getByRole('slider', { name: 'Rim fillet radius' })).toHaveAttribute(
+      'aria-valuemax',
+      '0.59'
+    );
+    await user.click(toggle);
+    expect(useDesignerStore.getState().params.base.rimFillet).toBe(false);
+    expect(useDesignerStore.getState().params.base.rimFilletRadius).toBe(0.8);
+  });
+
   beforeEach(() => {
     useDesignerStore.setState({
       params: { ...DEFAULT_BIN_PARAMS },
@@ -45,15 +73,49 @@ describe('BaseSection', () => {
     expect(screen.getByText('Lightweight floor')).toBeInTheDocument();
   });
 
+  describe('lip notches', () => {
+    const sized = (over: Partial<typeof DEFAULT_BIN_PARAMS> = {}) => {
+      act(() => {
+        useDesignerStore.setState({
+          params: { ...DEFAULT_BIN_PARAMS, width: 3, depth: 2, ...over },
+        });
+      });
+    };
+
+    it('stores the toggle on, and nothing at all once off again', async () => {
+      const user = userEvent.setup();
+      render(<BaseSection />);
+      sized();
+      const toggle = screen.getByRole('switch', { name: 'Lip notches' });
+      await user.click(toggle);
+      expect(useDesignerStore.getState().params.base.lipNotches).toBe(true);
+      await user.click(toggle);
+      expect('lipNotches' in useDesignerStore.getState().params.base).toBe(false);
+    });
+
+    it('says why it is off on a lidded bin', () => {
+      render(<BaseSection />);
+      sized({ lid: { ...DEFAULT_BIN_PARAMS.lid, enabled: true } });
+      expect(screen.getByRole('switch', { name: 'Lip notches' })).toBeDisabled();
+      expect(screen.getByText(/Not available with a lid/)).toBeInTheDocument();
+    });
+
+    it('is not offered without a lip', () => {
+      render(<BaseSection />);
+      sized({ base: { ...DEFAULT_BIN_PARAMS.base, stackingLip: false } });
+      expect(screen.queryByRole('switch', { name: 'Lip notches' })).not.toBeInTheDocument();
+    });
+  });
+
   describe('body type', () => {
     it('offers the archetypes as one exclusive choice', () => {
       render(<BaseSection />);
 
-      const group = screen.getByRole('group', { name: 'Body type' });
-      const cards = within(group).getAllByRole('button');
-      const chosen = cards.filter((c) => c.getAttribute('aria-pressed') === 'true');
+      const group = screen.getByRole('radiogroup', { name: 'Body type' });
+      const tiles = within(group).getAllByRole('radio');
+      const chosen = tiles.filter((tile) => tile.getAttribute('aria-checked') === 'true');
 
-      expect(cards).toHaveLength(6);
+      expect(tiles).toHaveLength(6);
       expect(chosen).toHaveLength(1);
     });
 
@@ -69,9 +131,9 @@ describe('BaseSection', () => {
     it('unlocks Mounting outside the Nesting body card without enabling hardware', async () => {
       const user = userEvent.setup();
       render(<BaseSection />);
-      await user.click(screen.getByRole('button', { name: /^Nesting One continuous/ }));
+      await user.click(screen.getByRole('radio', { name: 'Nesting' }));
       expect(useDesignerStore.getState().params.base.trayBottom?.floorAtBed).toBe(true);
-      const bodyTypes = screen.getByRole('group', { name: 'Body type' });
+      const bodyTypes = screen.getByRole('radiogroup', { name: 'Body type' });
       expect(
         within(bodyTypes).queryByRole('switch', { name: 'Magnet holes' })
       ).not.toBeInTheDocument();
@@ -289,7 +351,7 @@ describe('BaseSection magnet press-fit options', () => {
     const user = userEvent.setup();
     render(<BaseSection />);
     await user.click(customizeNextTo('ø6.5mm × 2mm deep'));
-    const ribs = screen.getByRole('checkbox', { name: 'Crush ribs' });
+    const ribs = screen.getByRole('switch', { name: 'Crush ribs' });
     expect(ribs).not.toBeChecked();
 
     await user.click(ribs);
@@ -303,7 +365,7 @@ describe('BaseSection magnet press-fit options', () => {
     const user = userEvent.setup();
     render(<BaseSection />);
     await user.click(customizeNextTo('ø6.5mm × 2mm deep'));
-    const chamfer = screen.getByRole('checkbox', { name: 'Chamfered mouth' });
+    const chamfer = screen.getByRole('switch', { name: 'Chamfered mouth' });
     expect(chamfer).toBeEnabled();
     await user.click(chamfer);
     expect(useDesignerStore.getState().params.base.magnetChamfer).toBe(true);
@@ -313,7 +375,38 @@ describe('BaseSection magnet press-fit options', () => {
         params: { ...s.params, base: { ...s.params.base, lightweight: true } },
       }));
     });
-    expect(screen.getByRole('checkbox', { name: 'Chamfered mouth' })).toBeDisabled();
+    expect(screen.getByRole('switch', { name: 'Chamfered mouth' })).toBeDisabled();
     expect(screen.getByText(/too little wall around each hole/)).toBeInTheDocument();
+  });
+});
+
+describe('BaseSection corner-only holes', () => {
+  const withBase = (base: Partial<typeof DEFAULT_BIN_PARAMS.base>) =>
+    useDesignerStore.setState({
+      params: { ...DEFAULT_BIN_PARAMS, base: { ...DEFAULT_BIN_PARAMS.base, ...base } },
+      ui: { ...DEFAULT_UI_STATE },
+    });
+
+  it('stores the choice as present-or-absent, never false', async () => {
+    withBase({ style: 'screw' });
+    const user = userEvent.setup();
+    render(<BaseSection />);
+    const corners = screen.getByRole('switch', { name: 'Corners only' });
+    expect(corners).not.toBeChecked();
+
+    await user.click(corners);
+    expect(useDesignerStore.getState().params.base.cornerHolesOnly).toBe(true);
+
+    await user.click(corners);
+    expect(useDesignerStore.getState().params.base.cornerHolesOnly).toBeUndefined();
+  });
+
+  it('is offered only while the base drills magnet or screw holes', () => {
+    withBase({ style: 'standard' });
+    render(<BaseSection />);
+    expect(screen.queryByRole('switch', { name: 'Corners only' })).not.toBeInTheDocument();
+
+    act(() => withBase({ style: 'magnet' }));
+    expect(screen.getByRole('switch', { name: 'Corners only' })).toBeInTheDocument();
   });
 });

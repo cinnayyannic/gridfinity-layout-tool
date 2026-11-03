@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { createInitialContext, deriveDimensions } from './context';
 import { DEFAULT_BIN_PARAMS, GRIDFINITY } from '@/shared/constants/bin';
-import type { BinParams } from '@/shared/types/bin';
+import type { BinParams, PullTabWall } from '@/shared/types/bin';
+import { DEFAULT_PULL_TAB, pullTabWallFields, resolvePullTab } from '@/shared/utils/pullTabPlan';
 
 // Source from DEFAULT_BIN_PARAMS so the fixture tracks the real BinParams
 // shape automatically. Tests below expect a no-lip baseline, so override
@@ -177,6 +178,25 @@ describe('createInitialContext', () => {
     // Cache key discriminates on heightUnitMm via quantized wallHeight,
     // so the two solids don't collide in the shape cache.
     expect(ctxDefault.dimensions.shellKey).not.toBe(ctxCustom.dimensions.shellKey);
+  });
+
+  // The notches are cut into the lip before it is fused, so they are part of
+  // the shell: sharing a key with the plain lip would reuse it forever.
+  it('keys a notched lip apart from a plain one, and a blocked request with it', () => {
+    const key = (width: number, depth: number, lipNotches?: boolean): string =>
+      createInitialContext(
+        createTestParams({
+          width,
+          depth,
+          base: {
+            ...DEFAULT_BIN_PARAMS.base,
+            stackingLip: true,
+            ...(lipNotches && { lipNotches }),
+          },
+        })
+      ).dimensions.shellKey;
+    expect(key(3, 2, true)).not.toBe(key(3, 2));
+    expect(key(1, 1, true)).toBe(key(1, 1));
   });
 
   it('computes interiorHeight with lip deduction', () => {
@@ -472,5 +492,33 @@ describe('omitLipSolid', () => {
     expect(deriveDimensions(lipped, true, false).shellKey).toBe(
       deriveDimensions(lipped, true).shellKey
     );
+  });
+});
+
+describe('pull tab in the rounded-rim shell key', () => {
+  const rounded = (walls: PullTabWall[]): string =>
+    deriveDimensions(
+      createTestParams({
+        width: 3,
+        depth: 2,
+        compartments: { ...DEFAULT_BIN_PARAMS.compartments, cols: 2, rows: 2, cells: [0, 1, 2, 3] },
+        base: { ...DEFAULT_BIN_PARAMS.base, stackingLip: false, rimFillet: true },
+        pullTab: resolvePullTab({
+          ...DEFAULT_PULL_TAB,
+          enabled: true,
+          ...pullTabWallFields(walls),
+        }),
+      }),
+      true
+    ).shellKey;
+
+  it('stays the same when a center tab joins the wall tabs', () => {
+    for (const walls of [['front'], ['right'], ['left'], ['front', 'back']] as PullTabWall[][]) {
+      expect(rounded([...walls, 'center']), walls.join('+')).toBe(rounded(walls));
+    }
+  });
+
+  it('still changes with the outer walls', () => {
+    expect(rounded(['front', 'back'])).not.toBe(rounded(['front']));
   });
 });

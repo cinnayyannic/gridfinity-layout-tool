@@ -27,6 +27,12 @@ export interface GenerationResult {
   readonly timingMs: number;
   /** Optional fine-grained perf breakdown (present when worker emits one). */
   readonly perfSnapshot?: PerfSnapshot;
+  /**
+   * A mesh this design uses is not on this device yet, so its pockets are
+   * missing from this mesh. Show it, but cache it nowhere: the same params
+   * build the full mesh once the file arrives.
+   */
+  readonly meshesPending?: true;
 }
 
 /** Result from a successful BREP export */
@@ -164,9 +170,11 @@ export class ExportTimeoutError extends Error {
  */
 export class WorkerRequestError extends Error {
   readonly code: ExportErrorCode | undefined;
-  constructor(message: string, code?: ExportErrorCode) {
+  readonly causes: readonly string[];
+  constructor(message: string, code?: ExportErrorCode, causes: readonly string[] = []) {
     super(message);
     this.name = 'WorkerRequestError';
     this.code = code;
+    this.causes = causes;
   }
 }

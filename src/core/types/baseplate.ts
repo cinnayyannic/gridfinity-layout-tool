@@ -33,6 +33,18 @@ export interface StackPrintParams {
 
 /** Default air gap between stacked copies — one 0.2mm layer. */
 export const STACK_PRINT_DEFAULT_GAP_MM = 0.2;
+/**
+ * Height planed off every stacked plate's top so the seam between plates lands
+ * on a flat ridge instead of the profile's zero-width apex. A ridge narrower
+ * than an extrusion line is dropped by the Classic wall generator (the Bambu
+ * Studio and Snapmaker U1 preset default), on both sides of the gap, and the
+ * first ridge that does print then spans cell corner to cell corner over air.
+ * At this depth the shared ridge is twice this wide and the outer edge this
+ * wide, and both print with either wall generator. It is a whole number of
+ * 0.2mm layers so the plate top keeps the untrimmed plate's position against
+ * the slice planes: 0.3 or 0.5 lands it exactly on one at a 0.25mm first layer.
+ */
+export const STACK_SEAM_TRIM_MM = 0.4;
 /** Inclusive bounds + default for the whole-layout copy multiplier. */
 export const STACK_PRINT_DEFAULT_COPIES = 1;
 export const STACK_PRINT_MIN_COPIES = 1;
@@ -77,6 +89,14 @@ export interface SplitOverride {
 export type ScrewHeadStyle = 'countersink' | 'counterbore';
 
 /**
+ * Which magnet position in a cell a floor screw takes: the one toward the
+ * piece's edge, or the one diagonally opposite it in the same cell. Relative to
+ * the anchor, not the compass, so the choice survives the half-turn
+ * `preferIdenticalPieces` applies.
+ */
+export type ScrewCellCorner = 'outer' | 'inner';
+
+/**
  * Mount-down screw holes: vertical through-holes that fasten a plate to
  * a drawer bottom, bench or wall. Distinct from the bin's `base.style: 'screw'`
  * (which anchors a BIN to a plate) and from the split-piece connectors (which
@@ -87,15 +107,16 @@ export type ScrewHeadStyle = 'countersink' | 'counterbore';
  * well its neighbours are screwed down.
  *
  * Each hole prefers the solid drawer-fit margin, which is full plate height and
- * needs no floor, and falls back to the pocket floor when no margin band is wide
- * enough. That fallback is the only case that changes the plate's height: the
- * pad under the hole must be `recessDepth + SCREW_PAD_MIN_RETAIN_MM` thick,
- * since a 2.3mm countersink cannot be sunk into a 0.8mm floor.
+ * needs no floor; then the solid post where four pockets meet, when the head
+ * seats there clear of a bin's feet; and falls back to the pocket floor last.
+ * That fallback is the only case that changes the plate's height: the pad under
+ * the hole must be `recessDepth + SCREW_PAD_MIN_RETAIN_MM` thick, since a 2.3mm
+ * countersink cannot be sunk into a 0.8mm floor.
  *
  * A magnet plate can escape that cost, but not automatically. Because the screw
  * is concentric with a magnet, the ø6.5 × 2mm magnet pocket can serve as the
  * head recess (screw in first, magnet dropped in over it). That only holds while
- * the head fits the pocket, so the ø8 countersink default (too wide) and the 3mm
+ * the head fits the pocket, so a ø8 countersink (too wide) and the 3mm
  * counterbore default (too deep) each still buy their own pad. See
  * `screwPadThicknessMm`.
  */
@@ -105,13 +126,44 @@ export interface ScrewHoleParams {
    * off the mounting surface rather than pull it down. */
   readonly diameter: Mm;
   readonly headStyle: ScrewHeadStyle;
-  /** Head recess diameter. Absent ⇒ the style's default (8 / 5.5). */
+  /** Head recess diameter. Absent ⇒ 8 for a countersink, 5.5 for a counterbore
+   * (`resolveScrewHeadDiameter`), fixed so plates that omit it keep their shape.
+   * New configs store it. */
   readonly headDiameter?: Mm;
   /** Counterbore depth. Ignored for a countersink, whose depth is derived from
    * the cone angle. Absent ⇒ `SCREW_COUNTERBORE_DEFAULT_DEPTH_MM`. */
   readonly counterboreDepth?: Mm;
   /** Holes per split piece. Absent ⇒ `SCREWS_PER_PIECE_DEFAULT`. */
   readonly screwsPerPiece?: number;
+  /**
+   * Grid units kept free of screws along every edge of each piece, for a drawer
+   * whose lip covers the outer ring. Above 0 it also rules out the margin, which
+   * sits under that lip. Absent ⇒ 0.
+   */
+  readonly edgeInsetCells?: number;
+  /** Floor screws only. Absent ⇒ `'outer'`. */
+  readonly cellCorner?: ScrewCellCorner;
+}
+
+/**
+ * Mount magnets: blind holes opening on the plate's UNDERSIDE at the "+"
+ * junctions where four pockets meet, so the plate holds to a steel drawer or
+ * tool chest without growing taller. Distinct from `magnetHoles`, which hold
+ * BINS to the plate from above.
+ *
+ * Only junctions interior to a printed piece qualify: a seam or the plate edge
+ * has no solid junction to sit in. The pocket corners close in toward the
+ * junction as they rise, so a hole too wide or deep for the plate's profile is
+ * skipped rather than breaking into a pocket (see `mountMagnetFits`).
+ */
+export interface MountMagnetParams {
+  readonly enabled: boolean;
+  readonly diameter: Mm;
+  readonly depth: Mm;
+  /** Magnets per split piece. Absent ⇒ `MOUNT_MAGNETS_PER_PIECE_DEFAULT`. */
+  readonly perPiece?: number;
+  /** 45° lead-in at each hole's mouth on the underside. Absent means off. */
+  readonly chamfer?: boolean;
 }
 
 /** Stored (persisted) baseplate config saved per-layout.
@@ -168,6 +220,8 @@ export interface StoredBaseplateParams {
   readonly connectorNubs?: boolean;
   /** Remove center floor material, keeping only magnet pads (default true). */
   readonly lightweight?: boolean;
+  /** Hollow the straight grid joints while keeping the corner posts and a bottom bridge. */
+  readonly ecoPlate?: boolean;
   /**
    * Leave a solid floor under every socket instead of cutting the pockets
    * through — a rigid/weighted plate (default false). The floor is added below
@@ -278,4 +332,9 @@ export interface StoredBaseplateParams {
    * {@link ScrewHoleParams}.
    */
   readonly screwHoles?: ScrewHoleParams;
+  /**
+   * Underside mount magnets. Omitted/undefined = none. See
+   * {@link MountMagnetParams}.
+   */
+  readonly mountMagnets?: MountMagnetParams;
 }

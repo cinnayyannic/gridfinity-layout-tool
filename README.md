@@ -12,7 +12,11 @@ Plan and design [Gridfinity](https://www.youtube.com/c/ZackFreedman) drawer orga
 
 ### → [**gridfinitylayouttool.com**](https://gridfinitylayouttool.com)
 
+https://github.com/user-attachments/assets/eb7a7b68-07f0-45b3-9273-ecf1dfcf6a7c
+
 </div>
+
+The video plans an IKEA Alex drawer, from its measured size to a baseplate exported as 3MF. [Watch it on YouTube](https://www.youtube.com/watch?v=X85QnDIGCJc).
 
 <img width="1436" height="847" alt="image" src="https://github.com/user-attachments/assets/17dba424-3a01-4064-b3e9-7742687fc2d5" />
 
@@ -52,7 +56,7 @@ To set expectations, this tool deliberately does not:
 
 ## Local Development
 
-Requires **Node.js 24+** and **pnpm 11+**. Use `nvm use` to switch to the correct version (requires [nvm](https://github.com/nvm-sh/nvm)).
+Requires **Node.js 26+** and **pnpm 11+**. Use `nvm use` to switch to the correct version (requires [nvm](https://github.com/nvm-sh/nvm)).
 
 ```bash
 git clone https://github.com/andymai/gridfinity-layout-tool.git

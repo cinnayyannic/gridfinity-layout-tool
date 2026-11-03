@@ -1,0 +1,173 @@
+import { describe, expect, it } from 'vitest';
+import { buildCreditsPlan } from './creditsPlan';
+import { INTRO_SECONDS, buildRollSchedule, zoneAt, type MeasuredCredit } from './rollSchedule';
+import type { SupporterBin } from './supportersData';
+
+const bins: SupporterBin[] = [
+  { id: 'a', name: 'Ada', department: 0, isNewest: false },
+  { id: 'b', name: 'Bo', department: 0, isNewest: false },
+  { id: 'd', name: 'Dee', department: 0, isNewest: false },
+  { id: 'e', name: 'Eli', department: 0, isNewest: false },
+  { id: 'q', name: 'Quinn', department: 0, message: 'Saved my whole garage', isNewest: false },
+  { id: 'c', name: 'Cy', department: 3, isNewest: false },
+  { id: 's1', name: 'Somebody', department: 0, isNewest: false },
+  { id: 's2', name: 'Somebody', department: 3, isNewest: false },
+  { id: 'x', name: null, isNewest: false },
+];
+const plan = buildCreditsPlan(bins);
+const binsById = new Map(bins.map((b) => [b.id, b]));
+
+/** Stack every credit 60 px tall, top to bottom, as the DOM would. */
+const measured: MeasuredCredit[] = plan.items.map((item, i) => ({
+  id: item.id,
+  center: i * 60 + 30,
+  height: 60,
+}));
+const region = { height: 600, readingLine: 350 };
+const schedule = buildRollSchedule(plan, binsById, measured, region, 100);
+
+describe('buildRollSchedule', () => {
+  it('seats every credited bin after the title card', () => {
+    expect([...schedule.seatTimes.keys()].sort()).toEqual([
+      'a',
+      'b',
+      'c',
+      'd',
+      'e',
+      'q',
+      's1',
+      's2',
+      'x',
+    ]);
+    for (const time of schedule.seatTimes.values()) expect(time).toBeGreaterThan(INTRO_SECONDS);
+  });
+
+  it('drops the names in a block one after another', () => {
+    const block = plan.items.find((i) => i.kind === 'names' && i.binIds.length > 1);
+    const ids = block?.kind === 'names' ? block.binIds : [];
+    const [first, second] = ids.map((id) => schedule.seatTimes.get(id) ?? 0);
+    expect(second).toBeGreaterThan(first);
+    expect(second - first).toBeLessThan(0.2);
+  });
+
+  it('seats a bin as its credit crosses the reading line', () => {
+    const line = measured.find((m) => m.id === 'message-q');
+    const at = (line?.center ?? 0) - region.readingLine;
+    expect(schedule.timeline.offsetAt(schedule.seatTimes.get('q') ?? 0)).toBeCloseTo(at, 0);
+  });
+
+  it('drops a whole crowd of bins together as its one line passes', () => {
+    const line = measured.find((m) => m.id === 'crowd-somebody');
+    const time = schedule.timeline.timeAt((line?.center ?? 0) - region.readingLine);
+    const [first, second] = ['s1', 's2'].map((id) => schedule.seatTimes.get(id) ?? 0);
+    expect(first).toBeCloseTo(time);
+    expect(second - first).toBeGreaterThan(0);
+    expect(second - first).toBeLessThan(0.1);
+    expect(schedule.creditTimes.get('s2')).toBeCloseTo(time);
+  });
+
+  it('keeps even a huge crowd raining in within the hold of its line', () => {
+    const crowd: SupporterBin[] = Array.from({ length: 500 }, (_, i) => ({
+      id: `s${i}`,
+      name: 'Somebody',
+      department: i % 8,
+      isNewest: false,
+    }));
+    const big = buildCreditsPlan(crowd);
+    const stacked: MeasuredCredit[] = big.items.map((item, i) => ({
+      id: item.id,
+      center: i * 60 + 30,
+      height: 60,
+    }));
+    const times = buildRollSchedule(
+      big,
+      new Map(crowd.map((b) => [b.id, b])),
+      stacked,
+      region,
+      100
+    );
+    const drops = crowd.map((b) => times.seatTimes.get(b.id) ?? 0);
+    expect(Math.max(...drops) - Math.min(...drops)).toBeLessThanOrEqual(1.8 + 1e-9);
+  });
+
+  it('keeps the camera on the whole plate until a crowd has landed', () => {
+    const crowd: SupporterBin[] = [
+      ...Array.from({ length: 40 }, (_, i) => ({
+        id: `s${i}`,
+        name: 'Somebody',
+        department: i % 8,
+        isNewest: false,
+      })),
+      { id: 'x', name: null, isNewest: false },
+    ];
+    const tight = buildCreditsPlan(crowd);
+    const rows: MeasuredCredit[] = tight.items.map((item, i) => ({
+      id: item.id,
+      center: i * 30 + 15,
+      height: 30,
+    }));
+    const times = buildRollSchedule(tight, new Map(crowd.map((b) => [b.id, b])), rows, region, 100);
+    const lastDrop = Math.max(...crowd.slice(0, 40).map((b) => times.seatTimes.get(b.id) ?? 0));
+    const redacted = times.zoneCues.find((c) => c.zone === 8);
+    expect(redacted?.time).toBeGreaterThanOrEqual(lastDrop + 0.6);
+  });
+
+  it('cues the camera to each department ahead of its heading, in roll order', () => {
+    expect(schedule.zoneCues.map((c) => c.zone)).toEqual([0, 3, null, 8]);
+    const heading = measured.find((m) => m.id === 'dept-3');
+    const read = schedule.timeline.timeAt((heading?.center ?? 0) - region.readingLine);
+    expect(schedule.zoneCues[1].time).toBeLessThan(read);
+  });
+
+  it('starts with the first credit just below the region and ends near its top', () => {
+    const { timeline } = schedule;
+    expect(timeline.startOffset).toBe(-region.height);
+    const last = measured.at(-1);
+    expect(timeline.endOffset).toBeCloseTo((last?.center ?? 0) - region.height * 0.3);
+  });
+
+  it('slows down for a quote, so it takes longer than a block of names', () => {
+    const plain = buildRollSchedule(
+      buildCreditsPlan(bins.map((b) => ({ ...b, message: undefined }))),
+      binsById,
+      measured,
+      region,
+      100
+    );
+    expect(schedule.timeline.duration).toBeGreaterThan(plain.timeline.duration);
+  });
+});
+
+describe('a block that wraps onto several rows', () => {
+  it('lands each name as its own row passes, and seeks to that row', () => {
+    const block = plan.items.find((i) => i.kind === 'names' && i.binIds.length > 1);
+    if (block?.kind !== 'names') throw new Error('fixture has no multi-name block');
+    const [first, second] = block.binIds;
+    const rows = measured.map((m) =>
+      m.id === block.id
+        ? {
+            ...m,
+            members: [
+              { id: first, center: m.center - 20 },
+              { id: second, center: m.center + 20 },
+            ],
+          }
+        : m
+    );
+    const wrapped = buildRollSchedule(plan, binsById, rows, region, 100);
+    const center = measured.find((m) => m.id === block.id)?.center ?? 0;
+    const seekOffset = (id: string) =>
+      wrapped.timeline.offsetAt(wrapped.creditTimes.get(id) ?? 0) + region.readingLine;
+    expect(seekOffset(first)).toBeCloseTo(center - 20, 0);
+    expect(seekOffset(second)).toBeCloseTo(center + 20, 0);
+    expect(wrapped.seatTimes.get(second) ?? 0).toBeGreaterThan(wrapped.seatTimes.get(first) ?? 0);
+  });
+});
+
+describe('zoneAt', () => {
+  it('follows the cues and is null before the first one', () => {
+    expect(zoneAt(schedule, 0)).toBeNull();
+    expect(zoneAt(schedule, schedule.zoneCues[1].time + 0.01)).toBe(3);
+    expect(zoneAt(schedule, schedule.timeline.duration)).toBe(8);
+  });
+});

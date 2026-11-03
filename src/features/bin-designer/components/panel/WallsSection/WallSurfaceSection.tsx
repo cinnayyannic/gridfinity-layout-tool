@@ -3,17 +3,19 @@
  * walls. Lives on the Style page; thickness stays with Shape.
  */
 
-import { SliderInput, Checkbox, Stepper } from '@/design-system';
-import type { TextMode } from '@/features/bin-designer/types';
+import { SegmentedControl, SliderInput, Stepper } from '@/design-system';
+import type { TextMode, WallTextFace } from '@/features/bin-designer/types';
 import {
   MAX_WALL_LABEL_SLOT_PITCH_CELLS,
   PATTERN_WEB_THICKNESS_MAX,
   PATTERN_WEB_THICKNESS_MIN,
   PATTERN_WEB_THICKNESS_STEP,
   WALL_PATTERN_SIDES,
+  WALL_TEXT_FACES,
   WALL_TEXT_SIDES,
   isKumikoPattern,
 } from '@/features/bin-designer/types';
+import { jumpToDesignerControl } from '@/features/bin-designer/settingsManifest';
 import { useWallsSection } from './useWallsSection';
 import { PatternSelector } from './PatternSelector';
 import { FeatureToggle } from '../FeatureToggle';
@@ -21,7 +23,10 @@ import { CompartmentTextInput } from '../LabelTabsSection/CompartmentTextInput';
 import { LabelPlatesControls } from '../LabelTabsSection/LabelPlatesControls';
 import { AnchorPicker } from '../../controls/AnchorPicker';
 import {
+  DependencyHint,
+  FieldLabel,
   Hint,
+  LabelInfo,
   Readout,
   SideSelector,
   SubHeader,
@@ -63,7 +68,7 @@ export function WallSurfaceSection() {
 
   return (
     <div className="space-y-4">
-      <SubHeader>{t('binDesigner.style.section.walls')}</SubHeader>
+      <SubHeader>{t('binDesigner.style.section.wallSurface')}</SubHeader>
       <div>
         <PatternSelector
           selectedPattern={state.patternEnabled ? state.pattern : null}
@@ -98,7 +103,11 @@ export function WallSurfaceSection() {
                   max={PATTERN_WEB_THICKNESS_MAX}
                   step={PATTERN_WEB_THICKNESS_STEP}
                   unit="mm"
-                  info={t('binDesigner.walls.pattern.strutWidthHint')}
+                  labelAddon={
+                    <LabelInfo label={t('binDesigner.walls.pattern.strutWidth')}>
+                      {t('binDesigner.walls.pattern.strutWidthHint')}
+                    </LabelInfo>
+                  }
                 />
               </div>
             )}
@@ -112,9 +121,7 @@ export function WallSurfaceSection() {
               </p>
             ) : (
               <div className="mt-3">
-                <span className="mb-1 block text-label text-content-tertiary">
-                  {t('binDesigner.walls.pattern.sides')}
-                </span>
+                <FieldLabel>{t('binDesigner.walls.pattern.sides')}</FieldLabel>
                 <SideSelector
                   sides={patternSideStates}
                   onToggle={handlers.togglePatternSide}
@@ -125,23 +132,29 @@ export function WallSurfaceSection() {
                     {state.patternSidesNote}
                   </p>
                 )}
+                {state.patternCollarNote !== undefined && (
+                  <div className="mt-1">
+                    <DependencyHint
+                      reason={state.patternCollarNote}
+                      actionLabel={t('binDesigner.dependency.editHeight')}
+                      onAction={() => jumpToDesignerControl('bd-dimensions')}
+                    />
+                  </div>
+                )}
               </div>
             )}
             {/* ── Divider walls (#2811) — the same pattern and scale carried
                 through the compartment dividers, so a patterned bin doesn't
                 read as hollow walls around solid dividers. */}
             <div className="mt-3 border-t border-stroke-subtle/50 pt-2">
-              <Checkbox
-                checked={state.dividersEnabled}
-                onChange={handlers.handleDividersChange}
-                disabled={state.dividersAvailableReason !== undefined}
+              <FeatureToggle
                 label={t('binDesigner.walls.pattern.dividers')}
+                checked={state.dividersEnabled}
+                onChange={() => handlers.handleDividersChange(!state.dividersEnabled)}
+                disabledReason={state.dividersAvailableReason}
+                info={t('binDesigner.walls.pattern.dividersHint')}
               />
-              <p className="ml-6 mt-1 text-label leading-relaxed text-content-tertiary">
-                {state.dividersAvailableReason ??
-                  state.dividersNote ??
-                  t('binDesigner.walls.pattern.dividersHint')}
-              </p>
+              {state.dividersNote !== undefined && <Hint>{state.dividersNote}</Hint>}
             </div>
           </>
         )}
@@ -155,27 +168,45 @@ export function WallSurfaceSection() {
         checked={state.isWallTextOpen}
         onChange={handlers.toggleWallText}
         disabledReason={state.wallTextDisabledReason}
+        info={t('binDesigner.walls.text.hint')}
         primaryControls={
           <>
             <div className="grid grid-cols-2 gap-2">
-              {WALL_TEXT_SIDES.map((side, index) => (
-                <div key={side}>
-                  <span className="mb-1 block text-label text-content-tertiary">
-                    {t(`binDesigner.lid.side.${side}`)}
-                  </span>
-                  <CompartmentTextInput
-                    multiline
-                    committedValue={state.wallTexts[side] ?? ''}
-                    compartmentId={index}
-                    placeholder={t('binDesigner.walls.text.placeholder')}
-                    ariaLabel={t('binDesigner.walls.text.sideAria', {
-                      side: t(`binDesigner.lid.side.${side}`),
-                    })}
-                    onCommit={handlers.commitWallTextAt}
-                  />
-                </div>
-              ))}
+              {WALL_TEXT_SIDES.map((side, index) => {
+                const sideName = t(`binDesigner.lid.side.${side}`);
+                // Picks a face, not a wall, so the wall name stays out of the
+                // control's own subtree.
+                const faceAria = t('binDesigner.walls.text.faceAria', { side: sideName });
+                const insideBlock = state.insideFaceBlocks[side];
+                return (
+                  <div key={side} className="space-y-1">
+                    <FieldLabel>{sideName}</FieldLabel>
+                    <CompartmentTextInput
+                      multiline
+                      committedValue={state.wallTexts[side] ?? ''}
+                      compartmentId={index}
+                      placeholder={t('binDesigner.walls.text.placeholder')}
+                      ariaLabel={t('binDesigner.walls.text.sideAria', { side: sideName })}
+                      onCommit={handlers.commitWallTextAt}
+                    />
+                    <SegmentedControl<WallTextFace>
+                      aria-label={faceAria}
+                      fullWidth
+                      size="sm"
+                      value={state.wallTextFaces[side]}
+                      onChange={(face) => handlers.setWallTextFace(side, face)}
+                      options={WALL_TEXT_FACES.map((face) => ({
+                        value: face,
+                        label: t(`binDesigner.walls.text.face.${face}`),
+                        disabled: face === 'inside' && insideBlock !== null,
+                      }))}
+                    />
+                    {insideBlock === 'scoop' && <Hint>{state.insideFaceScoopNote}</Hint>}
+                  </div>
+                );
+              })}
             </div>
+            {state.insideFaceSolidNote !== undefined && <Hint>{state.insideFaceSolidNote}</Hint>}
             {state.hasAnyWallText && (
               <>
                 <TextFinishGrid
@@ -193,15 +224,37 @@ export function WallSurfaceSection() {
                   <span className="block text-label text-content-tertiary">
                     {t('binDesigner.type.anchor')}
                   </span>
-                  <AnchorPicker
-                    value={state.wallTextAnchor}
-                    onChange={handlers.setSurfaceTextAnchor}
-                    label={t('binDesigner.walls.text.anchor')}
-                  />
+                  {state.anyWallTextInside ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <span className="block text-label text-content-tertiary">
+                          {t('binDesigner.walls.text.face.outside')}
+                        </span>
+                        <AnchorPicker
+                          value={state.wallTextAnchor}
+                          onChange={handlers.setSurfaceTextAnchor}
+                          label={t('binDesigner.walls.text.anchorOutside')}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <span className="block text-label text-content-tertiary">
+                          {t('binDesigner.walls.text.face.inside')}
+                        </span>
+                        <AnchorPicker
+                          value={state.insideTextAnchor}
+                          onChange={handlers.setInsideTextAnchor}
+                          label={t('binDesigner.walls.text.anchorInside')}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <AnchorPicker
+                      value={state.wallTextAnchor}
+                      onChange={handlers.setSurfaceTextAnchor}
+                      label={t('binDesigner.walls.text.anchor')}
+                    />
+                  )}
                 </div>
-                <p className="text-label leading-relaxed text-content-tertiary">
-                  {t('binDesigner.walls.text.hint')}
-                </p>
                 <p className="text-label leading-relaxed text-content-tertiary">
                   {t('binDesigner.type.secondLineHint')}
                 </p>
@@ -215,13 +268,11 @@ export function WallSurfaceSection() {
         checked={state.labelSlotsEnabled}
         onChange={handlers.toggleLabelSlots}
         disabledReason={state.labelSlotsDisabledReason}
+        info={t('binDesigner.walls.labelSlots.hint')}
         primaryControls={
           <>
-            <Hint>{t('binDesigner.walls.labelSlots.hint')}</Hint>
             <div>
-              <span className="mb-1 block text-label text-content-tertiary">
-                {t('binDesigner.walls.labelSlots.sides')}
-              </span>
+              <FieldLabel>{t('binDesigner.walls.labelSlots.sides')}</FieldLabel>
               <SideSelector
                 sides={labelSlotSideStates}
                 onToggle={handlers.toggleLabelSlotSide}
@@ -234,9 +285,7 @@ export function WallSurfaceSection() {
               )}
             </div>
             <div>
-              <span className="mb-1 block text-label text-content-tertiary">
-                {t('binDesigner.walls.labelSlots.spacing')}
-              </span>
+              <FieldLabel>{t('binDesigner.walls.labelSlots.spacing')}</FieldLabel>
               <Stepper
                 aria-label={t('binDesigner.walls.labelSlots.spacing')}
                 value={state.labelSlotEveryCells}

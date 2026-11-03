@@ -15,6 +15,8 @@ import { useLayoutStore } from '@/core/store/layout';
 import { withLowProfileBase } from '@/shared/generation/lowProfileBase';
 import { useDesignerStore } from '../store';
 import { setPendingMeshCache } from '../store/helpers';
+import { withSyncedLidHeight } from '../utils/lidHeightUnits';
+import { withResolvedCutoutDepths } from '@/shared/utils/cutoutDepth';
 
 export function useSyncPhysicalUnits(): void {
   const { gridUnitMm, heightUnitMm, magnetAnchor, lowProfileBase } = useLayoutStore(
@@ -43,12 +45,14 @@ export function useSyncPhysicalUnits(): void {
 
     // Update params without history push — epoch increments to trigger regeneration
     useDesignerStore.setState((state) => ({
-      params: {
-        ...withLowProfileBase(state.params, lowProfileBase),
-        gridUnitMm,
-        heightUnitMm,
-        magnetAnchor,
-      },
+      params: withResolvedCutoutDepths(
+        withSyncedLidHeight({
+          ...withLowProfileBase(state.params, lowProfileBase),
+          gridUnitMm,
+          heightUnitMm,
+          magnetAnchor,
+        })
+      ),
       generation: {
         ...state.generation,
         epoch: state.generation.epoch + 1,
@@ -64,9 +68,8 @@ export function useSyncPhysicalUnits(): void {
     () =>
       useDesignerStore.subscribe((state, prev) => {
         if (state.params === prev.params) return;
-        const synced = withLowProfileBase(
-          state.params,
-          useLayoutStore.getState().layout.lowProfileBase
+        const synced = withResolvedCutoutDepths(
+          withLowProfileBase(state.params, useLayoutStore.getState().layout.lowProfileBase)
         );
         if (synced === state.params) return;
         setPendingMeshCache(null);

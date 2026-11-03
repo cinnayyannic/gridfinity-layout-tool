@@ -13,6 +13,7 @@ export {
   compareDimensions,
   checkSyncEligibility,
   checkBatchSyncEligibility,
+  planSiblingCascade,
   generateDefaultDesignName,
 } from './linkingRules';
 
@@ -26,6 +27,9 @@ export {
   formatDimensions,
   formatDimensionChange,
 } from './syncOperations';
+
+// A resize that would grow a placement's end support past what fits
+export { resizeBlockedBySupport, resizeOrder } from './resizeSupport';
 
 // Complex geometry detection
 export { hasComplexGeometry, getComplexityReasons } from './complexGeometry';

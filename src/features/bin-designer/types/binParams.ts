@@ -1,11 +1,12 @@
-import type { MagnetAnchor } from '@/core/types';
-import type { MeshAsset } from '@/shared/generation/meshAsset';
+import type { MagnetAnchor, SlantConfig } from '@/core/types';
+import type { MeshAssetEntry } from '@/shared/generation/meshAsset';
 import type { CellMask } from '@/shared/utils/cellMask';
 import type { BaseConfig, BinStyle } from './base';
 import type { SlotConfig, DividerPieceConfig } from './dividers';
 import type { CompartmentConfig, ScoopConfig } from './compartments';
 import type { LabelTabConfig } from './labelTabs';
 import type { HandleConfig } from './handles';
+import type { PullTabConfig } from './pullTab';
 import type { WallLabelSlotsConfig, WallConfig, WallPatternConfig, OverhangConfig } from './walls';
 import type { SlideConfig } from './slide';
 import type { FloorPatternConfig } from './floor';
@@ -74,6 +75,7 @@ export interface BinParams {
   /** Sliding tray: a rail on this bin plus the companion tray that rides it. */
   readonly slide: SlideConfig;
   readonly handles: HandleConfig;
+  readonly pullTab?: PullTabConfig;
   readonly slotConfig: SlotConfig;
   readonly dividerPieces: DividerPieceConfig;
   readonly inserts: Insert[];
@@ -83,9 +85,11 @@ export interface BinParams {
    * Imported STL imprint meshes, keyed by the id that `Cutout.meshId`
    * references (shape 'mesh' cutouts). Absent/empty for designs without mesh
    * imprints, so existing designs serialize byte-identically. Entries are
-   * GC'd by the store when the last referencing cutout is deleted.
+   * GC'd by the store when the last referencing cutout is deleted. A stored
+   * design holds refs into the local mesh store; an entry is inline until it
+   * has been stored, and everything that leaves the device is inline.
    */
-  readonly meshAssets?: Record<string, MeshAsset>;
+  readonly meshAssets?: Record<string, MeshAssetEntry>;
   /**
    * User-chosen names for cutout groups, keyed by group id. Unnamed groups are
    * simply absent and fall back to a derived "Group of N" row, so a design that
@@ -172,6 +176,8 @@ export interface BinParams {
    * from the footprint polygon.
    */
   readonly extraWallHeightMm?: number;
+  /** See {@link SlantConfig}. Ignored while `slantBlocker` reports a conflict. */
+  readonly slant?: SlantConfig;
 }
 
 // Insert Types

@@ -1,6 +1,7 @@
 ---
 title: Gridfinity Calculator — Drawer Size to Grid Units
 description: Convert drawer measurements in millimeters to Gridfinity grid units. See leftover space and the tallest bin that fits. Free, and no account needed.
+lastmod: 2026-10-15
 keywords: gridfinity calculator, gridfinity drawer calculator, gridfinity size calculator, gridfinity bin calculator, gridfinity base calculator, gridfinity grid units, gridfinity rechner, 42mm grid calculator
 schema: Article
 breadcrumbs:
@@ -47,7 +48,7 @@ faqs:
 
 # Gridfinity Calculator
 
-Convert your drawer measurements to Gridfinity grid units. Enter the interior dimensions in millimeters; the calculator shows the grid size, the half-grid size, leftover edge space, and the tallest bin the drawer can take.
+Convert your drawer measurements to Gridfinity grid units. Enter the interior dimensions in millimeters; the calculator shows the grid size, the half-grid size, leftover edge space, and the tallest bin the drawer can take. Precomputed grids for IKEA Alex, Kallax, Malm, Helmer and Milwaukee Packout 3-drawer are at [named drawer sizes](/gridfinity-drawers).
 
 <div class="calc" id="gridfinity-calculator">
   <div class="calc__grid">
@@ -85,10 +86,12 @@ Convert your drawer measurements to Gridfinity grid units. Enter the interior di
     </div>
   </div>
   <p class="calc__note">Measure the drawer's interior, not the front panel. Grid units round down; the baseplate generator's edge padding absorbs the leftover millimeters.</p>
+  <div class="calc__actions">
+    <a class="content-cta" href="/" data-drawer-link="planner">Plan this drawer &rarr;</a>
+    <a class="calc__secondary" href="/baseplate" data-drawer-link="baseplate">Make its baseplate &rarr;</a>
+  </div>
 </div>
 <script src="/calculator.js" defer></script>
-
-[CTA: Plan This Drawer in the Layout Tool](/)
 
 ## The Math Behind It
 

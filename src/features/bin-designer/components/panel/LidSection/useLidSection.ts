@@ -4,15 +4,14 @@ import { useDesignerStore } from '@/features/bin-designer/store';
 import { useTranslation } from '@/i18n';
 import {
   LID_CLICK_RAIL_COVERAGE_OPTIONS,
-  LID_EXTRA_HEIGHT_MIN_MM,
-  LID_EXTRA_HEIGHT_MAX_MM,
-  LID_EXTRA_HEIGHT_STEP_MM,
   LID_FIT_CLEARANCE,
   LID_TOP_THICKNESS_MIN_MM,
   LID_TRAY_FLOOR,
   LID_TOP_THICKNESS_MAX_MM,
   LID_TOP_THICKNESS_STEP_MM,
   LID_MAGNETIC_EXTRA_CLEARANCE,
+  lidHasFill,
+  attachmentTakesFill,
   resolveLidMateRelief,
   resolveLidPlateThickness,
   resolveLidTrayBreakdown,
@@ -69,7 +68,7 @@ import type { SnappingSliderOption } from '../../controls/SnappingSlider';
 import {
   buildBlockerReason,
   computeRailSummary,
-  FIXABLE_IDS,
+  fixableIdsFor,
   LID_TOP_SURFACES,
   lidValueSummary,
   type LidTopSurface,
@@ -99,7 +98,10 @@ import type {
   LidSlidePull,
   LidHingeCatch,
 } from '@/features/bin-designer/types/lid';
-import { slideLidPlanForParams } from '@/features/bin-designer/utils/slideLidPlanForParams';
+import {
+  slideLidFillOffsetMm,
+  slideLidPlanForParams,
+} from '@/features/bin-designer/utils/slideLidPlanForParams';
 import { slideSagSafeThicknessMm } from '@/shared/utils/slideLidPlan';
 
 function ceilToThicknessStep(mm: number): number {
@@ -135,6 +137,7 @@ export function useLidSection() {
     updateWalls,
     updateHandles,
     updateWallPattern,
+    updateCutoutConfig,
     setParam,
     setLidText,
     setLidTextStyle,
@@ -154,6 +157,7 @@ export function useLidSection() {
       updateWalls: s.updateWalls,
       updateHandles: s.updateHandles,
       updateWallPattern: s.updateWallPattern,
+      updateCutoutConfig: s.updateCutoutConfig,
       setParam: s.setParam,
       setLidText: s.setLidText,
       setLidTextStyle: s.setLidTextStyle,
@@ -167,6 +171,7 @@ export function useLidSection() {
   );
 
   const compatibilityIssues = useMemo(() => checkLidCompatibility(params), [params]);
+  const fixableIds = useMemo(() => fixableIdsFor(params), [params]);
   // Per-side rail conflicts (label tabs, wall cutouts, intruding handles).
   // Derived from the already-memoized issue list — avoids running the
   // compatibility scan a second time per params change. The worker side
@@ -224,7 +229,9 @@ export function useLidSection() {
   // the worker builds from: the pin lengths it quotes are the ones the barrel
   // is actually bored for, and they change as the bin is resized.
   const hingePlan = planHingeLid(params);
-  const stackingLipMissing = needsStackingLip && !base.stackingLip;
+  // A slanted bin has no lip to turn back on, so its blocker speaks first.
+  const slanted = compatibilityIssues.some((i) => i.id === 'slanted');
+  const stackingLipMissing = needsStackingLip && !base.stackingLip && !slanted;
   const disabledReason = stackingLipMissing
     ? t('binDesigner.lid.requiresStackingLip')
     : (blockerReason ?? undefined);
@@ -425,22 +432,14 @@ export function useLidSection() {
     updateLid({ relieveInterior: !lid.relieveInterior });
   }, [lid.relieveInterior, updateLid]);
 
+  // Off is an absent key, never `false` (see `LidConfig.fill`).
+  const toggleFill = useCallback(() => {
+    updateLid({ fill: lid.fill === true ? undefined : true });
+  }, [lid.fill, updateLid]);
+
   const setClickRailCoverage = useCallback(
     (clickRailCoverage: number) => {
       updateLid({ clickRailCoverage });
-    },
-    [updateLid]
-  );
-
-  const setExtraHeight = useCallback(
-    (extraHeightMm: number) => {
-      // Clamp defensively; the stepper already bounds input but a keyboard
-      // entry could exceed the range.
-      const clamped = Math.min(
-        LID_EXTRA_HEIGHT_MAX_MM,
-        Math.max(LID_EXTRA_HEIGHT_MIN_MM, extraHeightMm)
-      );
-      updateLid({ extraHeightMm: clamped });
     },
     [updateLid]
   );
@@ -456,8 +455,8 @@ export function useLidSection() {
       ? Math.max(LID_TRAY_FLOOR, ceilToThicknessStep(hingeFloor - lid.tray.depthMm))
       : Math.max(LID_TOP_THICKNESS_MIN_MM, hingeFloor);
   // The persisted value stays within LID_TOP_THICKNESS_MAX_MM (the server
-  // bound); a hinge floor past it pins the stepper at the built value rather
-  // than handing it a minimum above its maximum.
+  // bound); a minimum past it pins the stepper at the built value rather than
+  // handing it a minimum above its maximum.
   const topThicknessMax = Math.max(LID_TOP_THICKNESS_MAX_MM, topThicknessMin);
 
   const setTopThickness = useCallback(
@@ -756,6 +755,11 @@ export function useLidSection() {
         case 'slideFlushNeedsNoLip':
           updateBase({ stackingLip: false });
           return;
+        case 'slideFillTooHigh': {
+          const topOffset = slideLidFillOffsetMm(params);
+          if (topOffset !== null) updateCutoutConfig({ topOffset });
+          return;
+        }
         // Through the picker's own write so the grid-only options (magnet
         // pockets, lip-only, separate plate) are cleared with the grid.
         case 'hingeStackableTop':
@@ -778,10 +782,11 @@ export function useLidSection() {
       }
     },
     [
-      params.dividerPieces,
+      params,
       setParam,
       setTopSurface,
       updateBase,
+      updateCutoutConfig,
       updateHandles,
       updateWalls,
       updateWallPattern,
@@ -908,6 +913,12 @@ export function useLidSection() {
       anyRail,
       clickRailCoverage: lid.clickRailCoverage,
       relieveInterior: lid.relieveInterior,
+      fillAvailable: attachmentTakesFill(lid.attachment),
+      fill: lid.fill === true,
+      // The fill overrides the relief, so its toggle would do nothing.
+      relieveInteriorDisabledReason: lidHasFill(params)
+        ? t('binDesigner.lid.relieveInteriorFillReason')
+        : undefined,
       // Sliding lid. `slidePlan` carries the resolver's own account of the
       // joint — the free span the sag warning is about and the thickness that
       // would carry it — so the panel never restates arithmetic the worker
@@ -966,10 +977,6 @@ export function useLidSection() {
       gripHeightMax: LID_GRIP_HEIGHT_MAX_MM,
       gripHeightStep: LID_GRIP_HEIGHT_STEP_MM,
       gripCoverageOptions,
-      extraHeightMm: lid.extraHeightMm,
-      extraHeightMin: LID_EXTRA_HEIGHT_MIN_MM,
-      extraHeightMax: LID_EXTRA_HEIGHT_MAX_MM,
-      extraHeightStep: LID_EXTRA_HEIGHT_STEP_MM,
       // Floor-plate thickness knob. `topThicknessEffective` reflects
       // what the worker will actually build: magnet pockets raise the plate
       // above the user's value, and on a tray lid the value IS the floor under
@@ -999,7 +1006,7 @@ export function useLidSection() {
       dimensionsReadout,
       railsReadout,
       compatibilityIssues,
-      fixableIds: FIXABLE_IDS,
+      fixableIds,
       // Lid-top text
       lidText,
       textMode,
@@ -1023,6 +1030,7 @@ export function useLidSection() {
       toggleClickRailSide,
       setClickRailCoverage,
       toggleRelieveInterior,
+      toggleFill,
       setHingeSide,
       setHingeCatch,
       setHingeFit,
@@ -1037,7 +1045,6 @@ export function useLidSection() {
       setGripCoverage,
       setGripHeight,
       toggleGripBinDip,
-      setExtraHeight,
       setTopThickness,
       setRetentionMagnetDiameter,
       setRetentionMagnetDepth,

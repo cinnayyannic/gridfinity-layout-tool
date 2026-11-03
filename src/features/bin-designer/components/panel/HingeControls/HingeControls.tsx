@@ -19,7 +19,7 @@
  */
 
 import { SegmentedControl } from '@/design-system';
-import { Hint, Readout } from '../shared';
+import { FieldLabel, OptionNotes, Readout, SideSelector } from '../shared';
 import type { useTranslation } from '@/i18n';
 import type { useLidSection } from '../LidSection/useLidSection';
 
@@ -37,28 +37,34 @@ export function HingeControls({
   return (
     <div className="space-y-2">
       <div>
-        <span className="mb-1 block text-xs font-medium text-content-secondary">
+        <FieldLabel info={t('binDesigner.lid.hinge.sideHint')}>
           {t('binDesigner.lid.hinge.side')}
-        </span>
-        <SegmentedControl
-          aria-label={t('binDesigner.lid.hinge.side')}
-          activeStyle="accent"
-          fullWidth
-          size="sm"
+        </FieldLabel>
+        <SideSelector
+          mode="single"
+          ariaLabel={t('binDesigner.lid.hinge.side')}
           value={state.hinge.side}
-          onChange={handlers.setHingeSide}
-          options={state.hingeSides.map((side) => ({
-            value: side,
+          onSelect={handlers.setHingeSide}
+          sides={state.hingeSides.map((side) => ({
+            side,
             label: t(`binDesigner.lid.side.${side}`),
           }))}
         />
-        <Hint>{t('binDesigner.lid.hinge.sideHint')}</Hint>
       </div>
 
       <div>
-        <span className="mb-1 block text-xs font-medium text-content-secondary">
+        <FieldLabel
+          info={
+            <OptionNotes
+              options={state.hingeCatches.map((mode) => ({
+                label: t(`binDesigner.lid.hinge.catch.${mode}`),
+                note: t(`binDesigner.lid.hinge.catch.${mode}Hint`),
+              }))}
+            />
+          }
+        >
           {t('binDesigner.lid.hinge.catch')}
-        </span>
+        </FieldLabel>
         <SegmentedControl
           aria-label={t('binDesigner.lid.hinge.catch')}
           activeStyle="accent"
@@ -71,7 +77,6 @@ export function HingeControls({
             label: t(`binDesigner.lid.hinge.catch.${mode}`),
           }))}
         />
-        <Hint>{t(`binDesigner.lid.hinge.catch.${state.hinge.catchMode}Hint`)}</Hint>
       </div>
 
       {/* The plan's own numbers, never the panel's. A run per unbroken stretch

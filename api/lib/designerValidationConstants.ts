@@ -32,6 +32,11 @@ export const CONSTRAINTS = {
   // The client clamps at read time too; this stops a NaN or an absurd angle
   // reaching tan() in the generator's tool-extension math.
   MAX_CUTOUT_LEAN_DEG: 45,
+  // Mirrors MAX_CUTOUT_FLOOR_MM in src/features/bin-designer/types/cutout.ts:
+  // the tallest bin (MAX_HEIGHT * 7mm), above which no floor can sit.
+  MAX_CUTOUT_FLOOR_MM: 350,
+  // Mirrors MAX_SPLIT_POINT_MM in src/features/bin-designer/types/cutout.ts.
+  MAX_SPLIT_POINT_MM: 1000,
   // Mirrors MAX_ARRAY_INSTANCES in src/features/bin-designer/types/cutout.ts.
   // A repeat expands to at most this many holes, so a label list longer than it
   // describes copies that do not exist. Bounded here so a direct HTTP POST
@@ -105,7 +110,9 @@ export const CONSTRAINTS = {
   // `src/shared/generation/meshAsset.ts` — keep in sync. Designs carrying
   // meshAssets get the raised payload cap; everything else keeps 100KB.
   MESH_MAX_PAYLOAD_BYTES: 2_000_000,
-  MAX_MESH_ASSETS: 8,
+  // Declared triangles across a design's assets, inline or ref. The client
+  // decoder holds each asset to its declared count, which makes this binding.
+  MAX_MESH_TRIANGLES_TOTAL: 400_000,
   MAX_MESH_ASSET_TRIANGLES: 50_000,
   MAX_MESH_OUTLINE_POINTS: 4000,
   MAX_MESH_NAME_LENGTH: 64,

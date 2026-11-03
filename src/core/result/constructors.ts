@@ -28,6 +28,8 @@ import type {
   StorageCorruptedError,
   StorageUnavailableError,
   StorageNetworkError,
+  StorageMeshMissingError,
+  StorageNotSavedError,
   ValidationOutOfBoundsError,
   ValidationCollisionError,
   ValidationInvalidLayerError,
@@ -129,6 +131,14 @@ export function storageUnavailable(
 /** Create a storage network error. */
 export function storageNetworkError(cause?: unknown): StorageNetworkError {
   return createError('StorageError', 'STORAGE_NETWORK_ERROR', { cause });
+}
+
+export function storageMeshMissing(hash: string): StorageMeshMissingError {
+  return createError('StorageError', 'STORAGE_MESH_MISSING', { hash });
+}
+
+export function storageNotSaved(): StorageNotSavedError {
+  return createError('StorageError', 'STORAGE_NOT_SAVED', {});
 }
 
 // Validation Error Constructors

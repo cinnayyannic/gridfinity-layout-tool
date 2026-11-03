@@ -11,12 +11,17 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ALLOWED_PARAM_KEYS,
   DESIGN_TAG_MAX_COUNT,
   DESIGN_TAG_MAX_LENGTH,
   LIP_CORNERS as API_LIP_CORNERS,
   MAX_CUTOUT_CORNER_RADIUS as API_MAX_CUTOUT_CORNER_RADIUS,
   VALID_BIN_STYLES,
+  VALID_CUTOUT_DEPTH_MODES,
+  VALID_CUTOUT_ENTRY_PROFILES,
   VALID_CUTOUT_FILL_REFERENCES,
+  VALID_CUTOUT_FINGER_BOTTOMS,
+  VALID_SPLIT_DEPTH_MODES,
   VALID_CUTOUT_LABEL_MODES,
   VALID_FEET_MODES,
   VALID_FOOT_LATTICES,
@@ -35,10 +40,17 @@ import {
   VALID_TEXT_CUT_PROFILES,
   VALID_TEXT_FONTS,
   VALID_TEXT_MODES,
+  VALID_TEXT_QUARTER_TURNS,
   VALID_WALL_TEXT_ALIGNS,
   VALID_WALL_TEXT_SIDES,
   validateDesignerShare,
 } from './designerValidation.js';
+import { VALID_WALL_TEXT_FACES } from './designerTextValidation.js';
+import {
+  PULL_TAB_RANGES,
+  VALID_PULL_TAB_CENTER_AXES,
+  VALID_PULL_TAB_WALLS,
+} from './designerPullTabValidation.js';
 import { SOCKET_HEIGHT_MM } from './assemblyValidation.js';
 import {
   CONSTRAINTS,
@@ -59,13 +71,19 @@ import {
   LIGHTWEIGHT_MODES,
 } from '../../src/features/bin-designer/types/base.js';
 import {
+  CUTOUT_ENTRY_PROFILES,
   CUTOUT_FILL_REFERENCES,
+  CUTOUT_FINGER_BOTTOMS,
+  SPLIT_DEPTH_MODES,
   CUTOUT_LABEL_MODES,
   MAX_ARRAY_INSTANCES,
   MAX_CUTOUT_GROUP_NAMES,
+  MAX_CUTOUT_FLOOR_MM,
+  MAX_SPLIT_POINT_MM,
   MAX_CUTOUT_LEAN_DEG,
   MAX_GROUP_NAME_LENGTH,
   MAX_PARENT_GROUPS,
+  STORED_CUTOUT_DEPTH_MODES,
 } from '../../src/features/bin-designer/types/cutout.js';
 import {
   LIP_AXIS_COUNTS,
@@ -90,7 +108,9 @@ import {
   TEXT_CUT_PROFILES,
   TEXT_FONT_FAMILIES,
   TEXT_MODES,
+  TEXT_QUARTER_TURNS,
   WALL_TEXT_ALIGNS,
+  WALL_TEXT_FACES,
   WALL_TEXT_SIDES,
 } from '../../src/features/bin-designer/types/text.js';
 import { MAX_TAGS, MAX_TAG_LENGTH } from '../../src/features/bin-designer/utils/tags.js';
@@ -102,14 +122,17 @@ import {
   MIN_LABEL_SOCKET_TAB_DEPTH_MM,
 } from '../../src/shared/constants/labelPlates.js';
 import {
-  MAX_MESH_ASSETS_PER_DESIGN,
+  MAX_MESH_TRIANGLES_PER_DESIGN,
   MAX_MESH_ASSET_DATA_LENGTH,
   MAX_MESH_ASSET_TRIANGLES,
   MAX_MESH_OUTLINE_POINTS,
 } from '../../src/shared/generation/meshAsset.js';
 import { GRIDFINITY_SPEC } from '../../src/shared/printSettings/gridfinityGeometry.js';
 import { MAX_MASK_DIMENSION } from '../../src/shared/utils/cellMask.js';
+import { BIN_PARAMS_KEYS } from '../../src/shared/schema/binDesignKeys.js';
 import { MAX_CUTOUT_CORNER_RADIUS } from '../../src/shared/utils/wallCutoutPosition.js';
+import { PULL_TAB_LIMITS, PULL_TAB_WALLS } from '../../src/shared/utils/pullTabPlan.js';
+import { PULL_TAB_CENTER_AXES } from '../../src/shared/utils/pullTabCenterPlan.js';
 
 type Allowlist = readonly (string | number)[];
 
@@ -151,14 +174,38 @@ const ALLOWLIST_MIRRORS: readonly (readonly [string, Allowlist, Allowlist])[] = 
   ['VALID_TEXT_CUT_PROFILES / TEXT_CUT_PROFILES', VALID_TEXT_CUT_PROFILES, TEXT_CUT_PROFILES],
   ['VALID_WALL_TEXT_SIDES / WALL_TEXT_SIDES', VALID_WALL_TEXT_SIDES, WALL_TEXT_SIDES],
   ['VALID_WALL_TEXT_ALIGNS / WALL_TEXT_ALIGNS', VALID_WALL_TEXT_ALIGNS, WALL_TEXT_ALIGNS],
+  ['VALID_WALL_TEXT_FACES / WALL_TEXT_FACES', VALID_WALL_TEXT_FACES, WALL_TEXT_FACES],
+  ['VALID_TEXT_QUARTER_TURNS / TEXT_QUARTER_TURNS', VALID_TEXT_QUARTER_TURNS, TEXT_QUARTER_TURNS],
   [
     'VALID_CUTOUT_FILL_REFERENCES / CUTOUT_FILL_REFERENCES',
     VALID_CUTOUT_FILL_REFERENCES,
     CUTOUT_FILL_REFERENCES,
   ],
   ['VALID_CUTOUT_LABEL_MODES / CUTOUT_LABEL_MODES', VALID_CUTOUT_LABEL_MODES, CUTOUT_LABEL_MODES],
+  [
+    'VALID_CUTOUT_ENTRY_PROFILES / CUTOUT_ENTRY_PROFILES',
+    VALID_CUTOUT_ENTRY_PROFILES,
+    CUTOUT_ENTRY_PROFILES,
+  ],
+  ['VALID_SPLIT_DEPTH_MODES / SPLIT_DEPTH_MODES', VALID_SPLIT_DEPTH_MODES, SPLIT_DEPTH_MODES],
+  [
+    'VALID_CUTOUT_FINGER_BOTTOMS / CUTOUT_FINGER_BOTTOMS',
+    VALID_CUTOUT_FINGER_BOTTOMS,
+    CUTOUT_FINGER_BOTTOMS,
+  ],
+  [
+    'VALID_CUTOUT_DEPTH_MODES / STORED_CUTOUT_DEPTH_MODES',
+    VALID_CUTOUT_DEPTH_MODES,
+    STORED_CUTOUT_DEPTH_MODES,
+  ],
   ['LIP_CORNERS', API_LIP_CORNERS, LIP_CORNERS],
   ['VALID_LIP_AXIS_COUNTS / LIP_AXIS_COUNTS', [...VALID_LIP_AXIS_COUNTS], LIP_AXIS_COUNTS],
+  ['VALID_PULL_TAB_WALLS / PULL_TAB_WALLS', VALID_PULL_TAB_WALLS, PULL_TAB_WALLS],
+  [
+    'VALID_PULL_TAB_CENTER_AXES / PULL_TAB_CENTER_AXES',
+    VALID_PULL_TAB_CENTER_AXES,
+    PULL_TAB_CENTER_AXES,
+  ],
 ];
 
 const BOUND_MIRRORS: readonly (readonly [string, number, number])[] = [
@@ -268,12 +315,14 @@ const BOUND_MIRRORS: readonly (readonly [string, number, number])[] = [
     LABEL_PLATE_FIT_OFFSET_MAX,
   ],
   ['MAX_CUTOUT_LEAN_DEG', CONSTRAINTS.MAX_CUTOUT_LEAN_DEG, MAX_CUTOUT_LEAN_DEG],
+  ['MAX_CUTOUT_FLOOR_MM', CONSTRAINTS.MAX_CUTOUT_FLOOR_MM, MAX_CUTOUT_FLOOR_MM],
+  ['MAX_SPLIT_POINT_MM', CONSTRAINTS.MAX_SPLIT_POINT_MM, MAX_SPLIT_POINT_MM],
   ['MAX_ARRAY_INSTANCES', CONSTRAINTS.MAX_ARRAY_INSTANCES, MAX_ARRAY_INSTANCES],
   ['MAX_PARENT_GROUPS', CONSTRAINTS.MAX_PARENT_GROUPS, MAX_PARENT_GROUPS],
   ['MAX_GROUP_NAME_LENGTH', CONSTRAINTS.MAX_GROUP_NAME_LENGTH, MAX_GROUP_NAME_LENGTH],
   ['MAX_CUTOUT_GROUP_NAMES', CONSTRAINTS.MAX_CUTOUT_GROUP_NAMES, MAX_CUTOUT_GROUP_NAMES],
   ['MAX_LID_CUTOUTS', CONSTRAINTS.MAX_LID_CUTOUTS, MAX_LID_CUTOUTS],
-  ['MAX_MESH_ASSETS', CONSTRAINTS.MAX_MESH_ASSETS, MAX_MESH_ASSETS_PER_DESIGN],
+  ['MAX_MESH_TRIANGLES_TOTAL', CONSTRAINTS.MAX_MESH_TRIANGLES_TOTAL, MAX_MESH_TRIANGLES_PER_DESIGN],
   ['MAX_MESH_ASSET_TRIANGLES', CONSTRAINTS.MAX_MESH_ASSET_TRIANGLES, MAX_MESH_ASSET_TRIANGLES],
   ['MAX_MESH_OUTLINE_POINTS', CONSTRAINTS.MAX_MESH_OUTLINE_POINTS, MAX_MESH_OUTLINE_POINTS],
   ['MAX_MESH_DATA_LENGTH', CONSTRAINTS.MAX_MESH_DATA_LENGTH, MAX_MESH_ASSET_DATA_LENGTH],
@@ -371,4 +420,36 @@ describe('minimum bin height (cross-boundary mirror)', () => {
       });
     }
   );
+});
+
+/**
+ * Keys the share allowlist leaves out on purpose. Anything else in `BinParams`
+ * that is not allowlisted is stripped from every share, synced design and
+ * version without a sound.
+ */
+const PARAM_KEYS_NOT_PERSISTED: ReadonlyMap<string, string> = new Map([
+  ['gridUnitMmY', 'community card metrics measure one pitch; see communityStore.crossBoundary'],
+  ['nozzleSizeMm', 'injected from the live print setting at generation, never stored'],
+]);
+
+describe('designer param allowlist covers BinParams', () => {
+  it('allowlists every top-level BinParams key except the deliberate exclusions', () => {
+    const missing = BIN_PARAMS_KEYS.filter(
+      (key) => !ALLOWED_PARAM_KEYS.has(key) && !PARAM_KEYS_NOT_PERSISTED.has(key)
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('excludes only keys that BinParams has and the allowlist really leaves out', () => {
+    for (const key of PARAM_KEYS_NOT_PERSISTED.keys()) {
+      expect(BIN_PARAMS_KEYS).toContain(key);
+      expect(ALLOWED_PARAM_KEYS.has(key)).toBe(false);
+    }
+  });
+});
+
+describe('pull tab ranges (cross-boundary mirror)', () => {
+  it('match PULL_TAB_LIMITS', () => {
+    expect(PULL_TAB_RANGES).toEqual(PULL_TAB_LIMITS);
+  });
 });

@@ -18,7 +18,9 @@ import {
   flipSelectionVertical,
 } from './geometry';
 import { useCutoutInteraction } from './useCutoutInteraction';
+import { useAddFingerAccess } from './useAddFingerAccess';
 import { useTranslation } from '@/i18n';
+import { useLoadedMeshAssets } from '@/shared/hooks/useMeshOutlines';
 import { useSvgImport } from './svgImport';
 import { useStlImport } from './stlImport';
 import type { FitCue } from './cutoutSectionVisibility';
@@ -118,12 +120,15 @@ export function useCutoutEditor() {
     ]
   );
 
+  const meshAssets = useLoadedMeshAssets(params.meshAssets);
+
   const {
     mode,
     setMode,
     selection,
     selectCutout,
     selectIndividual,
+    selectIds,
     deselectAll,
     selectAll,
     deleteSelected,
@@ -172,15 +177,20 @@ export function useCutoutEditor() {
     canRedo,
     onLock: lockCutouts,
     onUnlock: unlockCutouts,
-    startTransaction,
-    commitTransaction,
     binWidth,
     binDepth,
     gridSize,
     cellMask: params.cellMask,
     maskCellSize,
-    meshAssets: params.meshAssets,
+    meshAssets,
   });
+
+  const handleAddFingerAccess = useAddFingerAccess(
+    cutouts,
+    { width: binWidth, depth: binDepth, mask: params.cellMask, cellSize: maskCellSize, meshAssets },
+    Math.max(0, wallHeight - params.cutoutConfig.topOffset),
+    selectIds
+  );
 
   const { triggerImport: triggerSvgImport } = useSvgImport();
   const stlImport = useStlImport();
@@ -198,7 +208,8 @@ export function useCutoutEditor() {
       // Ruler tool: sticky mode (toolbar) or Shift+drag quick measurement
       if (mode.type === 'ruler-ready' || (nativeEvent.shiftKey && mode.type === 'idle')) {
         const sticky = mode.type === 'ruler-ready';
-        setMode({ type: 'measuring', startX: worldX, startY: worldY, sticky });
+        const splitId = mode.type === 'ruler-ready' ? mode.splitId : undefined;
+        setMode({ type: 'measuring', startX: worldX, startY: worldY, sticky, splitId });
         return;
       }
 
@@ -498,10 +509,12 @@ export function useCutoutEditor() {
     fitCue,
     setFitCue,
     handleFlattenArray,
+    handleAddFingerAccess,
     mode,
     setMode,
     selection,
     selectCutout,
+    selectIds,
     preview,
     drawingPreview,
     pathDrawingPreview,

@@ -1,7 +1,6 @@
 /** The lid's millimetre fine-tuning disclosure: plate thickness, mode-specific clearances, seam relief, tray dims. */
 
-import { useState } from 'react';
-import { Collapsible } from '@/design-system';
+import { MoreDisclosure } from '@/shared/components/MoreDisclosure';
 import { SnappingSlider } from '../../controls/SnappingSlider';
 import { StepperField } from '../shared/StepperField';
 import { Hint, Readout } from '../shared';
@@ -20,8 +19,6 @@ export function LidAdvancedFields({
   handlers: ReturnType<typeof useLidSection>['handlers'];
   t: Translator;
 }) {
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-
   // Which mode-specific knobs the Advanced disclosure holds depends on the
   // current mode; the floor-plate thickness applies to every lid, so the
   // disclosure is always present now and never renders empty.
@@ -43,12 +40,7 @@ export function LidAdvancedFields({
     : Math.max(state.topThicknessMm, state.topThicknessMin);
 
   return (
-    <Collapsible
-      title={t('binDesigner.lid.advanced')}
-      size="sm"
-      expanded={advancedOpen}
-      onExpandedChange={setAdvancedOpen}
-    >
+    <MoreDisclosure label={t('binDesigner.lid.advanced')}>
       <div className="space-y-3 pt-2">
         <div className="space-y-1">
           <StepperField
@@ -78,6 +70,15 @@ export function LidAdvancedFields({
                 : t('binDesigner.lid.topThicknessAria')
             }
             commitMode="deferred"
+            info={
+              state.trayBreakdown
+                ? t('binDesigner.lid.trayFloorThicknessHint')
+                : state.isHinge
+                  ? t('binDesigner.lid.hingePlateFloorHint', {
+                      min: state.topThicknessMin.toFixed(1),
+                    })
+                  : t('binDesigner.lid.topThicknessHint')
+            }
           />
           {/* A tray splits the plate into recess + floor, and the field
               sets the floor — without the arithmetic spelled out, the
@@ -98,19 +99,15 @@ export function LidAdvancedFields({
               </div>
             </dl>
           )}
-          <Hint>
-            {state.trayBreakdown
-              ? t('binDesigner.lid.trayFloorThicknessHint')
-              : state.isHinge
-                ? t('binDesigner.lid.hingePlateFloorHint', {
-                    min: state.topThicknessMin.toFixed(1),
-                  })
-                : state.topThicknessEffective > state.topThicknessMm
-                  ? t('binDesigner.lid.topThicknessRaisedHint', {
-                      thickness: state.topThicknessEffective.toFixed(1),
-                    })
-                  : t('binDesigner.lid.topThicknessHint')}
-          </Hint>
+          {!state.trayBreakdown &&
+            !state.isHinge &&
+            state.topThicknessEffective > state.topThicknessMm && (
+              <Hint>
+                {t('binDesigner.lid.topThicknessRaisedHint', {
+                  thickness: state.topThicknessEffective.toFixed(1),
+                })}
+              </Hint>
+            )}
         </div>
 
         {state.isHinge && (
@@ -129,8 +126,8 @@ export function LidAdvancedFields({
               size="md"
               aria-label={t('binDesigner.lid.hinge.fitClearanceAria')}
               commitMode="deferred"
+              info={t('binDesigner.lid.hinge.fitClearanceHint')}
             />
-            <Hint>{t('binDesigner.lid.hinge.fitClearanceHint')}</Hint>
           </div>
         )}
 
@@ -152,8 +149,8 @@ export function LidAdvancedFields({
               size="md"
               aria-label={t('binDesigner.lid.slide.clearanceAria')}
               commitMode="deferred"
+              info={t('binDesigner.lid.slide.clearanceHint')}
             />
-            <Hint>{t('binDesigner.lid.slide.clearanceHint')}</Hint>
           </div>
         )}
 
@@ -209,8 +206,8 @@ export function LidAdvancedFields({
                 size="md"
                 aria-label={t('binDesigner.lid.retentionEdgeMagnetsAria')}
                 commitMode="deferred"
+                info={t('binDesigner.lid.retentionEdgeMagnetsHint')}
               />
-              <Hint>{t('binDesigner.lid.retentionEdgeMagnetsHint')}</Hint>
             </div>
           </div>
         )}
@@ -233,12 +230,13 @@ export function LidAdvancedFields({
             label={t('binDesigner.lid.relieveInterior')}
             checked={state.relieveInterior}
             onChange={handlers.toggleRelieveInterior}
+            disabledReason={state.relieveInteriorDisabledReason}
+            info={
+              state.relieveInterior
+                ? t('binDesigner.lid.relieveInteriorHint')
+                : t('binDesigner.lid.relieveInteriorOffHint')
+            }
           />
-          <Hint>
-            {state.relieveInterior
-              ? t('binDesigner.lid.relieveInteriorHint')
-              : t('binDesigner.lid.relieveInteriorOffHint')}
-          </Hint>
         </div>
 
         {showTrayAdvanced && (
@@ -272,6 +270,6 @@ export function LidAdvancedFields({
           </div>
         )}
       </div>
-    </Collapsible>
+    </MoreDisclosure>
   );
 }

@@ -16,8 +16,7 @@ const QUOTA: Record<SyncItemKind, { maxCount: number; maxBytes: number }> = {
   // Versions are per-design, so this axis counts differently from the others:
   // 100 items across a whole library would be a handful of designs' history.
   // The client caps each design at MAX_VERSIONS_PER_DESIGN; this is the
-  // whole-account ceiling. Bodies are compressed params with no thumbnail, so
-  // they are far smaller than a design envelope.
+  // whole-account ceiling.
   designVersions: { maxCount: 500, maxBytes: 25 * 1024 * 1024 },
   // A folder is a name and a parent pointer; the count matches the client's
   // FOLDERS_MAX so the two limits never disagree about which folder is one too many.
@@ -120,4 +119,40 @@ export async function checkQuota(
 
 export function getQuotaCaps(kind: SyncItemKind): { maxCount: number; maxBytes: number } {
   return QUOTA[kind];
+}
+
+export const MESH_QUOTA_BYTES = 100 * 1024 * 1024;
+
+/**
+ * A library of a hundred designs carrying several meshes each, with version
+ * history keeping older imports alive, stays well inside 5000. Without a count
+ * cap, tiny files could grow one account's hash past what account deletion can
+ * walk.
+ */
+export const MESH_QUOTA_COUNT = 5000;
+
+/**
+ * Whether one more file of `sizeBytes` fits beside `usage`. Unlike
+ * `checkQuota` this is not the gate: `acquireAccountMesh` re-runs the same
+ * comparisons atomically as it records the hold.
+ */
+export function checkMeshQuota(
+  usage: { readonly bytes: number; readonly count: number },
+  sizeBytes: number
+): QuotaCheck {
+  const count = usage.count + 1;
+  if (count > MESH_QUOTA_COUNT) {
+    return {
+      ok: false,
+      error: { type: 'QUOTA_EXCEEDED', reason: 'count', current: count, limit: MESH_QUOTA_COUNT },
+    };
+  }
+  const bytes = usage.bytes + sizeBytes;
+  if (bytes > MESH_QUOTA_BYTES) {
+    return {
+      ok: false,
+      error: { type: 'QUOTA_EXCEEDED', reason: 'bytes', current: bytes, limit: MESH_QUOTA_BYTES },
+    };
+  }
+  return { ok: true };
 }

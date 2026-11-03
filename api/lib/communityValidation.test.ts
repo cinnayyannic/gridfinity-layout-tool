@@ -71,6 +71,28 @@ beforeEach(() => {
 });
 
 describe('validateCommunityPublish', () => {
+  it('takes mesh refs in bin params, leaving the held-file check to the handler', () => {
+    validateCommunityPublish(validBody());
+    expect(mocks.validateDesignerShare).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Number),
+      {
+        meshRefs: true,
+      }
+    );
+  });
+
+  it('publishes a design without its overhang, which card metrics do not measure', () => {
+    const result = validateCommunityPublish(
+      validBody({
+        params: { width: 1, depth: 1, overhang: { left: 0, right: 14, front: 0, back: 0 } },
+      })
+    );
+    expect(result.valid).toBe(true);
+    if (!result.valid) throw new Error('expected valid');
+    expect(result.payload.params).toEqual({ width: 1, depth: 1 });
+  });
+
   it('accepts a valid publish body and returns the sanitized payload', () => {
     const result = validateCommunityPublish(validBody({ name: '  Socket Organizer  ' }));
     expect(result.valid).toBe(true);

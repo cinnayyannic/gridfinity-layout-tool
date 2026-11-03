@@ -6,9 +6,29 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createShare, updateShare, fetchShare, deleteShare, reportShare } from '@/core/api/share';
 import { expectOk, expectErr } from '@/test/testUtils';
-import { getUserMessage } from '@/core/result';
-import type { Layout } from '@/core/types';
-import { gridUnits, heightUnits, mm, categoryId, layerId } from '@/core/types';
+import { getUserMessage, ok } from '@/core/result';
+import type { Layout, DesignId } from '@/core/types';
+import { gridUnits, heightUnits, mm, categoryId, layerId, binId, designId } from '@/core/types';
+import {
+  registerDesignStorePort,
+  resetDesignStorePort,
+  type DesignStorePort,
+  type LoadedDesignData,
+} from '@/core/storage/designStorePort';
+import { useSessionStore } from '@/core/sync/session/useSession';
+import {
+  accountHoldsMeshFiles,
+  forgetHeldMeshes,
+  meshCloudSession,
+} from '@/shared/generation/meshCloud';
+import type * as MeshCloud from '@/shared/generation/meshCloud';
+
+vi.mock('@/shared/generation/meshCloud', async (importOriginal) => ({
+  ...(await importOriginal<typeof MeshCloud>()),
+  accountHoldsMeshFiles: vi.fn(),
+  forgetHeldMeshes: vi.fn(),
+  meshCloudSession: vi.fn(() => 1),
+}));
 
 const mockLayout: Layout = {
   version: '1.0',
@@ -244,9 +264,442 @@ describe('updateShare', () => {
   });
 });
 
+describe('linked designs travelling with a share', () => {
+  const layoutLinking = (...ids: DesignId[]): Layout => ({
+    ...mockLayout,
+    bins: ids.map((id, i) => ({
+      id: binId(`bin-${i}`),
+      layerId: layerId('layer1'),
+      x: gridUnits(i * 2),
+      y: gridUnits(0),
+      width: gridUnits(2),
+      depth: gridUnits(2),
+      height: heightUnits(3),
+      category: categoryId('cat1'),
+      label: '',
+      notes: '',
+      linkedDesignId: id,
+    })),
+  });
+
+  const assembly: LoadedDesignData = {
+    id: designId('design_asm'),
+    name: 'Pliers Rack',
+    kind: 'assembly',
+    envelope: {
+      width: 2,
+      depth: 2,
+      gridUnitMm: 42,
+      heightUnitMm: 7,
+      attachment: {
+        magnetHoles: false,
+        magnetDiameter: 6.5,
+        magnetDepth: 2.4,
+        screwHoles: false,
+        screwDiameter: 3,
+      },
+      featureColors: { enabled: false },
+    },
+    structure: {
+      kind: 'assembly',
+      schemaVersion: 1,
+      base: { floorThickness: 2 },
+      mirrorAxis: 'x',
+      parts: [],
+    },
+  };
+
+  const installDesigns = (designs: readonly LoadedDesignData[]): void => {
+    const byId = new Map(designs.map((d) => [d.id, d]));
+    const port: DesignStorePort = {
+      loadDesign: async (id) => {
+        const design = byId.get(id);
+        if (!design) throw new Error(`unexpected load of ${id}`);
+        return ok(design);
+      },
+      saveDesign: () => Promise.reject(new Error('unused')),
+      upsertRegistryEntry: () => Promise.reject(new Error('unused')),
+      registryEdgeFields: async () => ({}),
+      registryPlacementFields: async () => ({}),
+    };
+    registerDesignStorePort(port);
+  };
+
+  const postedLinkedDesigns = (): unknown => {
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    return (JSON.parse(init?.body as string) as { linkedDesigns: unknown }).linkedDesigns;
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: () =>
+        Promise.resolve({ id: 'abc123xyz789', url: '/l/x', deleteToken: 't', permission: 'view' }),
+    } as Response);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetDesignStorePort();
+  });
+
+  it('sends an assembly entry with its kind, envelope and structure', async () => {
+    installDesigns([assembly]);
+
+    expectOk(await createShare('abc123xyz789', layoutLinking(assembly.id), 'view'));
+
+    expect(postedLinkedDesigns()).toEqual([
+      {
+        id: assembly.id,
+        name: assembly.name,
+        kind: 'assembly',
+        envelope: assembly.envelope,
+        structure: assembly.structure,
+      },
+    ]);
+  });
+
+  it('sends an assembly entry on update too', async () => {
+    installDesigns([assembly]);
+
+    expectOk(await updateShare('abc123xyz789', 't', layoutLinking(assembly.id), 'view'));
+
+    expect(postedLinkedDesigns()).toEqual([expect.objectContaining({ kind: 'assembly' })]);
+  });
+
+  it('skips a design over the budget without starving the ones after it', async () => {
+    const huge: LoadedDesignData = {
+      id: designId('design_huge'),
+      name: 'Huge',
+      params: { meshAssets: { m: { data: 'x'.repeat(600 * 1024) } } },
+    };
+    const small: LoadedDesignData = { id: designId('design_small'), name: 'Small', params: {} };
+    installDesigns([huge, assembly, small]);
+
+    expectOk(
+      await createShare('abc123xyz789', layoutLinking(huge.id, assembly.id, small.id), 'view')
+    );
+
+    expect(postedLinkedDesigns()).toEqual([
+      expect.objectContaining({ id: assembly.id }),
+      expect.objectContaining({ id: small.id }),
+    ]);
+  });
+});
+
+describe('linked designs over the server per-design cap', () => {
+  const layoutLinking = (...ids: DesignId[]): Layout => ({
+    ...mockLayout,
+    bins: ids.map((id, i) => ({
+      id: binId(`bin-${i}`),
+      layerId: layerId('layer1'),
+      x: gridUnits(i * 2),
+      y: gridUnits(0),
+      width: gridUnits(2),
+      depth: gridUnits(2),
+      height: heightUnits(3),
+      category: categoryId('cat1'),
+      label: '',
+      notes: '',
+      linkedDesignId: id,
+    })),
+  });
+
+  const installDesigns = (designs: readonly LoadedDesignData[]): void => {
+    const byId = new Map(designs.map((d) => [d.id, d]));
+    registerDesignStorePort({
+      loadDesign: async (id) => {
+        const design = byId.get(id);
+        if (!design) throw new Error(`unexpected load of ${id}`);
+        return ok(design);
+      },
+      saveDesign: () => Promise.reject(new Error('unused')),
+      upsertRegistryEntry: () => Promise.reject(new Error('unused')),
+      registryEdgeFields: async () => ({}),
+      registryPlacementFields: async () => ({}),
+    });
+  };
+
+  const postedIds = (): unknown => {
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    const body = JSON.parse(init?.body as string) as { linkedDesigns: { id: string }[] };
+    return body.linkedDesigns.map((d) => d.id);
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: () =>
+        Promise.resolve({ id: 'abc123xyz789', url: '/l/x', deleteToken: 't', permission: 'view' }),
+    } as Response);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetDesignStorePort();
+  });
+
+  const small: LoadedDesignData = { id: designId('design_small'), name: 'Small', params: {} };
+
+  it('skips an assembly over 100 KB and keeps the designs after it', async () => {
+    const bigAssembly: LoadedDesignData = {
+      id: designId('design_big_asm'),
+      name: 'Big rack',
+      kind: 'assembly',
+      envelope: {},
+      structure: { kind: 'assembly', outline: 'x'.repeat(110 * 1024) },
+    };
+    installDesigns([bigAssembly, small]);
+
+    expectOk(await createShare('abc123xyz789', layoutLinking(bigAssembly.id, small.id), 'view'));
+
+    expect(postedIds()).toEqual([small.id]);
+  });
+
+  it('skips a bin over 100 KB that carries no meshes', async () => {
+    const bigBin: LoadedDesignData = {
+      id: designId('design_big_bin'),
+      name: 'Big bin',
+      params: { notes: 'x'.repeat(110 * 1024) },
+    };
+    installDesigns([bigBin, small]);
+
+    expectOk(await createShare('abc123xyz789', layoutLinking(bigBin.id, small.id), 'view'));
+
+    expect(postedIds()).toEqual([small.id]);
+  });
+
+  it('skips a mesh-free bin between 100,000 B and 100 KiB', async () => {
+    const params = { notes: 'x'.repeat(100_500) };
+    expect(JSON.stringify(params).length).toBeLessThan(100 * 1024);
+    const nearCap: LoadedDesignData = { id: designId('design_near'), name: 'Near', params };
+    installDesigns([nearCap, small]);
+
+    expectOk(await createShare('abc123xyz789', layoutLinking(nearCap.id, small.id), 'view'));
+
+    expect(postedIds()).toEqual([small.id]);
+  });
+
+  it('keeps a bin over 100 KB whose size comes from its meshes', async () => {
+    const meshBin: LoadedDesignData = {
+      id: designId('design_mesh_bin'),
+      name: 'Mesh bin',
+      params: { meshAssets: { m: { data: 'x'.repeat(110 * 1024) } } },
+    };
+    installDesigns([meshBin, small]);
+
+    expectOk(await createShare('abc123xyz789', layoutLinking(meshBin.id, small.id), 'view'));
+
+    expect(postedIds()).toEqual([meshBin.id, small.id]);
+  });
+});
+
+describe('linked designs naming mesh files', () => {
+  const HASH = 'a'.repeat(64);
+  const ref = {
+    name: 'wrench',
+    hash: HASH,
+    triangleCount: 12,
+    sizeMm: { x: 1, y: 1, z: 1 },
+    bytes: 9,
+  };
+  const inline = {
+    name: 'wrench',
+    data: 'QUFBQQ==',
+    triangleCount: 12,
+    sizeMm: { x: 1, y: 1, z: 1 },
+  };
+  const meshBin = (meshAsset: unknown, extra: Record<string, unknown> = {}): LoadedDesignData => ({
+    id: designId('design_mesh'),
+    name: 'Mesh bin',
+    params: { ...extra, meshAssets: { m: meshAsset } },
+  });
+
+  const layout: Layout = {
+    ...mockLayout,
+    bins: [
+      {
+        id: binId('bin-0'),
+        layerId: layerId('layer1'),
+        x: gridUnits(0),
+        y: gridUnits(0),
+        width: gridUnits(2),
+        depth: gridUnits(2),
+        height: heightUnits(3),
+        category: categoryId('cat1'),
+        label: '',
+        notes: '',
+        linkedDesignId: designId('design_mesh'),
+      },
+    ],
+  };
+
+  /** The stored design names its mesh by ref; loading it inline swaps in the bytes. */
+  const installMeshBin = (extra: Record<string, unknown> = {}): void => {
+    registerDesignStorePort({
+      loadDesign: async (_id, options) => ok(meshBin(options?.meshRefs ? ref : inline, extra)),
+      saveDesign: () => Promise.reject(new Error('unused')),
+      upsertRegistryEntry: () => Promise.reject(new Error('unused')),
+      registryEdgeFields: async () => ({}),
+      registryPlacementFields: async () => ({}),
+    });
+  };
+
+  const created = {
+    ok: true,
+    status: 201,
+    json: () =>
+      Promise.resolve({ id: 'abc123xyz789', url: '/l/x', deleteToken: 't', permission: 'view' }),
+  } as Response;
+
+  const sentAssets = (): unknown[] =>
+    vi.mocked(fetch).mock.calls.map(([, init]) => {
+      const body = JSON.parse(init?.body as string) as {
+        linkedDesigns: { params?: { meshAssets?: Record<string, unknown> } }[];
+      };
+      return body.linkedDesigns[0]?.params?.meshAssets?.m;
+    });
+
+  const signIn = (): void => {
+    useSessionStore.setState({
+      status: 'authenticated',
+      user: { userId: 'u1', provider: 'google', email: 'a@x' },
+    });
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+    vi.mocked(fetch).mockResolvedValue(created);
+    vi.mocked(accountHoldsMeshFiles).mockResolvedValue(true);
+    vi.mocked(meshCloudSession).mockReturnValue(1);
+    installMeshBin();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+    resetDesignStorePort();
+    useSessionStore.setState({ status: 'unknown', user: null });
+  });
+
+  it('names the mesh by ref once the signed-in account holds its file', async () => {
+    signIn();
+
+    expectOk(await createShare('abc123xyz789', layout, 'view'));
+
+    expect(accountHoldsMeshFiles).toHaveBeenCalledWith([HASH], 1);
+    expect(sentAssets()).toEqual([ref]);
+    const [, init] = vi.mocked(fetch).mock.calls[0];
+    expect(new Headers(init?.headers).get('X-Requested-With')).toBe('gflt');
+  });
+
+  it('sends the mesh inline for a signed-out sharer, uploading nothing', async () => {
+    useSessionStore.setState({ status: 'anonymous', user: null });
+
+    expectOk(await createShare('abc123xyz789', layout, 'view'));
+
+    expect(accountHoldsMeshFiles).not.toHaveBeenCalled();
+    expect(sentAssets()).toEqual([inline]);
+  });
+
+  it('sends the mesh inline when the server has no mesh store', async () => {
+    signIn();
+    vi.mocked(accountHoldsMeshFiles).mockResolvedValue(false);
+
+    expectOk(await createShare('abc123xyz789', layout, 'view'));
+
+    expect(sentAssets()).toEqual([inline]);
+  });
+
+  it('sends again inline when the server finds a file unheld, forgetting it', async () => {
+    signIn();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 424,
+        json: () => Promise.resolve({ code: 'MESH_MISSING', missing: [HASH] }),
+      } as Response)
+      .mockResolvedValueOnce(created);
+
+    expectOk(await createShare('abc123xyz789', layout, 'view'));
+
+    expect(sentAssets()).toEqual([ref, inline]);
+    expect(forgetHeldMeshes).toHaveBeenCalledWith([HASH]);
+  });
+
+  it('does the same on update', async () => {
+    signIn();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 424,
+        json: () => Promise.resolve({ code: 'MESH_MISSING', missing: [HASH] }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ id: 'abc123xyz789', url: '/l/x', permission: 'view' }),
+      } as Response);
+
+    expectOk(await updateShare('abc123xyz789', 'token', layout));
+
+    expect(sentAssets()).toEqual([ref, inline]);
+  });
+
+  it('sends inline a bin the ref budget skips, since its inline mesh lifts the cap', async () => {
+    signIn();
+    installMeshBin({ notes: 'x'.repeat(110 * 1024) });
+
+    expectOk(await createShare('abc123xyz789', layout, 'view'));
+
+    expect(accountHoldsMeshFiles).not.toHaveBeenCalled();
+    expect(sentAssets()).toEqual([inline]);
+  });
+
+  it('uploads under the session the share began in, though another starts meanwhile', async () => {
+    signIn();
+    registerDesignStorePort({
+      loadDesign: async (_id, options) => {
+        vi.mocked(meshCloudSession).mockReturnValue(2);
+        return ok(meshBin(options?.meshRefs ? ref : inline));
+      },
+      saveDesign: () => Promise.reject(new Error('unused')),
+      upsertRegistryEntry: () => Promise.reject(new Error('unused')),
+      registryEdgeFields: async () => ({}),
+      registryPlacementFields: async () => ({}),
+    });
+
+    expectOk(await createShare('abc123xyz789', layout, 'view'));
+
+    expect(accountHoldsMeshFiles).toHaveBeenCalledWith([HASH], 1);
+  });
+});
+
 describe('fetchShare', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
+  });
+
+  it('keeps the URL of each mesh file the share names, dropping malformed entries', async () => {
+    const hash = 'b'.repeat(64);
+    const url = `https://store.public.blob.vercel-storage.com/meshes/${hash}`;
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          layout: mockLayout,
+          metadata: { createdAt: '2026-01-01T00:00:00.000Z', permission: 'view' },
+          meshFiles: { [hash]: url, nothex: url, ['c'.repeat(64)]: 'http://insecure/x' },
+        }),
+    } as Response);
+
+    const value = expectOk(await fetchShare('abc123xyz789'));
+
+    expect(value.meshFiles).toEqual({ [hash]: url });
   });
 
   afterEach(() => {
@@ -274,6 +727,30 @@ describe('fetchShare', () => {
     const value = expectOk(result);
     expect(value.layout.name).toBe('Test Layout');
     expect(value.metadata.authorName).toBe('Test Author');
+  });
+
+  it('gives each bin of an older share an empty label and notes when it carries none', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          layout: {
+            ...mockLayout,
+            bins: [
+              { id: 'b1', layerId: 'layer1', x: 0, y: 0, width: 2, depth: 2, height: 3 },
+              { id: 'b2', layerId: 'layer1', x: 2, y: 0, width: 2, depth: 2, height: 3 },
+            ],
+          },
+          metadata: { createdAt: '2026-01-01T00:00:00.000Z', permission: 'view' },
+        }),
+    } as Response);
+
+    const value = expectOk(await fetchShare('abc123xyz789'));
+
+    expect(value.layout.bins.map((bin) => [bin.label, bin.notes])).toEqual([
+      ['', ''],
+      ['', ''],
+    ]);
   });
 
   it('returns Err with ApiNotFoundError on 404', async () => {

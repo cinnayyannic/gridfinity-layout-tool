@@ -9,10 +9,11 @@
  */
 
 import { FeatureToggle } from '../FeatureToggle';
+import { FeatureTip } from '../../FeatureTip';
 import { MoreDisclosure } from '@/shared/components/MoreDisclosure';
 import { ShapePicker, SideSelector, StepperField, LinkIcon, type SideState } from '../shared';
 import { RulerIcon } from '@/design-system/Icon';
-import { Button, Checkbox } from '@/design-system';
+import { Button } from '@/design-system';
 import { clamp } from '@/shared/utils/math';
 import { DESIGNER_CONSTRAINTS } from '../../../constants';
 import { useHandleSection, HANDLE_SIDES } from './useHandleSection';
@@ -115,6 +116,7 @@ export function HandleSection() {
       onChange={handlers.toggleEnabled}
       disabledReason={meta.disabledReason}
       valueSummary={meta.summary}
+      badge={<FeatureTip tip="handles" feature={t('binDesigner.handles')} />}
       primaryControls={
         <div className="space-y-3">
           <ShapePicker
@@ -253,20 +255,18 @@ export function HandleSection() {
               </MoreDisclosure>
 
               {/* Behavior toggles — separated visually */}
-              <div className="flex flex-col items-start gap-2 border-t border-stroke-subtle/50 pt-2">
-                <Checkbox
-                  size="sm"
+              <div className="flex flex-col gap-2 border-t border-stroke-subtle/50 pt-2">
+                <FeatureToggle
+                  label={t('binDesigner.handles.chamfer')}
                   checked={handles.chamfer}
                   onChange={handlers.toggleChamfer}
-                  label={t('binDesigner.handles.chamfer')}
                 />
 
                 {hasCompartments && (
-                  <Checkbox
-                    size="sm"
+                  <FeatureToggle
+                    label={t('binDesigner.handles.interior')}
                     checked={handles.interior}
                     onChange={handlers.toggleInterior}
-                    label={t('binDesigner.handles.interior')}
                   />
                 )}
               </div>

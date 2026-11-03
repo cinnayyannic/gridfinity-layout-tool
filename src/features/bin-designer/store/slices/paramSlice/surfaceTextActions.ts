@@ -1,12 +1,23 @@
 /**
- * Surface-text actions: lid text, per-wall text + alignment + shared style,
+ * Surface-text actions: lid and floor text, per-wall text + alignment + shared style,
  * and the label-tab row texts. Each collapses the `surfaceText`/`label` config
  * back to absent when nothing remains so pre-feature designs serialize
  * byte-identically.
  */
 
-import type { WallTextSide, TextAnchor, TextStyleOverride } from '@/features/bin-designer/types';
-import { TEXT_MAX_LENGTH, normalizeTextInput } from '@/features/bin-designer/types/text';
+import type {
+  WallTextSide,
+  WallTextFace,
+  TextAnchor,
+  TextQuarterTurn,
+  TextStyleOverride,
+} from '@/features/bin-designer/types';
+import {
+  TEXT_MAX_LENGTH,
+  normalizeTextInput,
+  topRowAnchor,
+  wallTextFace,
+} from '@/features/bin-designer/types/text';
 import { pushHistoryEntry } from '@/features/bin-designer/store/helpers';
 import type { Set, Get } from './types';
 
@@ -58,6 +69,50 @@ export function createSurfaceTextActions(set: Set, get: Get) {
       });
     },
 
+    setFloorText: (text: string) => {
+      const { params } = get();
+      const clamped = normalizeTextInput(text).trim();
+      if ((params.surfaceText?.floorText ?? '') === clamped) return;
+
+      set((state) => {
+        pushHistoryEntry(state);
+        const { floorText: _drop, ...rest } = state.params.surfaceText ?? {};
+        const next = {
+          ...rest,
+          ...(clamped !== '' ? { floorText: clamped } : {}),
+        };
+        state.params.surfaceText = Object.keys(next).length > 0 ? next : undefined;
+      });
+    },
+
+    setFloorTextStyle: (overrides: TextStyleOverride | null) => {
+      set((state) => {
+        pushHistoryEntry(state);
+        const { floorStyle: _drop, ...rest } = state.params.surfaceText ?? {};
+        const next = {
+          ...rest,
+          ...(overrides !== null && Object.keys(overrides).length > 0
+            ? { floorStyle: overrides }
+            : {}),
+        };
+        state.params.surfaceText = Object.keys(next).length > 0 ? next : undefined;
+      });
+    },
+
+    setFloorTextRotation: (rotation: TextQuarterTurn) => {
+      const { params } = get();
+      if ((params.surfaceText?.floorTextRotation ?? 0) === rotation) return;
+      set((state) => {
+        pushHistoryEntry(state);
+        const { floorTextRotation: _drop, ...rest } = state.params.surfaceText ?? {};
+        const next = {
+          ...rest,
+          ...(rotation !== 0 ? { floorTextRotation: rotation } : {}),
+        };
+        state.params.surfaceText = Object.keys(next).length > 0 ? next : undefined;
+      });
+    },
+
     setWallText: (side: WallTextSide, text: string) => {
       const { params } = get();
       // Trimmed on store, same rationale as setLidText: the worker trims
@@ -89,16 +144,72 @@ export function createSurfaceTextActions(set: Set, get: Get) {
       // No-op guard: nothing to clear keeps undo/regeneration quiet. Per-wall
       // styles count as something to clear, because a design can hold them
       // without any wall strings.
-      if (params.surfaceText?.walls === undefined && params.surfaceText?.wallStyles === undefined) {
+      const st = params.surfaceText;
+      if (
+        st?.walls === undefined &&
+        st?.wallStyles === undefined &&
+        st?.wallFaces === undefined &&
+        st?.insideStyle === undefined
+      ) {
         return;
       }
 
       set((state) => {
         pushHistoryEntry(state);
-        // Drop `walls` AND the per-wall styles that only refine them; keep any
-        // other surface-text keys (lid text, shared style) intact.
-        const { walls: _walls, wallStyles: _styles, ...rest } = state.params.surfaceText ?? {};
+        // Drop `walls` AND everything that only refines them; keep any other
+        // surface-text keys (lid text, shared style) intact.
+        const {
+          walls: _walls,
+          wallStyles: _styles,
+          wallFaces: _faces,
+          insideStyle: _inside,
+          ...rest
+        } = state.params.surfaceText ?? {};
         state.params.surfaceText = Object.keys(rest).length > 0 ? rest : undefined;
+      });
+    },
+
+    setWallTextFace: (side: WallTextSide, face: WallTextFace) => {
+      const { params } = get();
+      if (wallTextFace(params.surfaceText, side) === face) return;
+
+      set((state) => {
+        pushHistoryEntry(state);
+        const {
+          wallFaces: prevFaces,
+          insideStyle: prevInside,
+          ...rest
+        } = state.params.surfaceText ?? {};
+        const { [side]: _drop, ...otherFaces } = prevFaces ?? {};
+        const wallFaces = { ...otherFaces, ...(face === 'inside' ? { [side]: face } : {}) };
+        const anyInside = Object.keys(wallFaces).length > 0;
+        // Inside text starts near the rim: anchored low, it sits by the floor
+        // where whatever the bin holds covers it.
+        const sharedAnchor = rest.style?.anchor ?? state.params.textDefaults.anchor;
+        const insideStyle = anyInside
+          ? prevInside?.anchor !== undefined
+            ? prevInside
+            : { ...prevInside, anchor: topRowAnchor(sharedAnchor) }
+          : undefined;
+        const next = {
+          ...rest,
+          ...(anyInside ? { wallFaces } : {}),
+          ...(insideStyle !== undefined ? { insideStyle } : {}),
+        };
+        state.params.surfaceText = Object.keys(next).length > 0 ? next : undefined;
+      });
+    },
+
+    setInsideTextAnchor: (anchor: TextAnchor) => {
+      const { params } = get();
+      const st = params.surfaceText;
+      if (st?.wallFaces === undefined) return;
+      const current = st.insideStyle?.anchor ?? st.style?.anchor ?? params.textDefaults.anchor;
+      if (current === anchor) return;
+      set((state) => {
+        pushHistoryEntry(state);
+        const rest = state.params.surfaceText ?? {};
+        state.params.surfaceText = { ...rest, insideStyle: { ...rest.insideStyle, anchor } };
       });
     },
 
@@ -135,6 +246,20 @@ export function createSurfaceTextActions(set: Set, get: Get) {
           ...(overrides !== null && Object.keys(overrides).length > 0
             ? { lidStyle: overrides }
             : {}),
+        };
+        state.params.surfaceText = Object.keys(next).length > 0 ? next : undefined;
+      });
+    },
+
+    setLidTextRotation: (rotation: TextQuarterTurn) => {
+      const { params } = get();
+      if ((params.surfaceText?.lidTextRotation ?? 0) === rotation) return;
+      set((state) => {
+        pushHistoryEntry(state);
+        const { lidTextRotation: _drop, ...rest } = state.params.surfaceText ?? {};
+        const next = {
+          ...rest,
+          ...(rotation !== 0 ? { lidTextRotation: rotation } : {}),
         };
         state.params.surfaceText = Object.keys(next).length > 0 ? next : undefined;
       });

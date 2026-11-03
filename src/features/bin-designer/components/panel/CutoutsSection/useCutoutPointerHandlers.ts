@@ -8,9 +8,9 @@
  * path / vertex edit / measurement.
  */
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { Cutout, CutoutShape, PathPoint } from '@/features/bin-designer/types';
-import type { MeshAsset } from '@/shared/generation/meshAsset';
+import type { MeshAssetEntry } from '@/shared/generation/meshAsset';
 import type { CellMask } from '@/shared/utils/cellMask';
 import {
   handlePendingPlaceMove,
@@ -33,6 +33,7 @@ import { cutoutFitsInMask, type MaskCellSize } from './maskFit';
 import { createDefaultCutout, defaultPlaceSize } from './cutoutHelpers';
 import { type InteractionMode, type PreviewMap } from './cutoutInteractionTypes';
 import { generateUUID } from '@/shared/utils/uuid';
+import { mapPathRings, translatePathPoints } from '@/features/bin-designer/utils/pathTransforms';
 
 interface DrawingPreviewState {
   readonly x: number;
@@ -61,7 +62,7 @@ interface UseCutoutPointerHandlersOptions {
   readonly binDepth: number;
   readonly cellMask?: CellMask;
   readonly maskCellSize?: MaskCellSize;
-  readonly meshAssets?: Readonly<Record<string, MeshAsset>>;
+  readonly meshAssets?: Readonly<Record<string, MeshAssetEntry>>;
   readonly rulerSnapTargets: SnapModel;
   readonly rulerZoomRef: React.RefObject<number>;
   readonly pastDeadZoneRef: React.RefObject<boolean>;
@@ -69,8 +70,11 @@ interface UseCutoutPointerHandlersOptions {
   readonly onAdd: (cutout: Cutout) => boolean;
   readonly onUpdate: (id: string, updates: Partial<Cutout>) => void;
   readonly onUpdateBatch?: (updates: ReadonlyMap<string, Partial<Cutout>>) => void;
-  readonly commitTransaction?: () => void;
+  readonly onSplitLine?: (cutoutId: string, line: RulerMeasurement) => void;
 }
+
+/** A shorter drag reads as a click, which leaves the split tool waiting (mm). */
+const MIN_SPLIT_LINE_MM = 1;
 
 export interface CutoutPointerHandlers {
   readonly handlePointerMove: (
@@ -111,8 +115,14 @@ export function useCutoutPointerHandlers(
     onAdd,
     onUpdate,
     onUpdateBatch,
-    commitTransaction,
+    onSplitLine,
   } = opts;
+  const lastLineRef = useRef<RulerMeasurement | null>(null);
+  // A drag ended any way but pointer up (Escape, blur) must not be the line a
+  // later click commits.
+  useEffect(() => {
+    if (mode.type !== 'measuring') lastLineRef.current = null;
+  }, [mode.type]);
 
   const handlePointerMove = useCallback(
     (mmX: number, mmY: number, shiftKey?: boolean, altKey?: boolean) => {
@@ -199,7 +209,9 @@ export function useCutoutPointerHandlers(
 
         case 'measuring': {
           const snapped = snapToNearestTarget(mmX, mmY, rulerSnapTargets, rulerZoomRef.current);
-          setRulerMeasurement(computeMeasurement(mode.startX, mode.startY, snapped.x, snapped.y));
+          const line = computeMeasurement(mode.startX, mode.startY, snapped.x, snapped.y);
+          lastLineRef.current = line;
+          setRulerMeasurement(line);
           break;
         }
       }
@@ -280,11 +292,7 @@ export function useCutoutPointerHandlers(
             if (dx !== 0 || dy !== 0) {
               augmented.set(id, {
                 ...updates,
-                path: cutout.path.map((pt) => ({
-                  ...pt,
-                  x: pt.x + dx,
-                  y: pt.y + dy,
-                })),
+                ...mapPathRings(cutout, (ring) => translatePathPoints(ring, dx, dy)),
               });
             }
           }
@@ -364,15 +372,26 @@ export function useCutoutPointerHandlers(
             setSegmentHover,
           });
         }
-        commitTransaction?.();
         return;
       }
 
-      case 'measuring':
+      case 'measuring': {
+        const line = lastLineRef.current;
+        lastLineRef.current = null;
+        if (mode.splitId !== undefined) {
+          if (line && line.distance >= MIN_SPLIT_LINE_MM) {
+            onSplitLine?.(mode.splitId, line);
+            setMode({ type: 'idle' });
+          } else {
+            setMode({ type: 'ruler-ready', splitId: mode.splitId });
+          }
+          return;
+        }
         // Sticky mode (toolbar): stay in ruler-ready for repeated measurements
         // One-off (Shift+drag): return to idle
         setMode({ type: mode.sticky ? 'ruler-ready' : 'idle' });
         return;
+      }
     }
   }, [
     mode,
@@ -382,7 +401,7 @@ export function useCutoutPointerHandlers(
     commitPendingPlace,
     commitTransformPreview,
     commitDrawing,
-    commitTransaction,
+    onSplitLine,
     setMode,
     setPreview,
     setActiveGuides,

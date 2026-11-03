@@ -7,26 +7,29 @@
  */
 
 import { DESIGNER_CONSTRAINTS } from '@/features/bin-designer/constants';
-import { Checkbox, IconButton, Stepper } from '@/design-system';
+import { IconButton, Stepper } from '@/design-system';
+import { FeatureToggle } from '../FeatureToggle';
 import { ArrowLeftRightIcon, RulerIcon } from '@/design-system/Icon';
 import { FractionalEdgeToggle } from '@/shared/components/FractionalEdgeToggle';
 import { useResponsive } from '@/shared/hooks/useResponsive';
+import { formatCompactMm } from '@/features/bin-designer/utils/compartmentDimensions';
 import { AssembledHeightBreakdown } from '../AssembledHeightBreakdown';
+import { FieldLabel, LabelInfo, SubHeader } from '../shared';
 import { useDimensionsSection } from './useDimensionsSection';
 
 export function DimensionsSection() {
   const { state, handlers, t } = useDimensionsSection();
   const { isMobile } = useResponsive();
-  const checkboxSize = isMobile ? 'lg' : 'md';
   const stepperSize = isMobile ? 'lg' : 'md';
 
   return (
     <div className="space-y-3">
+      <SubHeader>{t('binDesigner.dimensions')}</SubHeader>
       {/* Width and Depth on same row with swap button */}
       <div className="flex items-end gap-2">
         {/* Width */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <span className="mb-1 block text-xs text-content-tertiary">{t('common.width')}</span>
+          <FieldLabel>{t('common.width')}</FieldLabel>
           <Stepper
             value={state.width}
             onChange={(v) => handlers.setParam('width', v)}
@@ -56,7 +59,7 @@ export function DimensionsSection() {
 
         {/* Depth */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <span className="mb-1 block text-xs text-content-tertiary">{t('common.depth')}</span>
+          <FieldLabel>{t('common.depth')}</FieldLabel>
           <Stepper
             value={state.depth}
             onChange={(v) => handlers.setParam('depth', v)}
@@ -80,6 +83,21 @@ export function DimensionsSection() {
           {state.widthMm.toFixed(0)} × {state.depthMm.toFixed(0)} × {state.heightMm.toFixed(0)} mm
         </span>
       </div>
+
+      {state.interior && (
+        <div className="space-y-0.5 text-center">
+          <div className="flex items-center justify-center gap-1.5 text-xs text-content-tertiary">
+            <span>{t('binDesigner.interiorDimensions')}</span>
+            <LabelInfo label={t('binDesigner.interiorDimensions')}>
+              {t('binDesigner.interiorDimensionsHint')}
+            </LabelInfo>
+            <span className="tabular-nums">
+              {formatCompactMm(state.interior.widthMm)} × {formatCompactMm(state.interior.depthMm)}{' '}
+              × {formatCompactMm(state.interior.heightMm)} mm
+            </span>
+          </div>
+        </div>
+      )}
 
       <AssembledHeightBreakdown />
 
@@ -123,8 +141,16 @@ export function DimensionsSection() {
       {state.heightApplies && (
         <div>
           <div className="mb-1 flex items-center justify-between">
-            <span className="text-xs text-content-tertiary">{t('common.height')}</span>
-            <span className="text-label tabular-nums text-content-tertiary">{state.height}u</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-content-tertiary">{t('common.height')}</span>
+              <LabelInfo label={t('common.height')}>
+                {t('binDesigner.heightUnitsDetail', { mm: formatCompactMm(state.heightUnitMm) })}
+              </LabelInfo>
+            </div>
+            <span className="text-label tabular-nums text-content-tertiary">
+              {state.height}u<span> · </span>
+              {formatCompactMm(state.heightMm)} mm
+            </span>
           </div>
           <Stepper
             value={state.height}
@@ -145,12 +171,14 @@ export function DimensionsSection() {
           that encloses tall contents and keeps a stacked bin off them (#2500). */}
       <div>
         <div className="mb-1 flex items-center justify-between">
-          <span
-            className="text-xs text-content-tertiary"
-            title={t('binDesigner.extraWallHeightTooltip')}
-          >
-            {t('binDesigner.extraWallHeight')}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-content-tertiary">
+              {t('binDesigner.extraWallHeight')}
+            </span>
+            <LabelInfo label={t('binDesigner.extraWallHeight')}>
+              {t('binDesigner.extraWallHeightDetail')}
+            </LabelInfo>
+          </div>
           <span className="text-label tabular-nums text-content-tertiary">
             {state.extraWallHeightMm} mm
           </span>
@@ -168,28 +196,11 @@ export function DimensionsSection() {
         />
       </div>
 
-      {/* Half-bin mode toggle */}
-      <div
-        className="group flex items-center justify-between cursor-pointer rounded-md px-1 -mx-1 py-1 focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
-        onClick={handlers.toggleHalfGridMode}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            handlers.toggleHalfGridMode();
-          }
-        }}
-        role="checkbox"
-        aria-checked={state.halfGridMode}
-        aria-label={t('binDesigner.halfBinModeEnable05Grid')}
-        tabIndex={0}
-      >
-        <span
-          className={`text-xs leading-none transition-colors ${state.halfGridMode ? 'text-content' : 'text-content-tertiary group-hover:text-content-secondary'}`}
-        >
-          {t('binDesigner.halfBinMode')}
-        </span>
-        <Checkbox checked={state.halfGridMode} size={checkboxSize} />
-      </div>
+      <FeatureToggle
+        label={t('binDesigner.halfBinMode')}
+        checked={state.halfGridMode}
+        onChange={handlers.toggleHalfGridMode}
+      />
     </div>
   );
 }

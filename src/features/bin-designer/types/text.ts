@@ -384,6 +384,20 @@ export type WallTextSide = 'front' | 'back' | 'left' | 'right';
 export const WALL_TEXT_SIDES: readonly WallTextSide[] = ['front', 'back', 'left', 'right'] as const;
 
 /**
+ * Face of an outer wall a caption is cut into, and so the side it reads from.
+ * A through-cut caption reads mirrored from the face it was not set on.
+ */
+export type WallTextFace = 'outside' | 'inside';
+export const WALL_TEXT_FACES: readonly WallTextFace[] = ['outside', 'inside'] as const;
+
+/** Top-row anchor with the same horizontal alignment. */
+export function topRowAnchor(anchor: TextAnchor): TextAnchor {
+  if (anchor.endsWith('left')) return 'top-left';
+  if (anchor.endsWith('right')) return 'top-right';
+  return 'top';
+}
+
+/**
  * Legacy vertical alignment of wall text, one knob shared by all four walls.
  * Superseded by {@link TextAnchor}; retained so `migrateSurfaceText` can fold a
  * persisted value into `style.anchor` (horizontal was always centered, so the
@@ -403,6 +417,21 @@ export const WALL_ALIGN_TO_ANCHOR: Record<WallTextVerticalAlign, TextAnchor> = {
 } as const;
 
 /**
+ * Turn of an auto-fitted caption on its host, in degrees clockwise seen from
+ * above (the cutout `rotation` convention). Quarter turns only: the caption is
+ * fitted to the host rect, and only a quarter turn maps that rect onto itself
+ * (with its sides swapped). Any other angle has no box to fit into; a text
+ * element in the cut editor covers those.
+ */
+export type TextQuarterTurn = 0 | 90 | 180 | 270;
+
+export const TEXT_QUARTER_TURNS: readonly TextQuarterTurn[] = [0, 90, 180, 270] as const;
+
+export function isTextQuarterTurn(value: unknown): value is TextQuarterTurn {
+  return (TEXT_QUARTER_TURNS as readonly unknown[]).includes(value);
+}
+
+/**
  * Text on the design's exterior surfaces. One shared style for all surface
  * text (merged over `BinParams.textDefaults`), optionally refined per surface,
  * with a string per surface.
@@ -420,6 +449,21 @@ export interface SurfaceTextConfig {
    */
   readonly lidText?: string;
   /**
+   * Turns the lid caption's whole reading frame, so the anchor and offset
+   * turn with it and a 90° or 270° turn fits the caption along the lid's
+   * other side. Absent means 0.
+   */
+  readonly lidTextRotation?: TextQuarterTurn;
+  /**
+   * Text on the interior floor of a standard hollow bin. It takes the largest
+   * clear stretch of floor, so dividers, scoops, the interior fillet, inserts
+   * and raised floors stay untouched. Ignored on solid, slotted and polygon
+   * `cellMask` bins and on bins without a closed floor.
+   */
+  readonly floorText?: string;
+  /** Turns the floor caption's reading frame, like {@link lidTextRotation}. */
+  readonly floorTextRotation?: TextQuarterTurn;
+  /**
    * Per-wall text on the bin's outer walls. Each string fits into the largest
    * clear region on its wall (avoiding wall cutouts and handles, and clearing
    * any wall pattern behind it). Ignored for polygon `cellMask` bins and for
@@ -432,8 +476,54 @@ export interface SurfaceTextConfig {
   readonly style?: TextStyleOverride;
   /** Lid-only refinement, merged over {@link style}. */
   readonly lidStyle?: TextStyleOverride;
-  /** Per-wall refinement, merged over {@link style}. */
+  /** Floor-only refinement, merged over {@link style}. */
+  readonly floorStyle?: TextStyleOverride;
+  /** Per-wall refinement, merged over {@link style} and {@link insideStyle}. */
   readonly wallStyles?: Partial<Record<WallTextSide, TextStyleOverride>>;
+  /**
+   * Walls whose caption sits on the inner face. Only `'inside'` is stored: an
+   * absent side faces outside, so a design that never used this serializes
+   * byte-identically.
+   */
+  readonly wallFaces?: Partial<Record<WallTextSide, WallTextFace>>;
+  /**
+   * Refinement for inside-facing captions, merged over {@link style}. Present
+   * only while some wall faces inside, for the same fingerprint reason.
+   */
+  readonly insideStyle?: TextStyleOverride;
+}
+
+export function wallTextFace(
+  surfaceText: SurfaceTextConfig | undefined,
+  side: WallTextSide
+): WallTextFace {
+  return surfaceText?.wallFaces?.[side] === 'inside' ? 'inside' : 'outside';
+}
+
+/** The one place a wall caption's style layers are ordered. */
+export function resolveWallTextStyle(
+  defaults: TextStyleDefaults,
+  surfaceText: SurfaceTextConfig | undefined,
+  side: WallTextSide
+): TextStyleDefaults & { readonly fontSizeOverride?: number } {
+  return resolveTextStyle(
+    defaults,
+    surfaceText?.style,
+    wallTextFace(surfaceText, side) === 'inside' ? surfaceText?.insideStyle : undefined,
+    surfaceText?.wallStyles?.[side]
+  );
+}
+
+/**
+ * The floor caption's style. A floor has a base under it, so nothing can be
+ * cut through: a through-cut inherited from the shared style engraves instead.
+ */
+export function resolveFloorTextStyle(
+  defaults: TextStyleDefaults,
+  surfaceText: SurfaceTextConfig | undefined
+): TextStyleDefaults & { readonly fontSizeOverride?: number } {
+  const style = resolveTextStyle(defaults, surfaceText?.style, surfaceText?.floorStyle);
+  return style.mode === 'through-cut' ? { ...style, mode: 'engrave' } : style;
 }
 
 /**

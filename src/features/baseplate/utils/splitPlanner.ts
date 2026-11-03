@@ -662,12 +662,21 @@ export function pieceToBaseplateParams(
     gridUnitMmY: parentParams.gridUnitMmY,
     outline: pieceOutline,
     outlineOverhang: pieceOverhang,
+    outlineIsCornerRounding: pieceOutline ? parentParams.outlineIsCornerRounding : undefined,
     connectorFilter,
     magnetHoles: parentParams.magnetHoles,
     magnetDiameter: parentParams.magnetDiameter,
     magnetDepth: parentParams.magnetDepth,
+    ...(parentParams.magnetCrushRibs === true ? { magnetCrushRibs: true } : {}),
+    ...(parentParams.magnetChamfer === true ? { magnetChamfer: true } : {}),
+    // Rotation-invariant: the anchor insets every magnet the same distance
+    // from its own cell's edges.
+    magnetAnchor: parentParams.magnetAnchor,
     // Rotation-invariant, and every piece must cut the same pocket depth.
     ...(parentParams.lowProfileBase === true ? { lowProfileBase: true } : {}),
+    ...(parentParams.stackSeamTrimMm !== undefined
+      ? { stackSeamTrimMm: parentParams.stackSeamTrimMm }
+      : {}),
     paddingLeft: rot ? piece.paddingRight : piece.paddingLeft,
     paddingRight: rot ? piece.paddingLeft : piece.paddingRight,
     paddingFront: rot ? piece.paddingBack : piece.paddingFront,
@@ -703,6 +712,7 @@ export function pieceToBaseplateParams(
     invertDovetails: parentParams.invertDovetails,
     preferIdenticalPieces: parentParams.preferIdenticalPieces,
     lightweight: parentParams.lightweight,
+    ecoPlate: parentParams.ecoPlate,
     solidFloor: parentParams.solidFloor,
     solidFloorThickness: parentParams.solidFloorThickness,
     screwHoles: parentParams.screwHoles,
@@ -710,6 +720,7 @@ export function pieceToBaseplateParams(
     // piece that computed its own pad would come out a different thickness from
     // its neighbours and the assembly would be stepped.
     screwPadThicknessMm: parentParams.screwPadThicknessMm,
+    mountMagnets: parentParams.mountMagnets,
     cornerRadius: parentParams.cornerRadius,
     cornerRadii,
   };

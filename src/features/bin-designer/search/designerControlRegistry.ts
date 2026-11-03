@@ -44,6 +44,12 @@ export const DESIGNER_CONTROL_SEARCH: readonly DesignerControlSearchEntry[] = [
     keywordsKey: 'help.target.binDesigner.shape.keywords',
   },
   {
+    controlId: 'bd-slant',
+    titleKey: 'help.target.binDesigner.slant.title',
+    descriptionKey: 'help.target.binDesigner.slant.description',
+    keywordsKey: 'help.target.binDesigner.slant.keywords',
+  },
+  {
     controlId: 'bd-walls',
     titleKey: 'help.target.binDesigner.walls.title',
     descriptionKey: 'help.target.binDesigner.walls.description',
@@ -96,6 +102,12 @@ export const DESIGNER_CONTROL_SEARCH: readonly DesignerControlSearchEntry[] = [
   // display:none for slide lids), so a search result would dead-end in the
   // common no-lid case. The lid itself (bd-lid) stays searchable and lands the
   // user on the section where the grip lives.
+  {
+    controlId: 'bd-pull-tab',
+    titleKey: 'help.target.binDesigner.pullTab.title',
+    descriptionKey: 'help.target.binDesigner.pullTab.description',
+    keywordsKey: 'help.target.binDesigner.pullTab.keywords',
+  },
   {
     controlId: 'bd-handles',
     titleKey: 'help.target.binDesigner.handles.title',
@@ -192,6 +204,21 @@ export const DESIGNER_OPTION_RECORDS: readonly DesignerOptionRecord[] = [
     keywords: ['stacking lip', 'stack', 'lip', 'rim', 'stackable', 'mating'],
   },
   {
+    id: 'opt-lip-notches',
+    labelKey: 'binDesigner.base.lipNotches',
+    section: 'bd-base',
+    keywords: [
+      'lip notches',
+      'notch',
+      'notches',
+      'stack smaller bins',
+      'sliding',
+      'locate',
+      'register',
+      'grid lines',
+    ],
+  },
+  {
     id: 'opt-magnets',
     labelKey: 'binDesigner.base.magnetHoles',
     section: 'bd-base',
@@ -202,6 +229,12 @@ export const DESIGNER_OPTION_RECORDS: readonly DesignerOptionRecord[] = [
     labelKey: 'binDesigner.base.screwHoles',
     section: 'bd-base',
     keywords: ['screw', 'screws', 'screw holes', 'mounting', 'fasten', 'countersink'],
+  },
+  {
+    id: 'opt-corner-holes',
+    labelKey: 'binDesigner.base.cornerHolesOnly',
+    section: 'bd-base',
+    keywords: ['corner magnets', 'corners only', 'fewer magnets', 'outer corners', 'four magnets'],
   },
   {
     id: 'opt-detachable-feet',
@@ -294,7 +327,7 @@ export const DESIGNER_OPTION_RECORDS: readonly DesignerOptionRecord[] = [
     id: 'opt-lid-extra-height',
     labelKey: 'binDesigner.lid.extraHeight',
     section: 'bd-lid',
-    keywords: ['extra lid height', 'deeper lid', 'cavity', 'headroom'],
+    keywords: ['extra lid height', 'deeper lid', 'cavity', 'headroom', 'lid height units', 'level'],
   },
   // Walls
   {
@@ -308,6 +341,12 @@ export const DESIGNER_OPTION_RECORDS: readonly DesignerOptionRecord[] = [
     labelKey: 'binDesigner.walls.text.heading',
     section: 'bd-wall-style',
     keywords: ['wall text', 'engrave walls', 'emboss', 'sign', 'caption'],
+  },
+  {
+    id: 'opt-floor-text',
+    labelKey: 'binDesigner.floor.text.heading',
+    section: 'bd-floor-pattern',
+    keywords: ['floor text', 'engrave floor', 'bottom text', 'inside label', 'caption'],
   },
   {
     id: 'opt-wall-label-slots',
@@ -469,6 +508,8 @@ export interface ControlAvailabilityContext {
   readonly viewMode: 'scroll' | 'rail';
   /** The `sliding_tray` labs flag — the slide-tray section only mounts when on. */
   readonly slideTrayEnabled: boolean;
+  /** The `slant` labs flag, or a design that already leans: when the Slant section mounts. */
+  readonly slantVisible: boolean;
 }
 
 /**
@@ -489,6 +530,8 @@ export function isDesignerControlAvailable(
       return ctx.hasText;
     case 'bd-slide-tray':
       return ctx.slideTrayEnabled;
+    case 'bd-slant':
+      return ctx.slantVisible;
     case 'bd-print-fit':
       return ctx.viewMode === 'rail' || ctx.needsSplit;
     default:

@@ -8,6 +8,7 @@
  * Geometry breakdown (in build order):
  *   - `buildLidFloor`     — flat plate at the top              (lidProfile)
  *   - `buildMatingShell`  — inverted-lip wall                  (lidProfile)
+ *   - `addLidFill`        — plug down to the mating edge     (lidFill)
  *   - `addClickRails`     — tapered snap rails on each wall    (lidClickRail)
  *   - `cutMagnetHoles`    — standard magnet pattern through floor (lidMagnets)
  *   - `buildStackGrid`    — Gridfinity lip profile on top      (lidStackGrid)
@@ -30,19 +31,23 @@ import type { Shape3D, DisposalScope, ValidSolid } from 'brepjs';
 import type { BinParams } from '@/shared/types/bin';
 import { FeatureTag } from './featureTags';
 import { collectOrigins } from './pipeline/collectOrigins';
-import { resolveLidInputs } from './lidInputs';
+import { keepsNaturalOrientation, resolveLidInputs } from './lidInputs';
+import type { LidInputs } from './lidInputs';
 import { buildLidFloor, buildMatingShell } from './lidProfile';
 import { addClickRails } from './lidClickRail';
 import { addGripRelief } from './lidGripRelief';
 import { buildStackGrid } from './lidStackGrid';
 import { cutMagnetHoles } from './lidMagnets';
 import { addLidRetentionMagnets } from './lidRetentionMagnets';
+import { addLidFill } from './lidFill';
 import { cutTrayRecess } from './lidTray';
 import { applyLidCutouts } from './lidCutoutBuilder';
 import { applyLidText } from './lidTextBuilder';
 import { buildSlideLidPlate } from './slideLidPlate';
-import { applyLidHinge } from './hingeBarrel';
+import { applyLidHinge, relieveLatchPlug } from './hingeBarrel';
+import type { HingeFrame, LatchWall } from './hingeBarrel';
 import { planHingeLid } from '@/shared/utils/hingeLidPlan';
+import type { HingeGeometry } from '@/shared/utils/hingeLidPlan';
 
 export { resolveLidInputs } from './lidInputs';
 export { chamferApexXForCavityWall } from './lidClickRail';
@@ -87,6 +92,24 @@ export function buildLid(params: BinParams, originToTag?: Map<number, number>): 
       collectOrigins(matingShell, FeatureTag.LID_BODY, originToTag);
     }
     let body: Shape3D = unwrap(fuse(floor, matingShell));
+
+    // 1b. Lid fill. Before the retention bosses, whose pockets would
+    //     otherwise be filled by it.
+    if (inputs.fill) {
+      body = addLidFill(scope, body, inputs, inputs.fill, originToTag);
+    }
+
+    // 1c. The hinge's latch-side relief, before the rails and magnet bosses:
+    //     the bosses land on the bin's posts rather than on the lip, and the
+    //     snap rail is meant to snap past it. The plan drops a rail the relief
+    //     would leave without a plug to hang from (`detentFits`).
+    const hinge = planHingeLid(params).geometry;
+    const hingeFrame = hinge
+      ? lidHingeFrame(inputs, hinge, keepsNaturalOrientation(params) ? 1 : -1)
+      : null;
+    if (hinge && hingeFrame && hinge.relievesLatch) {
+      body = relieveLatchPlug(scope, body, hinge, hingeFrame, lidLatchWall(inputs, hinge));
+    }
 
     // 2. Click rails — fuse onto the mating shell from outside (tags rails).
     // Skipped entirely when no side has rails enabled, producing a
@@ -171,23 +194,48 @@ export function buildLid(params: BinParams, originToTag?: Map<number, number>): 
     //    per-feature checklist `lid.relieveInterior` exists to avoid
     //    (CLAUDE.md gotcha #18). Run it here and a feature added next year is
     //    trimmed correctly by an author who never heard of the hinge.
-    const hinge = planHingeLid(params).geometry;
-    if (hinge) {
-      const crossOuter = hinge.alongX ? inputs.lidOuterD / 2 : inputs.lidOuterW / 2;
-      const offset = hinge.alongX ? inputs.outerOffsetY : inputs.outerOffsetX;
-      const outward = hinge.side === 'back' || hinge.side === 'right' ? 1 : -1;
-      body = applyLidHinge(scope, body, hinge, {
-        outerFaceCrossMm: crossOuter + outward * offset,
-        // Lid-local: the plate's underside. `axisAboveLipTopMm` is the same
-        // plane stated in the bin's frame, so the two agree by construction
-        // rather than by two copies of the anchor chain (CLAUDE.md gotcha #14).
-        axisZ: -inputs.topThickness,
-        rotationDeg: hinge.rotationDeg,
-      });
+    if (hinge && hingeFrame) {
+      body = applyLidHinge(scope, body, hinge, hingeFrame);
     }
 
     return body as ValidSolid;
   });
+}
+
+function lidLatchWall(inputs: LidInputs, hinge: HingeGeometry): LatchWall {
+  const along = hinge.alongX ? inputs.lidOuterW : inputs.lidOuterD;
+  // The lid's centre along the axis, relative to the cavity's centre the
+  // cutter is shifted to: the overhang offset turned back through the wall's
+  // rotation, less the plan's own shift.
+  const r = (hinge.rotationDeg * Math.PI) / 180;
+  const centre =
+    inputs.outerOffsetX * Math.cos(r) + inputs.outerOffsetY * Math.sin(r) - hinge.alongOffsetMm;
+  const half = along / 2 - inputs.cavityInset;
+  return {
+    axisToFaceMm: hinge.axisToLatchFaceMm,
+    straightLo: centre - half,
+    straightHi: centre + half,
+    cornerRecessMm: inputs.cavityInset,
+  };
+}
+
+function lidHingeFrame(
+  inputs: LidInputs,
+  hinge: HingeGeometry,
+  printUpZ: HingeFrame['printUpZ']
+): HingeFrame {
+  const crossOuter = hinge.alongX ? inputs.lidOuterD / 2 : inputs.lidOuterW / 2;
+  const offset = hinge.alongX ? inputs.outerOffsetY : inputs.outerOffsetX;
+  const outward = hinge.side === 'back' || hinge.side === 'right' ? 1 : -1;
+  return {
+    outerFaceCrossMm: crossOuter + outward * offset,
+    // Lid-local: the plate's underside. `axisAboveLipTopMm` is the same
+    // plane stated in the bin's frame, so the two agree by construction
+    // rather than by two copies of the anchor chain (CLAUDE.md gotcha #14).
+    axisZ: -inputs.topThickness,
+    rotationDeg: hinge.rotationDeg,
+    printUpZ,
+  };
 }
 
 /**

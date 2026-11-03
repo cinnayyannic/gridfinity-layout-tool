@@ -20,31 +20,35 @@ import { Button, SegmentedControl } from '@/design-system';
 import { LidGripControls } from '../LidGripControls';
 import { SlideControls } from '../SlideControls';
 import { HingeControls } from '../HingeControls';
-import { StepperField } from '../shared/StepperField';
 import {
-  Hint,
-  Readout,
-  SubHeader,
   DependencyHint,
-  SegmentGrid,
+  FieldLabel,
+  Hint,
   InfoDot,
+  Readout,
+  SegmentGrid,
   SideSelector,
+  SubHeader,
   TextColorControl,
   TextFinishGrid,
 } from '../shared';
 import type { SideState } from '../shared';
 import type { TextSurface } from '@/features/bin-designer/utils/flatTextContrast';
-import type {
-  LidCompatibilityId,
-  LidCompatibilityIssue,
+import {
+  LID_ISSUES_WITHOUT_DETAIL,
+  type LidCompatibilityId,
+  type LidCompatibilityIssue,
 } from '@/features/bin-designer/utils/lidCompatibility';
 import { LID_RAIL_SIDES, LID_ATTACHMENTS } from '@/features/bin-designer/types';
 import type { TextMode } from '@/features/bin-designer/types';
 import type { useTranslation } from '@/i18n';
 import { CompartmentTextInput } from '../LabelTabsSection/CompartmentTextInput';
 import { FeatureToggle } from '../FeatureToggle';
+import { FeatureTip } from '../../FeatureTip';
 import { useLidSection, LID_TOP_SURFACES } from './useLidSection';
 import { LidAdvancedFields } from './LidAdvancedFields';
+import { LidHeightField } from './LidHeightField';
+import { LidTextRotation } from './LidTextRotation';
 
 /** Mode options for the lid-text picker, in the shared textMode order. */
 const TEXT_MODE_OPTIONS: readonly TextMode[] = ['engrave', 'emboss', 'through-cut'] as const;
@@ -83,7 +87,16 @@ function CompatibilityIssue({
   return (
     <li className={`flex items-start gap-1.5 text-label leading-relaxed ${textColor}`}>
       <span className={`mt-1.5 inline-block h-1 w-1 shrink-0 rounded-full ${dotColor}`} />
-      <span className="flex-1">{message}</span>
+      <p className="flex-1">
+        {t(`binDesigner.lid.compat.${issue.id}`, { sides })}
+        {!LID_ISSUES_WITHOUT_DETAIL.has(issue.id) && (
+          <span className="ml-1 inline-flex align-middle">
+            <InfoDot aria-label={t('binDesigner.infoButton')}>
+              <p>{t(`binDesigner.lid.compat.${issue.id}Detail`, { sides })}</p>
+            </InfoDot>
+          </span>
+        )}
+      </p>
       {fixable && (
         <Button
           type="button"
@@ -128,9 +141,7 @@ function RailSides({
   });
   return (
     <div>
-      <span className="mb-1 block text-label text-content-tertiary">
-        {t('binDesigner.lid.clickRails')}
-      </span>
+      <FieldLabel>{t('binDesigner.lid.clickRails')}</FieldLabel>
       <SideSelector sides={sides} onToggle={onToggle} ariaLabel={t('binDesigner.lid.clickRails')} />
     </div>
   );
@@ -149,9 +160,11 @@ export function LidSection() {
         onChange={handlers.toggleEnabled}
         disabledReason={state.disabledReason}
         badge={
-          <InfoDot aria-label={t('binDesigner.infoButton')}>
-            <p>{t('binDesigner.lid.printNote')}</p>
-          </InfoDot>
+          <FeatureTip
+            tip="lids"
+            feature={t('binDesigner.lid.enable')}
+            detail={t('binDesigner.lid.printNote')}
+          />
         }
       />
       {state.stackingLipMissing && (
@@ -206,21 +219,34 @@ export function LidSection() {
             {state.attachment === 'friction' && <Hint>{t('binDesigner.lid.frictionHint')}</Hint>}
 
             {state.attachment === 'magnetic' && (
-              <>
-                <Hint>
-                  {t('binDesigner.lid.retentionMagnetHint', {
-                    diameter: state.retentionMagnetDiameter.toFixed(1),
-                    depth: state.retentionMagnetDepth.toFixed(1),
-                  })}
-                </Hint>
-                {state.hasMagneticRelief && (
-                  <Hint>
-                    {t('binDesigner.lid.magneticClearanceHint', {
-                      clearance: state.magneticClearanceMm.toFixed(2),
-                    })}
-                  </Hint>
-                )}
-              </>
+              <Hint
+                info={
+                  <div className="space-y-2">
+                    <p>{t('binDesigner.lid.retentionMagnetHintDetail')}</p>
+                    {state.hasMagneticRelief && (
+                      <p>
+                        {t('binDesigner.lid.magneticClearanceHint', {
+                          clearance: state.magneticClearanceMm.toFixed(2),
+                        })}
+                      </p>
+                    )}
+                  </div>
+                }
+              >
+                {t('binDesigner.lid.retentionMagnetHint', {
+                  diameter: state.retentionMagnetDiameter.toFixed(1),
+                  depth: state.retentionMagnetDepth.toFixed(1),
+                })}
+              </Hint>
+            )}
+
+            {state.fillAvailable && (
+              <FeatureToggle
+                label={t('binDesigner.lid.fill')}
+                checked={state.fill}
+                onChange={handlers.toggleFill}
+                info={t('binDesigner.lid.fillHint')}
+              />
             )}
 
             {state.attachment === 'clickRails' && (
@@ -256,15 +282,14 @@ export function LidSection() {
                   label={t('binDesigner.lid.stackLipOnly')}
                   checked={state.stackLipOnly}
                   onChange={handlers.toggleStackLipOnly}
+                  info={t('binDesigner.lid.stackLipOnlyHint')}
                 />
-                <Hint>
-                  {state.stackLipOnly
-                    ? t('binDesigner.lid.stackLipOnlyHint')
-                    : t('binDesigner.lid.stackGridHint')}
-                </Hint>
+                {!state.stackLipOnly && <Hint>{t('binDesigner.lid.stackGridHint')}</Hint>}
                 {state.stackLipOnlyIsNoOp && <Hint>{t('binDesigner.lid.stackLipOnlyNoOp')}</Hint>}
                 {state.stackLipOnlyNeedsPlateHint && (
-                  <Hint>{t('binDesigner.lid.stackLipOnlyPrintNote')}</Hint>
+                  <Hint info={t('binDesigner.lid.stackLipOnlyPrintNoteDetail')}>
+                    {t('binDesigner.lid.stackLipOnlyPrintNote')}
+                  </Hint>
                 )}
                 <FeatureToggle
                   label={t('binDesigner.lid.magnetHoles')}
@@ -283,10 +308,8 @@ export function LidSection() {
                   label={t('binDesigner.lid.separateStackPlate')}
                   checked={state.separateStackPlate}
                   onChange={handlers.toggleSeparateStackPlate}
+                  info={t('binDesigner.lid.separateStackPlateHint')}
                 />
-                {state.separateStackPlate && (
-                  <Hint>{t('binDesigner.lid.separateStackPlateHint')}</Hint>
-                )}
               </div>
             )}
           </section>
@@ -321,13 +344,16 @@ export function LidSection() {
                       {state.textMode === 'through-cut' && (
                         <Hint>{t('binDesigner.textMode.throughCutStencilNote')}</Hint>
                       )}
+                      <LidTextRotation />
                       <TextColorControl surfaces={LID_SURFACE} flat={state.textMode === 'flat'} />
                       {state.textOnTrayFloor && <Hint>{t('binDesigner.lid.text.trayHint')}</Hint>}
                       {state.textOnStackLipFloor && (
                         <Hint>{t('binDesigner.lid.text.stackLipHint')}</Hint>
                       )}
                       {state.textEmbossBlocksStacking && (
-                        <Hint>{t('binDesigner.lid.text.stackLipEmbossWarning')}</Hint>
+                        <Hint info={t('binDesigner.lid.text.stackLipEmbossWarningDetail')}>
+                          {t('binDesigner.lid.text.stackLipEmbossWarning')}
+                        </Hint>
                       )}
                     </>
                   )}
@@ -360,33 +386,18 @@ export function LidSection() {
                 <p>{t('binDesigner.lid.editCutoutsHint')}</p>
               </InfoDot>
             </div>
-            {(!state.cutouts.allowed || state.cutouts.atCapacity) && (
-              <Hint>
-                {!state.cutouts.allowed
-                  ? t('binDesigner.lid.editCutoutsBlocked')
-                  : t('binDesigner.lid.editCutoutsFull', { max: state.cutouts.max })}
+            {!state.cutouts.allowed && (
+              <Hint info={t('binDesigner.lid.editCutoutsBlockedDetail')}>
+                {t('binDesigner.lid.editCutoutsBlocked')}
               </Hint>
+            )}
+            {state.cutouts.allowed && state.cutouts.atCapacity && (
+              <Hint>{t('binDesigner.lid.editCutoutsFull', { max: state.cutouts.max })}</Hint>
             )}
           </div>
 
-          {/* ── Extra height (folded in) ─────────────────────────────── */}
-          <div className={`space-y-1 ${state.isSlide ? 'hidden' : ''}`}>
-            <StepperField
-              label={t('binDesigner.lid.extraHeight')}
-              unit="mm"
-              value={state.extraHeightMm}
-              onChange={handlers.setExtraHeight}
-              onStep={(delta) =>
-                handlers.setExtraHeight(state.extraHeightMm + delta * state.extraHeightStep)
-              }
-              min={state.extraHeightMin}
-              max={state.extraHeightMax}
-              step={state.extraHeightStep}
-              size="md"
-              aria-label={t('binDesigner.lid.extraHeightAria')}
-              commitMode="deferred"
-              info={t('binDesigner.lid.extraHeightHint')}
-            />
+          <div className={state.isSlide ? 'hidden' : ''}>
+            <LidHeightField />
           </div>
 
           {/* ── Advanced (millimetre fine-tuning) ────────────────────── */}
@@ -398,23 +409,17 @@ export function LidSection() {
               state.isSlide ? 'hidden' : ''
             }`}
           >
-            <div className="flex items-center gap-1.5">
-              <SubHeader>{t('binDesigner.lid.section.grip')}</SubHeader>
-              <InfoDot aria-label={t('binDesigner.lid.section.grip')}>
-                <p>{t('binDesigner.lid.gripHint')}</p>
-              </InfoDot>
-            </div>
+            <SubHeader info={t('binDesigner.lid.gripHint')}>
+              {t('binDesigner.lid.section.grip')}
+            </SubHeader>
             <LidGripControls state={state} handlers={handlers} t={t} />
           </section>
 
           {/* Hands off to a NEW design (#3036) — see `matchingTrayParams`. */}
           <section className="space-y-2 border-t border-stroke-subtle pt-3">
-            <div className="flex items-center gap-1.5">
-              <SubHeader>{t('binDesigner.lid.section.tray')}</SubHeader>
-              <InfoDot aria-label={t('binDesigner.lid.section.tray')}>
-                <p>{t('binDesigner.lid.matchingTrayHint')}</p>
-              </InfoDot>
-            </div>
+            <SubHeader info={t('binDesigner.lid.matchingTrayHint')}>
+              {t('binDesigner.lid.section.tray')}
+            </SubHeader>
             <Button variant="secondary" size="sm" onClick={handlers.createMatchingTray}>
               {t('binDesigner.lid.createMatchingTray')}
             </Button>

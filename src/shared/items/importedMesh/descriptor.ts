@@ -9,11 +9,12 @@
  */
 import { z } from 'zod';
 import { MAX_MESH_ASSET_TRIANGLES, MAX_MESH_OUTLINE_POINTS } from '@/shared/generation/meshAsset';
-import type { MeshAsset } from '@/shared/generation/meshAsset';
+import type { MeshAsset, MeshAssetRef } from '@/shared/generation/meshAsset';
 import type { ItemTypeDescriptor } from '@/shared/items/registry';
 import type { ImportedMeshStructure, ItemEnvelope } from '@/shared/types/item';
 
-export const MAX_IMPORTED_MESH_HEIGHT_UNITS = 20;
+/** The bin height cap: the import dialog offers that range for a claim. */
+export const MAX_IMPORTED_MESH_HEIGHT_UNITS = 50;
 
 /** Sanity ceiling for the base64 payload of one asset (mirrors server cap). */
 export const MAX_IMPORTED_MESH_DATA_LENGTH = 900_000;
@@ -44,10 +45,18 @@ const meshAssetSchema: z.ZodType<MeshAsset> = z.object({
     }),
 });
 
+const meshAssetRefSchema: z.ZodType<MeshAssetRef> = z.object({
+  name: z.string().min(1).max(MAX_MESH_NAME_LENGTH),
+  hash: z.string().regex(/^[0-9a-f]{64}$/),
+  triangleCount: z.number().int().min(1).max(MAX_MESH_ASSET_TRIANGLES),
+  sizeMm: sizeMmSchema,
+  bytes: z.number().int().positive(),
+});
+
 export const importedMeshSchema: z.ZodType<ImportedMeshStructure> = z.object({
   kind: z.literal('importedMesh'),
   heightUnits: z.number().int().min(1).max(MAX_IMPORTED_MESH_HEIGHT_UNITS),
-  asset: meshAssetSchema,
+  asset: z.union([meshAssetSchema, meshAssetRefSchema]),
   volumeMm3: z.number().positive().optional(),
   sourceFileName: z.string().max(255).optional(),
 });

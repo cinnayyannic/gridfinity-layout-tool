@@ -8,19 +8,25 @@
 import { useCallback, useState } from 'react';
 import type { DesignId } from '@/core/types';
 import { bridgeManager } from '@/shared/generation/bridge';
+import { FORMAT_MIME_TYPES } from '@/shared/generation/exportUtils';
+import { deliverExport } from '@/shared/exportDestination/deliverExport';
+import { primeExportFolder } from '@/shared/exportDestination/exportFolder';
 import { withLowProfileBase } from '@/shared/generation/lowProfileBase';
+import { withSocketNozzle } from '@/shared/generation/socketNozzle';
+import { packagePiecesAsZip } from '@/shared/generation/zipExport';
+import { withPlacedTabCaption } from '@/shared/utils/placedCaption';
 import { useLayoutStore } from '@/core/store/layout';
 import { generateFileName, loadDesign } from '@/features/bin-designer';
 import { assemblyDescriptor } from '@/shared/items/assembly/descriptor';
-import { useToastStore } from '@/core/store';
+import { useSettingsStore, useToastStore } from '@/core/store';
 import { isOk } from '@/core/result';
 import { useTranslation } from '@/i18n';
 
 interface UseQuickExportReturn {
   /** Whether an export is currently in progress */
   readonly isExporting: boolean;
-  /** Export a design to STL and trigger download */
-  readonly exportToSTL: (id: DesignId, designName: string) => Promise<void>;
+  /** Export a design to STL as the bin labeled `binLabel` prints it, and trigger download */
+  readonly exportToSTL: (id: DesignId, designName: string, binLabel: string) => Promise<void>;
 }
 
 /**
@@ -33,12 +39,14 @@ export function useQuickExport(): UseQuickExportReturn {
   const [isExporting, setIsExporting] = useState(false);
 
   const exportToSTL = useCallback(
-    async (id: DesignId, designName: string) => {
+    async (id: DesignId, designName: string, binLabel: string) => {
+      primeExportFolder();
       if (isExporting) return;
 
       setIsExporting(true);
-      // Read before any await: the export must match the setting it began under.
+      // Read before any await: the export must match the settings it began under.
       const lowProfileBase = useLayoutStore.getState().layout.lowProfileBase;
+      const nozzleSizeMm = useSettingsStore.getState().settings.printSettings.nozzleSizeMm;
 
       try {
         const designResult = await loadDesign(id);
@@ -59,37 +67,39 @@ export function useQuickExport(): UseQuickExportReturn {
 
         const bridge = await bridgeManager.acquire();
         try {
-          const exported = design.params
-            ? {
-                // Exported from the layout, so the layout's foot profile applies.
-                data: (
-                  await bridge.exportBin(withLowProfileBase(design.params, lowProfileBase), 'stl')
-                ).data,
-                fileName: generateFileName(
-                  design.params,
-                  'stl',
-                  design.exportFileNameConfig ?? 'descriptive',
-                  design.name
-                ),
-              }
-            : assembly
-              ? {
-                  data: (await bridge.exportItem(assembly, 'stl')).data,
-                  fileName: `${assemblyDescriptor.exportFileName(assembly.envelope, assembly.structure)}.stl`,
-                }
-              : null;
-          if (!exported) return;
-          const { data, fileName } = exported;
+          let pieces: readonly { data: ArrayBuffer; label: string }[];
+          let fileName: string;
+          if (design.params) {
+            // Exported from the layout, so the layout's foot profile and the
+            // bin's own label apply. Combined, so the lid, dividers and
+            // detachable feet ship with the body as they do from the designer.
+            const params = withSocketNozzle(
+              withPlacedTabCaption(withLowProfileBase(design.params, lowProfileBase), binLabel),
+              nozzleSizeMm
+            );
+            pieces = (await bridge.exportCombined(params, 'stl')).pieces;
+            fileName = generateFileName(
+              design.params,
+              'stl',
+              design.exportFileNameConfig ?? 'descriptive',
+              design.name
+            );
+          } else if (assembly) {
+            pieces = [{ data: (await bridge.exportItem(assembly, 'stl')).data, label: 'item' }];
+            fileName = `${assemblyDescriptor.exportFileName(assembly.envelope, assembly.structure)}.stl`;
+          } else {
+            return;
+          }
 
-          const blob = new Blob([data], { type: 'application/sla' });
-          const url = URL.createObjectURL(blob);
-          const anchor = document.createElement('a');
-          anchor.href = url;
-          anchor.download = fileName;
-          document.body.appendChild(anchor);
-          anchor.click();
-          document.body.removeChild(anchor);
-          URL.revokeObjectURL(url);
+          if (pieces.length === 1) {
+            void deliverExport(
+              new Blob([pieces[0].data], { type: FORMAT_MIME_TYPES.stl }),
+              fileName
+            );
+          } else {
+            const baseName = fileName.replace(/\.stl$/, '');
+            void deliverExport(packagePiecesAsZip(pieces, baseName, '.stl'), `${baseName}.zip`);
+          }
 
           addToast({
             message: t('designLinking.toast.exported', { name: designName }),

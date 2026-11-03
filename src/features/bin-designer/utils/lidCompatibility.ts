@@ -27,6 +27,7 @@ import { socketHeightMm } from '@/shared/printSettings/gridfinityGeometry';
 import { isPartialMask, maskToPolygon } from '@/shared/utils/cellMask';
 import { hasAnyPatternedWall } from '@/shared/utils/wallPatternSides';
 import { railFoulingLabelFootprints } from '@/shared/utils/labelTabPlan';
+import { resolveSlant } from '@/shared/utils/slantPlan';
 import { dividerRailBlocks, dividerRailSides } from '@/shared/utils/dividerRailPlan';
 import { unlippedSides, lipGaps, lipGapSides, polygonLipGaps } from '@/shared/utils/lipGapPlan';
 // Safe from the recursion CLAUDE.md gotcha #18 documents: `planHingeLid` is a
@@ -37,11 +38,12 @@ import { planHingeLid } from '@/shared/utils/hingeLidPlan';
 // shelf datum both need it and both are reached from here.
 export { interiorReliefActive } from '@/shared/utils/lidInteriorRelief';
 import { interiorReliefActive } from '@/shared/utils/lidInteriorRelief';
-import { binFloorMm, isSocketlessBase } from '@/features/bin-designer/types/base';
+import { isSocketlessBase } from '@/features/bin-designer/types/base';
 import {
   calculateDividerPieceHeight,
   dividerGrooveDepth,
   dividerSeatZ,
+  resolveBinFloorMm,
 } from '@/shared/utils/slotMath';
 import {
   computeLipOffset,
@@ -53,6 +55,7 @@ import {
 import type { BinParams, ScoopSide } from '../types';
 import { isUndersideRelief } from '../types/base';
 import {
+  hasLidGrip,
   isHingeLid,
   LID_CLICK_RAIL_BAND_BELOW_WALL_TOP,
   LID_MAGNET_LIP_CLEARANCE,
@@ -61,7 +64,7 @@ import {
   resolveLidSlide,
 } from '../types/lid';
 import { SLIDE_CATCH_MIN_DEPTH_MM, SLIDE_SAG_SPAN_MM } from '@/shared/utils/slideLidPlan';
-import { slideLidPlanForParams } from './slideLidPlanForParams';
+import { slideLidFillOffsetMm, slideLidPlanForParams } from './slideLidPlanForParams';
 import { compartmentHasTiltedEdge, getCompartmentBounds } from './compartments';
 import { binDimensions } from './binDimensions';
 
@@ -76,6 +79,8 @@ export type LidCompatibilitySeverity = 'blocker' | 'warning';
  * `binDesigner.lid.compat.{id}` for the user-facing message.
  */
 export type LidCompatibilityId =
+  /** A slanted bin's rim has moved sideways off its socket; no lid is built. */
+  | 'slanted'
   | 'wallCutouts'
   | 'wallCutoutsAllSides'
   | 'knifeSlots'
@@ -100,6 +105,8 @@ export type LidCompatibilityId =
   | 'slideFlushNeedsNoLip'
   /** The plan refused this design outright; the message names the reason. */
   | 'slideUnbuildable'
+  /** A solid bin's fill leaves too little room above it for the channel. Carries a one-click fix. */
+  | 'slideFillTooHigh'
   /** The plate's travel is blocked because the interior relief is switched off. */
   | 'slideInteriorBlocked'
   /** The plate is wide enough to bow between its two bearing edges. */
@@ -116,7 +123,21 @@ export type LidCompatibilityId =
   /** The plan refused this design outright; the message names the reason. */
   | 'hingeUnbuildable'
   /** Knuckles stand proud of the lid's top, so nothing sits level on it. */
-  | 'hingeStackableTop';
+  | 'hingeStackableTop'
+  /** The lid is too tall for its snap rail to clear the rim; it is built without one. */
+  | 'hingeSnapTooTall'
+  /** A lid grip sits on the hinge wall, which never lifts. */
+  | 'hingeGripOnHinge';
+
+/** Notes already said in one line, so they have no `{id}Detail` behind a dot. */
+export const LID_ISSUES_WITHOUT_DETAIL: ReadonlySet<LidCompatibilityId> =
+  new Set<LidCompatibilityId>([
+    'slanted',
+    'wallPattern',
+    'shortBin',
+    'topDownCutoutsAtLip',
+    'slideWallPattern',
+  ]);
 
 export interface LidCompatibilityIssue {
   readonly id: LidCompatibilityId;
@@ -202,7 +223,7 @@ function scoopReachesRailBand(params: BinParams, side: ScoopSide): boolean {
   const { wallHeight, interiorHeight } = scoopFrameHeights(
     boxWallHeight,
     computeInteriorHeight(params),
-    binFloorMm(params.wallThickness)
+    resolveBinFloorMm(params)
   );
   const idAt = (col: number, row: number): number => cells[row * cols + col];
   const against =
@@ -278,7 +299,8 @@ function checkSlideLidCompatibility(params: BinParams): LidCompatibilityIssue[] 
   if (!geometry) {
     // `not-slide` cannot reach here; every other rejection is a real refusal.
     if (rejection !== null && rejection !== 'not-slide') {
-      issues.push({ id: 'slideUnbuildable', severity: 'blocker' });
+      const id = slideLidFillOffsetMm(params) === null ? 'slideUnbuildable' : 'slideFillTooHigh';
+      issues.push({ id, severity: 'blocker' });
     }
     return issues;
   }
@@ -350,6 +372,9 @@ function isPolygonMask(params: BinParams): boolean {
 }
 
 export function checkLidCompatibility(params: BinParams): readonly LidCompatibilityIssue[] {
+  // Every other answer is moot: a lid would sit on a rim that has moved off the
+  // socket, and a bin stacked on top would lean further still.
+  if (resolveSlant(params)) return [{ id: 'slanted', severity: 'blocker' }];
   // A sliding lid answers a different set of questions entirely. Branching
   // here — rather than threading `isSlide` through fifteen checks — is what
   // keeps each list readable and stops a cap-lid rule quietly applying to a
@@ -474,7 +499,7 @@ export function checkLidCompatibility(params: BinParams): readonly LidCompatibil
         { height: 'auto' },
         binDimensions(params).wallHeight,
         params.base.stackingLip,
-        dividerSeatZ(params.wallThickness, dividerGrooveDepth(params))
+        dividerSeatZ(params.wallThickness, params.base.style, dividerGrooveDepth(params))
       )
   ) {
     issues.push({ id: 'tallDividerPieces', severity: 'blocker' });
@@ -663,7 +688,7 @@ export function checkLidCompatibility(params: BinParams): readonly LidCompatibil
 
   // 12. Hinged retention.
   if (isHinge) {
-    const { rejection } = planHingeLid(params);
+    const { rejection, geometry } = planHingeLid(params);
     // `disabled` is the resolver saying there is nothing to do, not a fault —
     // and it cannot occur here anyway, since `isHinge` is how we got in.
     if (rejection !== null && rejection !== 'disabled') {
@@ -677,11 +702,15 @@ export function checkLidCompatibility(params: BinParams): readonly LidCompatibil
       if (params.lid.stackableTop) {
         issues.push({ id: 'hingeStackableTop', severity: 'blocker' });
       }
-      // Nothing to warn about here any more: `detent` is a click rail on the
-      // wall opposite the axis, `magnets` is the corner-boss geometry filtered
-      // to that same wall, and `none` is a deliberate choice the panel's own
-      // hint already describes. The magnet SIZE limits are checked above,
-      // through the shared `magnetBosses` gate.
+      if (geometry && !geometry.detentFits) {
+        issues.push({ id: 'hingeSnapTooTall', severity: 'warning' });
+      }
+      if (geometry && hasLidGrip(params) && params.lid.grip.sides[geometry.side]) {
+        issues.push({ id: 'hingeGripOnHinge', severity: 'warning' });
+      }
+      // `magnets` is the corner-boss geometry filtered to the latch wall, and
+      // its SIZE limits are checked above through the shared `magnetBosses`
+      // gate; `none` is a deliberate choice the panel's own hint describes.
     }
   }
 

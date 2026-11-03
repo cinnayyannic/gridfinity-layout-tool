@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type * as ScanTrace from '@/shared/scanTrace';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { ok, err } from '@/core/result';
+import type { SceneShape, SceneTrace } from '@/shared/scanTrace';
 import { ScanPage } from './ScanPage';
 
 const mockDecodeCanvas = vi.fn();
 const mockImageData = vi.fn();
-const mockAutoSeed = vi.fn();
 const mockSegment = vi.fn();
 const mockTraceSegmented = vi.fn();
 const mockTrace = vi.fn();
@@ -13,49 +14,70 @@ const mockPreload = vi.fn();
 const mockCardSkew = vi.fn((..._args: unknown[]) => 0);
 const mockWithCardSize = vi.fn((...args: unknown[]) => args[0]);
 
-vi.mock('@/shared/scanTrace', () => ({
+// The image work is stubbed; the pure scene helpers (merging a redraw,
+// comparing references, seeding) run for real.
+vi.mock('@/shared/scanTrace', async (importOriginal) => ({
+  ...(await importOriginal<typeof ScanTrace>()),
   decodeImageToCanvas: (...args: unknown[]) => mockDecodeCanvas(...args),
   imageDataFromCanvas: (...args: unknown[]) => mockImageData(...args),
-  computeAutoSeed: (...args: unknown[]) => mockAutoSeed(...args),
   segmentAt: (...args: unknown[]) => mockSegment(...args),
   traceSceneSegmented: (...args: unknown[]) => mockTraceSegmented(...args),
   traceScene: (...args: unknown[]) => mockTrace(...args),
   preloadSegmenter: (...args: unknown[]) => mockPreload(...args),
-  pointsToSvgPath: () => 'M0 0 L10 0 L10 10',
   cardPerspectiveSkew: (...args: unknown[]) => mockCardSkew(...args),
   withCardSize: (...args: unknown[]) => mockWithCardSize(...args),
-  STEEP_CARD_SKEW: 0.2,
-  CARD_WIDTH_MM: 85.6,
-  CARD_HEIGHT_MM: 53.98,
 }));
 
 vi.mock('@/i18n', async () => await import('@/test/mocks/i18nEcho'));
 
 const TOKEN = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
-const IMAGE = { width: 24, height: 20, data: new Uint8ClampedArray(24 * 20 * 4) };
-const MASK = { width: 24, height: 20, data: new Float32Array(24 * 20) };
-const PTS = [
-  { x: 0, y: 0 },
-  { x: 25, y: 0 },
-  { x: 25, y: 45 },
-];
+const IMAGE = { width: 100, height: 80, data: new Uint8ClampedArray(100 * 80 * 4) };
+const MASK = { width: 100, height: 80, data: new Float32Array(100 * 80) };
+
+const box = (x0: number, y0: number, x1: number, y1: number): SceneShape => {
+  const points = [
+    { x: x0, y: y0 },
+    { x: x1, y: y0 },
+    { x: x1, y: y1 },
+    { x: x0, y: y1 },
+  ];
+  return { imagePoints: points, outputPoints: points };
+};
+const TOOL = box(10, 10, 35, 55);
+const SECOND = box(60, 10, 90, 30);
+const CARD = {
+  corners: [
+    { x: 1, y: 1 },
+    { x: 9, y: 1 },
+    { x: 9, y: 6 },
+    { x: 1, y: 6 },
+  ] as const,
+  fitness: 0.97,
+};
 // A scene with a detected card → millimetre output.
-const SCENE_MM = {
-  imagePoints: PTS,
-  outputPoints: PTS,
-  units: 'mm' as const,
-  card: {
-    corners: [
-      { x: 1, y: 1 },
-      { x: 9, y: 1 },
-      { x: 9, y: 6 },
-      { x: 1, y: 6 },
-    ] as const,
-    fitness: 0.97,
-  },
+const SCENE_MM: SceneTrace = {
+  shapes: [TOOL],
+  units: 'mm',
+  card: CARD,
+  grid: null,
+  reference: { kind: 'card', card: CARD },
 };
 // A scene with no card → pixel output, desktop will ask for the size.
-const SCENE_PX = { imagePoints: PTS, outputPoints: PTS, units: 'px' as const, card: null };
+const SCENE_PX: SceneTrace = {
+  shapes: [TOOL],
+  units: 'px',
+  card: null,
+  grid: null,
+  reference: null,
+};
+const SCENE_TWO: SceneTrace = { ...SCENE_MM, shapes: [TOOL, SECOND] };
+// The model's default redraw lands away from every tool, so it is never taken.
+const SCENE_ELSEWHERE: SceneTrace = { ...SCENE_MM, shapes: [box(70, 60, 90, 75)] };
+
+function lastUploadedSvg(fetchMock: ReturnType<typeof vi.fn>): string {
+  const [, init] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1] as [string, RequestInit];
+  return (JSON.parse(init.body as string) as { svg: string }).svg;
+}
 
 function selectPhoto(): void {
   const input = document.querySelector('input[type="file"]') as HTMLInputElement;
@@ -73,8 +95,9 @@ describe('ScanPage', () => {
     URL.revokeObjectURL = vi.fn();
     mockDecodeCanvas.mockResolvedValue(document.createElement('canvas'));
     mockImageData.mockReturnValue(IMAGE);
-    mockAutoSeed.mockReturnValue({ x: 0.5, y: 0.5 });
     mockSegment.mockResolvedValue(MASK);
+    mockTrace.mockReturnValue(ok(SCENE_MM));
+    mockTraceSegmented.mockReturnValue(ok(SCENE_ELSEWHERE));
     mockCardSkew.mockReturnValue(0);
     // jsdom gives 0×0 rects by default; the tap handler needs a real box.
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
@@ -109,7 +132,6 @@ describe('ScanPage', () => {
   });
 
   it('segments a photo and shows the review overlay with the tap hint', async () => {
-    mockTraceSegmented.mockReturnValue(ok(SCENE_MM));
     render(<ScanPage token={TOKEN} />);
 
     selectPhoto();
@@ -119,7 +141,7 @@ describe('ScanPage', () => {
     expect(screen.getByText('scan.review.confirmTitle')).toBeInTheDocument();
     expect(screen.getByText('scan.use')).toBeInTheDocument();
     // Two overlays: the tool outline and the detected-card highlight.
-    expect(document.querySelectorAll('polygon')).toHaveLength(2);
+    expect(document.querySelectorAll('polygon, path[fill-rule]')).toHaveLength(2);
     expect(screen.getByText('binDesigner.cutouts.scanImport.resultSize')).toBeInTheDocument();
     expect(screen.getByText('scan.cardMeasured')).toBeInTheDocument();
     // A flat shot (skew 0) shows no steep-angle caution.
@@ -127,7 +149,6 @@ describe('ScanPage', () => {
   });
 
   it('offers an upload option that accepts an existing photo without forcing the camera', async () => {
-    mockTraceSegmented.mockReturnValue(ok(SCENE_MM));
     render(<ScanPage token={TOKEN} />);
 
     // Both options are on the capture screen.
@@ -160,18 +181,17 @@ describe('ScanPage', () => {
   });
 
   it('shows the no-card warning and a single overlay when no card is detected', async () => {
-    mockTraceSegmented.mockReturnValue(ok(SCENE_PX));
+    mockTrace.mockReturnValue(ok(SCENE_PX));
     render(<ScanPage token={TOKEN} />);
 
     selectPhoto();
 
     expect(await screen.findByText('scan.noCardTitle')).toBeInTheDocument();
     expect(screen.getByText('scan.noCardHint')).toBeInTheDocument();
-    expect(document.querySelectorAll('polygon')).toHaveLength(1);
+    expect(document.querySelectorAll('polygon, path[fill-rule]')).toHaveLength(1);
   });
 
   it('re-segments at the tapped point', async () => {
-    mockTraceSegmented.mockReturnValue(ok(SCENE_MM));
     render(<ScanPage token={TOKEN} />);
     selectPhoto();
 
@@ -196,6 +216,174 @@ describe('ScanPage', () => {
     expect(await screen.findByText('scan.review.retakeHint')).toBeInTheDocument();
     expect(screen.queryByText('scan.review.confirmTitle')).toBeNull();
     expect(mockTrace).toHaveBeenCalled();
+  });
+
+  it('lists every tool it found and uploads them all in one outline file', async () => {
+    mockTrace.mockReturnValue(ok(SCENE_TWO));
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ScanPage token={TOKEN} />);
+    selectPhoto();
+
+    expect(await screen.findByText('scan.review.confirmTitleMany')).toBeInTheDocument();
+    expect(screen.getAllByText('scan.review.toolLabel')).toHaveLength(2);
+    expect(screen.getByText('scan.review.toolsFound')).toBeInTheDocument();
+    // Two tool outlines plus the card.
+    expect(document.querySelectorAll('polygon, path[fill-rule]')).toHaveLength(3);
+    // The model redrew each tool from a seed inside it.
+    expect(mockSegment).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByText('scan.useMany'));
+
+    expect(await screen.findByText('scan.sent.titleMany')).toBeInTheDocument();
+    expect(lastUploadedSvg(fetchMock).match(/<path /g)).toHaveLength(2);
+    vi.unstubAllGlobals();
+  });
+
+  it('leaves a removed tool out of the upload', async () => {
+    mockTrace.mockReturnValue(ok(SCENE_TWO));
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ScanPage token={TOKEN} />);
+    selectPhoto();
+
+    fireEvent.click((await screen.findAllByLabelText('scan.review.removeTool'))[1]);
+
+    // Down to one tool: the list goes, and so does a way to remove the last.
+    expect(screen.queryByText('scan.review.toolLabel')).toBeNull();
+    fireEvent.click(screen.getByText('scan.use'));
+    await screen.findByText('scan.sent.title');
+    expect(lastUploadedSvg(fetchMock).match(/<path /g)).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('holds removal until a tap’s redraw has landed', async () => {
+    mockTrace.mockReturnValue(ok(SCENE_TWO));
+    render(<ScanPage token={TOKEN} />);
+    selectPhoto();
+    const img = await screen.findByAltText('scan.photoAlt');
+
+    mockSegment.mockReturnValue(new Promise(() => {}));
+    fireEvent.pointerDown(img, { clientX: 20, clientY: 30 });
+
+    await waitFor(() =>
+      expect(screen.getAllByLabelText('scan.review.removeTool')[1]).toBeDisabled()
+    );
+    fireEvent.click(screen.getAllByLabelText('scan.review.removeTool')[1]);
+    expect(screen.getAllByText('scan.review.toolLabel')).toHaveLength(2);
+  });
+
+  it('undoes a tap that swallowed other tools', async () => {
+    mockTrace.mockReturnValue(ok(SCENE_TWO));
+    render(<ScanPage token={TOKEN} />);
+    selectPhoto();
+    const img = await screen.findByAltText('scan.photoAlt');
+    expect(screen.queryByText('scan.review.undo')).toBeNull();
+
+    // The model grabs both tools as one.
+    const both = box(5, 5, 95, 60);
+    mockTraceSegmented.mockReturnValue(ok({ ...SCENE_MM, shapes: [both] }));
+    fireEvent.pointerDown(img, { clientX: 20, clientY: 30 });
+
+    fireEvent.click(await screen.findByText('scan.review.undo'));
+
+    expect(screen.getAllByText('scan.review.toolLabel')).toHaveLength(2);
+    expect(screen.queryByText('scan.review.undo')).toBeNull();
+  });
+
+  it('keeps holes, and the tool in one, only once the switch is on', async () => {
+    const ring: SceneShape = { ...box(10, 10, 60, 60), holes: [box(25, 25, 45, 45)] };
+    const nut: SceneShape = { ...box(30, 30, 40, 40), inHole: true };
+    mockTrace.mockReturnValue(ok({ ...SCENE_MM, shapes: [ring, nut] }));
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ScanPage token={TOKEN} />);
+    selectPhoto();
+
+    // Off: one tool, its outline alone.
+    expect(await screen.findByText('scan.review.keepHoles')).toBeInTheDocument();
+    expect(screen.getByText('scan.use')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('switch', { name: 'scan.review.keepHoles' }));
+
+    expect(screen.getAllByText('scan.review.toolLabel')).toHaveLength(2);
+    fireEvent.click(screen.getByText('scan.useMany'));
+    await screen.findByText('scan.sent.titleMany');
+    const svg = lastUploadedSvg(fetchMock);
+    expect(svg.match(/<path /g)).toHaveLength(2);
+    expect(svg).toContain('fill-rule="evenodd"');
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps a tool once the ring it lay in is removed, with holes off again', async () => {
+    const ring: SceneShape = { ...box(10, 10, 60, 60), holes: [box(25, 25, 45, 45)] };
+    const nut: SceneShape = { ...box(30, 30, 40, 40), inHole: true };
+    mockTrace.mockReturnValue(ok({ ...SCENE_MM, shapes: [ring, nut] }));
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ScanPage token={TOKEN} />);
+    selectPhoto();
+    const toggle = await screen.findByRole('switch', { name: 'scan.review.keepHoles' });
+
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getAllByLabelText('scan.review.removeTool')[0]);
+    fireEvent.click(toggle);
+
+    fireEvent.click(screen.getByText('scan.use'));
+    await screen.findByText('scan.sent.title');
+    expect(lastUploadedSvg(fetchMock).match(/<path /g)).toHaveLength(1);
+    vi.unstubAllGlobals();
+  });
+
+  it('removes the tool the list shows when a narrow hole hides another', async () => {
+    const ring: SceneShape = { ...box(10, 10, 60, 60), holes: [box(30, 30, 32, 40)] };
+    const pin: SceneShape = { ...box(30.5, 31, 31.5, 39), inHole: true };
+    const other = box(70, 10, 90, 30);
+    mockTrace.mockReturnValue(ok({ ...SCENE_MM, shapes: [ring, pin, other] }));
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ScanPage token={TOKEN} />);
+    selectPhoto();
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'scan.review.keepHoles' }));
+    expect(screen.getAllByText('scan.review.toolLabel')).toHaveLength(2);
+    fireEvent.click(screen.getAllByLabelText('scan.review.removeTool')[1]);
+
+    fireEvent.click(screen.getByText('scan.use'));
+    await screen.findByText('scan.sent.title');
+    const svg = lastUploadedSvg(fetchMock);
+    expect(svg.match(/<path /g)).toHaveLength(1);
+    // The ring stays, sent as its outline alone; the tool beside it is gone.
+    expect(svg).not.toContain('fill-rule');
+    expect(svg).toContain('viewBox="0 0 50 50"');
+    vi.unstubAllGlobals();
+  });
+
+  it('offers no hole switch when nothing has a hole', async () => {
+    render(<ScanPage token={TOKEN} />);
+    selectPhoto();
+    await screen.findByAltText('scan.photoAlt');
+    expect(screen.queryByText('scan.review.keepHoles')).toBeNull();
+  });
+
+  it('takes the model’s redraw when it agrees with the tool it was seeded in', async () => {
+    const redrawn = box(11, 11, 34, 54);
+    mockTraceSegmented.mockReturnValue(ok({ ...SCENE_MM, shapes: [redrawn] }));
+    render(<ScanPage token={TOKEN} />);
+    selectPhoto();
+
+    await screen.findByAltText('scan.photoAlt');
+    const outline = document.querySelector('path[fill-rule="evenodd"]');
+    expect(outline?.getAttribute('d')).toBe('M 11 11 L 34 11 L 34 54 L 11 54 Z');
+  });
+
+  it('asks the model for the middle of the frame when the colour pass finds nothing', async () => {
+    mockTrace.mockReturnValue(err({ code: 'NO_OBJECT' }));
+    render(<ScanPage token={TOKEN} />);
+    selectPhoto();
+
+    expect(await screen.findByText('scan.review.confirmTitle')).toBeInTheDocument();
+    expect(mockSegment).toHaveBeenCalledWith(expect.anything(), { x: 0.5, y: 0.5 });
   });
 
   it('uploads the outline and confirms it was sent', async () => {
@@ -268,14 +456,13 @@ describe('ScanPage', () => {
 
   describe('reference card size', () => {
     async function openEditor(): Promise<void> {
-      mockTraceSegmented.mockReturnValue(ok(SCENE_MM));
       render(<ScanPage token={TOKEN} />);
       selectPhoto();
       fireEvent.click(await screen.findByText('scan.cardSize.change'));
     }
 
     it('is offered only when a card was actually detected', async () => {
-      mockTraceSegmented.mockReturnValue(ok(SCENE_PX));
+      mockTrace.mockReturnValue(ok(SCENE_PX));
       render(<ScanPage token={TOKEN} />);
       selectPhoto();
 
@@ -284,7 +471,6 @@ describe('ScanPage', () => {
     });
 
     it('starts collapsed on the nominal ID-1 card', async () => {
-      mockTraceSegmented.mockReturnValue(ok(SCENE_MM));
       render(<ScanPage token={TOKEN} />);
       selectPhoto();
 
@@ -325,24 +511,16 @@ describe('ScanPage', () => {
       selectPhoto();
 
       await waitFor(() =>
-        expect(mockTraceSegmented).toHaveBeenLastCalledWith(IMAGE, MASK, {
-          widthMm: 85.6,
-          heightMm: 54.1,
-        })
+        expect(mockTrace).toHaveBeenLastCalledWith(IMAGE, { widthMm: 85.6, heightMm: 54.1 })
       );
-    });
-
-    it('seeds against the same card, so an undetected card cannot become the tool', async () => {
-      await openEditor();
-
-      fireEvent.change(screen.getByLabelText('scan.cardSize.longSide'), {
-        target: { value: '100' },
-      });
-      fireEvent.click(screen.getByText('scan.retake'));
-      selectPhoto();
-
+      // The redraw is sized against the card the colour pass already found.
       await waitFor(() =>
-        expect(mockAutoSeed).toHaveBeenLastCalledWith(IMAGE, { widthMm: 100, heightMm: 53.98 })
+        expect(mockTraceSegmented).toHaveBeenLastCalledWith(
+          IMAGE,
+          MASK,
+          { widthMm: 85.6, heightMm: 54.1 },
+          SCENE_MM.reference
+        )
       );
     });
 

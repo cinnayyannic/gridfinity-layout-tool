@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "ignoreCommand": "bash scripts/vercel-ignore.sh",
+  "installCommand": "bash scripts/vercel-install.sh",
   "buildCommand": "bash scripts/vercel-build.sh",
   "trailingSlash": false,
   "redirects": [
@@ -171,6 +172,60 @@
     },
     {
       "source": "/gridfinity-cutout-generator",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, stale-while-revalidate=86400"
+        }
+      ]
+    },
+    {
+      "source": "/gridfinity-drawers",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, stale-while-revalidate=86400"
+        }
+      ]
+    },
+    {
+      "source": "/gridfinity-ikea-alex",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, stale-while-revalidate=86400"
+        }
+      ]
+    },
+    {
+      "source": "/gridfinity-milwaukee-packout",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, stale-while-revalidate=86400"
+        }
+      ]
+    },
+    {
+      "source": "/gridfinity-ikea-kallax",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, stale-while-revalidate=86400"
+        }
+      ]
+    },
+    {
+      "source": "/gridfinity-ikea-malm",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, stale-while-revalidate=86400"
+        }
+      ]
+    },
+    {
+      "source": "/gridfinity-ikea-helmer",
       "headers": [
         {
           "key": "Cache-Control",
@@ -427,7 +482,7 @@
   ],
   "rewrites": [
     {
-      "source": "/:slug(what-is-gridfinity|guide|privacy|terms|gridfinity-generator|gridfinity-bin-generator|gridfinity-baseplate-generator|gridfinity-calculator|gridfinity-sizes|gridfinity-tool-drawer|gridfinity-kitchen-drawer|gridfinity-software|gridfinity-cutout-generator)",
+      "source": "/:slug(what-is-gridfinity|guide|privacy|terms|gridfinity-generator|gridfinity-bin-generator|gridfinity-baseplate-generator|gridfinity-calculator|gridfinity-sizes|gridfinity-tool-drawer|gridfinity-kitchen-drawer|gridfinity-software|gridfinity-cutout-generator|gridfinity-drawers|gridfinity-ikea-alex|gridfinity-milwaukee-packout|gridfinity-ikea-kallax|gridfinity-ikea-malm|gridfinity-ikea-helmer)",
       "destination": "/:slug/index.html"
     },
     {

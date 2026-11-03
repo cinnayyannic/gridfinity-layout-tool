@@ -3,7 +3,7 @@
  *
  * Organised as one exclusive choice followed by the families of settings that
  * choice admits:
- *   1. Body type: feet, floor and walls, or some of them (`BodyTypeCards`)
+ *   1. Body type: feet, floor and walls, or some of them (`BodyTypeTiles`)
  *   2. Stacking:  the lip, which is the base's mating partner one bin up
  *   3. Mounting:  magnet and screw pockets
  *   4. Feet:      how the feet are laid out under the bin
@@ -20,9 +20,17 @@
  */
 
 import { DESIGNER_CONSTRAINTS } from '@/features/bin-designer/constants';
-import { Button, Checkbox, SegmentedControl, SliderInput } from '@/design-system';
+import { Button, SegmentedControl, SliderInput } from '@/design-system';
 import { FeatureToggle } from '../FeatureToggle';
-import { Hint, SegmentGrid, SideSelector, SubHeader } from '../shared';
+import {
+  FieldLabel,
+  Hint,
+  LabelInfo,
+  OptionNotes,
+  SegmentGrid,
+  SideSelector,
+  SubHeader,
+} from '../shared';
 import {
   DEFAULT_FOOT_LATTICE,
   FOOT_LATTICES,
@@ -36,11 +44,22 @@ import {
 } from '@/features/bin-designer/types';
 import { useTranslation } from '@/i18n';
 import { MoreDisclosure } from '@/shared/components/MoreDisclosure';
-import { BodyTypeCards } from './BodyTypeCards';
+import { BodyTypeTiles } from './BodyTypeTiles';
 import { useBaseSection } from './useBaseSection';
+import type { LipNotchBlocker } from '@/shared/utils/lipNotchPlan';
 
 /** Axis key suffixes for the foot-lattice translation keys. */
 const FOOT_LATTICE_AXES = ['x', 'y'] as const;
+
+/** `noLip` has no entry: the toggle is only rendered while the lip is on. */
+const LIP_NOTCH_BLOCKED = {
+  lid: 'binDesigner.base.lipNotches.blockedLid',
+  shape: 'binDesigner.base.lipNotches.blockedShape',
+  overhang: 'binDesigner.base.lipNotches.blockedOverhang',
+  lattice: 'binDesigner.base.lipNotches.blockedLattice',
+  size: 'binDesigner.base.lipNotches.blockedSize',
+  singleCell: 'binDesigner.base.lipNotches.blockedSingleCell',
+} as const satisfies Record<Exclude<LipNotchBlocker, 'noLip'>, string>;
 
 /**
  * A family the chosen body cannot have, named rather than removed.
@@ -59,6 +78,13 @@ export function UnavailableFamily({ title, reason }: { title: string; reason: st
     </section>
   );
 }
+
+const BODY_TYPE_NOTES = [
+  { title: 'binDesigner.base.bodyType.nesting', note: 'binDesigner.base.nesting.hint' },
+  { title: 'binDesigner.spacer', note: 'binDesigner.spacerHint' },
+  { title: 'binDesigner.tile', note: 'binDesigner.tileHint' },
+  { title: 'binDesigner.lidBottom', note: 'binDesigner.lidBottom.hint' },
+] as const;
 
 export function BaseSection() {
   const { state, handlers } = useBaseSection();
@@ -83,8 +109,6 @@ export function BaseSection() {
      deliberately: it is the same joint seen from the other side. */
   const trayOptions = (
     <div className="space-y-3">
-      <Hint>{t('binDesigner.lidBottom.hint')}</Hint>
-
       <SegmentGrid
         aria-label={t('binDesigner.lid.attachment')}
         value={state.trayBottom.attachment}
@@ -107,9 +131,7 @@ export function BaseSection() {
 
       {state.trayBottom.attachment === 'clickRails' && (
         <div>
-          <span className="mb-1 block text-label text-content-tertiary">
-            {t('binDesigner.lid.clickRails')}
-          </span>
+          <FieldLabel>{t('binDesigner.lid.clickRails')}</FieldLabel>
           <SideSelector
             sides={LID_RAIL_SIDES.map((side) => ({
               side,
@@ -128,16 +150,22 @@ export function BaseSection() {
     <div className="space-y-5">
       {/* ── Body type ─────────────────────────────────────────────────── */}
       <section className="space-y-2">
-        <SubHeader>{t('binDesigner.base.bodyType')}</SubHeader>
-        <BodyTypeCards
+        <SubHeader
+          info={
+            <OptionNotes
+              options={BODY_TYPE_NOTES.map(({ title, note }) => ({
+                label: t(title),
+                note: t(note),
+              }))}
+            />
+          }
+        >
+          {t('binDesigner.base.bodyType')}
+        </SubHeader>
+        <BodyTypeTiles
           value={state.bodyType}
           onChange={handlers.setBodyType}
-          options={{
-            spacer: <Hint>{t('binDesigner.spacerHint')}</Hint>,
-            tile: <Hint>{t('binDesigner.tileHint')}</Hint>,
-            tray: trayOptions,
-            nesting: <Hint>{t('binDesigner.base.nesting.hint')}</Hint>,
-          }}
+          options={{ tray: trayOptions }}
         />
       </section>
 
@@ -153,16 +181,50 @@ export function BaseSection() {
           label={t('assembledHeight.stackingLip')}
           checked={state.base.stackingLip}
           onChange={handlers.toggleStackingLip}
+          info={t('binDesigner.base.stackingLip.hint')}
+          disabledReason={state.slanted ? t('binDesigner.slant.noStackingLip') : undefined}
         />
-        <Hint>{t('binDesigner.base.stackingLip.hint')}</Hint>
+        {!state.base.stackingLip && (
+          <FeatureToggle
+            label={t('binDesigner.base.rimFillet')}
+            checked={state.base.rimFillet ?? false}
+            onChange={handlers.toggleRimFillet}
+            disabledReason={
+              state.rimFilletAvailable ? undefined : t('binDesigner.base.rimFillet.unavailable')
+            }
+            info={t('binDesigner.base.rimFillet.hint')}
+            primaryControls={
+              <>
+                <SliderInput
+                  label={t('binDesigner.base.rimFillet.radius')}
+                  value={state.rimFilletRadius}
+                  onChange={handlers.setRimFilletRadius}
+                  min={0.1}
+                  max={state.rimFilletMax}
+                  step={0.05}
+                  unit="mm"
+                />
+              </>
+            }
+          />
+        )}
         {/* Only while there IS a lip. The finish is a property of its peak, and
             offering it on a lipless bin would be a control with nothing to act
             on. */}
         {state.base.stackingLip && (
           <div className="space-y-1 pt-1">
-            <span className="block text-xs text-content-tertiary">
+            <FieldLabel
+              info={
+                <OptionNotes
+                  options={LIP_TIP_STYLES.map((tip) => ({
+                    label: t(`binDesigner.base.lipTip.${tip}`),
+                    note: t(`binDesigner.base.lipTip.${tip}.hint`),
+                  }))}
+                />
+              }
+            >
               {t('binDesigner.base.lipTip')}
-            </span>
+            </FieldLabel>
             <SegmentedControl
               options={LIP_TIP_STYLES.map((tip) => ({
                 value: tip,
@@ -174,8 +236,20 @@ export function BaseSection() {
               size="sm"
               fullWidth
             />
-            <Hint>{t(`binDesigner.base.lipTip.${state.lipTip}.hint`)}</Hint>
           </div>
+        )}
+        {state.base.stackingLip && (
+          <FeatureToggle
+            label={t('binDesigner.base.lipNotches')}
+            checked={state.lipNotches}
+            onChange={handlers.toggleLipNotches}
+            info={t('binDesigner.base.lipNotchesDetail')}
+            disabledReason={
+              state.lipNotchBlocker === null || state.lipNotchBlocker === 'noLip'
+                ? undefined
+                : t(LIP_NOTCH_BLOCKED[state.lipNotchBlocker])
+            }
+          />
         )}
       </section>
 
@@ -218,25 +292,19 @@ export function BaseSection() {
               step={state.magnetDepthStep}
               unit="mm"
             />
-            <div className="space-y-1">
-              <Checkbox
-                checked={state.magnetCrushRibs}
-                onChange={handlers.setMagnetCrushRibs}
-                label={t('binDesigner.base.magnetCrushRibs')}
-              />
-              <Hint>{t('binDesigner.base.magnetCrushRibsHint')}</Hint>
-            </div>
-            <div className="space-y-1">
-              <Checkbox
-                checked={state.magnetChamfer}
-                disabled={state.magnetChamferUnavailable !== undefined}
-                onChange={handlers.setMagnetChamfer}
-                label={t('binDesigner.base.magnetChamfer')}
-              />
-              <Hint>
-                {state.magnetChamferUnavailable ?? t('binDesigner.base.magnetChamferHint')}
-              </Hint>
-            </div>
+            <FeatureToggle
+              label={t('binDesigner.base.magnetCrushRibs')}
+              checked={state.magnetCrushRibs}
+              onChange={() => handlers.setMagnetCrushRibs(!state.magnetCrushRibs)}
+              info={t('binDesigner.base.magnetCrushRibsHint')}
+            />
+            <FeatureToggle
+              label={t('binDesigner.base.magnetChamfer')}
+              checked={state.magnetChamfer}
+              onChange={() => handlers.setMagnetChamfer(!state.magnetChamfer)}
+              disabledReason={state.magnetChamferUnavailable}
+              info={t('binDesigner.base.magnetChamferHint')}
+            />
             {state.bodyType === 'nesting' && (
               <>
                 <SliderInput
@@ -246,8 +314,12 @@ export function BaseSection() {
                   min={state.magnetEdgeMin}
                   max={state.magnetEdgeMax}
                   step={state.magnetEdgeStep}
+                  labelAddon={
+                    <LabelInfo label={t('binDesigner.lid.retentionEdgeMagnets')}>
+                      {t('binDesigner.lid.retentionEdgeMagnetsHint')}
+                    </LabelInfo>
+                  }
                 />
-                <Hint>{t('binDesigner.lid.retentionEdgeMagnetsHint')}</Hint>
                 <Hint>{t('binDesigner.base.nesting.magnetHint')}</Hint>
               </>
             )}
@@ -272,6 +344,15 @@ export function BaseSection() {
               />
             </FeatureToggle>
           )}
+
+          {state.showCornerHoles && (
+            <FeatureToggle
+              label={t('binDesigner.base.cornerHolesOnly')}
+              checked={state.cornerHolesOnly}
+              onChange={() => handlers.setCornerHolesOnly(!state.cornerHolesOnly)}
+              info={t('binDesigner.base.cornerHolesOnlyDetail')}
+            />
+          )}
         </section>
       )}
 
@@ -285,7 +366,11 @@ export function BaseSection() {
       {state.showFeet && (
         <section className="space-y-3">
           <SubHeader>{t('binDesigner.base.section.feet')}</SubHeader>
-          {state.lowProfile && <Hint>{t('binDesigner.base.lowProfileNote')}</Hint>}
+          {state.lowProfile && (
+            <Hint info={t('binDesigner.base.lowProfileNote')}>
+              {t('binDesigner.base.lowProfileNoteShort')}
+            </Hint>
+          )}
 
           {/* Heads the foot cluster. Half sockets and the lightweight modes
               below describe INTEGRAL feet, which this mode answers its own way
@@ -319,6 +404,9 @@ export function BaseSection() {
               </Hint>
             }
           >
+            <FieldLabel info={t('binDesigner.detachableFeet.pinHint')}>
+              {t('binDesigner.detachableFeet.pinSize')}
+            </FieldLabel>
             <SegmentedControl
               aria-label={t('binDesigner.detachableFeet.pinSize')}
               activeStyle="accent"
@@ -331,7 +419,6 @@ export function BaseSection() {
                 label: `\u00f8${diameter}mm`,
               }))}
             />
-            <Hint>{t('binDesigner.detachableFeet.pinHint')}</Hint>
           </FeatureToggle>
 
           <FeatureToggle
@@ -344,7 +431,9 @@ export function BaseSection() {
           {/* Why the lattice below is missing, in the slot it would occupy. The
               control that caused it is usually the toggle directly above, so
               this still reads as an explanation at its cause. */}
-          {state.footLatticeInertReason && <Hint>{state.footLatticeInertReason}</Hint>}
+          {state.footLatticeInertReason && (
+            <Hint info={state.footLatticeInertDetail}>{state.footLatticeInertReason}</Hint>
+          )}
 
           {/* Foot lattice (#3467). A foot has to land inside one baseplate
               pocket, so which layout seats depends on where the bin sits, per
@@ -391,7 +480,7 @@ export function BaseSection() {
                   />
                 </div>
               ))}
-              <Hint>{handlers.footLatticeLockReason}</Hint>
+              <Hint info={handlers.footLatticeLockDetail}>{handlers.footLatticeLockReason}</Hint>
             </MoreDisclosure>
           )}
         </section>
@@ -422,6 +511,18 @@ export function BaseSection() {
                   be turned on, so leaving it visible-but-inert was the old way
                   of keeping a scooped bin (the case the feature exists for)
                   from being stranded. The action below does that job instead. */}
+              <FieldLabel
+                info={
+                  <OptionNotes
+                    options={LIGHTWEIGHT_MODES.map((mode) => ({
+                      label: t(`binDesigner.lightweightMode.${mode}`),
+                      note: t(`binDesigner.lightweightMode.${mode}.hint`),
+                    }))}
+                  />
+                }
+              >
+                {t('binDesigner.lightweightMode')}
+              </FieldLabel>
               <SegmentedControl
                 aria-label={t('binDesigner.lightweightMode')}
                 activeStyle="accent"
@@ -434,7 +535,6 @@ export function BaseSection() {
                   label: t(`binDesigner.lightweightMode.${mode}`),
                 }))}
               />
-              <Hint>{t(`binDesigner.lightweightMode.${state.lightweightMode}.hint`)}</Hint>
             </FeatureToggle>
 
             {/* The interior relief is blocked but the underside one is not, so

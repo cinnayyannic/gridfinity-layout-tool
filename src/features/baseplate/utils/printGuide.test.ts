@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generatePrintGuide, generateStackPrintNote, generateMarginGuide } from './printGuide';
+import { STACK_SEAM_TRIM_MM } from '@/core/types';
 import { computeBaseplateTiling } from './splitPlanner';
 import { groupPiecesByFingerprint } from './pieceFingerprint';
 import { assignGroupNames } from './pieceNaming';
@@ -337,8 +338,10 @@ describe('generatePrintGuide', () => {
     expect(guide).toContain('Stack printing');
     expect(guide).toContain('right-side up'); // bottom plate upright
     expect(guide).toContain('flipped upside'); // the rest flipped
+    expect(guide).toContain('has its bottom plate flipped too'); // asymmetric shapes
     expect(guide).toContain('air gap');
     expect(guide).toContain('support interface'); // PETG / slicer tip
+    expect(guide).toContain(`each plate is ${STACK_SEAM_TRIM_MM}mm shorter`);
     expect(guide).toContain('print once =');
     expect(guide).toContain('Assembles:');
     // The misleading "Print N copies" instruction must NOT appear when stacking.

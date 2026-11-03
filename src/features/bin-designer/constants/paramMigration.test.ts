@@ -18,6 +18,7 @@ import { LID_TOP_THICKNESS_MAX_MM } from '../types';
 import { MAX_CUTOUT_CORNER_RADIUS } from '@/shared/utils/wallCutoutPosition';
 import { validateBinParams } from '../utils/validation';
 import { makeUniformLipCells } from '../types/featureColors';
+import { lidTopAboveRimMm } from '@/shared/printSettings/assembledHeight';
 import { DEFAULT_SLIDE_CONFIG } from '../types/slide';
 import { DEFAULT_DETACHABLE_PIN_DIAMETER_MM, DEFAULT_TRAY_BOTTOM } from '../types/base';
 import { expectOk } from '@/test/testUtils';
@@ -196,6 +197,35 @@ describe('migrateParams', () => {
     expect(Object.keys(result.meshAssets ?? {})).toEqual(['kept']);
   });
 
+  it('keeps a mesh cutout whose asset is a ref, file present or not', () => {
+    const ref = {
+      name: 'wrench',
+      hash: 'b'.repeat(64),
+      triangleCount: 12,
+      sizeMm: { x: 20, y: 10, z: 5 },
+      bytes: 512,
+    };
+    const meshCutout = {
+      id: 'mesh-1',
+      shape: 'mesh',
+      meshId: 'kept',
+      x: 0,
+      y: 0,
+      width: 20,
+      depth: 10,
+      cutDepth: 5,
+      rotation: 0,
+      cornerRadius: 0,
+      label: '',
+      groupId: null,
+    } as const;
+
+    const result = migrateParams({ cutouts: [meshCutout], meshAssets: { kept: ref } });
+
+    expect(result.cutouts.map((c) => c.id)).toEqual(['mesh-1']);
+    expect(result.meshAssets).toEqual({ kept: ref });
+  });
+
   it('clears meshAssets entirely when nothing references it', () => {
     const asset = {
       name: 'wrench',
@@ -291,6 +321,47 @@ describe('migrateParams', () => {
     expect(migrateParams({ surfaceText: { style: {} } } as any).surfaceText).toBeUndefined();
     expect(migrateParams({ surfaceText: 'label' } as any).surfaceText).toBeUndefined();
     expect(migrateParams({ surfaceText: { lidText: 42 } } as any).surfaceText).toBeUndefined();
+  });
+
+  it('keeps a quarter-turn lid text rotation and drops anything else', () => {
+    expect(
+      migrateParams({ surfaceText: { lidText: 'Cables', lidTextRotation: 90 } }).surfaceText
+    ).toEqual({ lidText: 'Cables', lidTextRotation: 90 });
+    expect(
+      migrateParams({ surfaceText: { lidText: 'Cables', lidTextRotation: 0 } }).surfaceText
+    ).toEqual({ lidText: 'Cables' });
+    for (const junk of [45, '90', -90, null]) {
+      expect(
+        migrateParams({
+          surfaceText: { lidText: 'Cables', lidTextRotation: junk as unknown as 90 },
+        }).surfaceText
+      ).toEqual({ lidText: 'Cables' });
+    }
+  });
+
+  it('keeps only inside wall faces, and the inside style only alongside one', () => {
+    expect(
+      migrateParams({
+        surfaceText: {
+          walls: { back: 'Spoons' },
+          wallFaces: { back: 'inside', front: 'outside', diagonal: 'inside' } as never,
+          insideStyle: { anchor: 'top-left' },
+        },
+      }).surfaceText
+    ).toEqual({
+      walls: { back: 'Spoons' },
+      wallFaces: { back: 'inside' },
+      insideStyle: { anchor: 'top-left' },
+    });
+    expect(
+      migrateParams({
+        surfaceText: {
+          walls: { back: 'Spoons' },
+          wallFaces: { back: 'outside' },
+          insideStyle: { anchor: 'top-left' },
+        },
+      }).surfaceText
+    ).toEqual({ walls: { back: 'Spoons' } });
   });
 
   it('trims persisted lid text so store, worker, and geometry agree', () => {
@@ -1245,6 +1316,14 @@ describe('migrateParams', () => {
     expect(DEFAULT_BIN_PARAMS.lid.relieveInterior).toBe(true);
   });
 
+  it('keeps fill only when true, so off never reaches the fingerprint', () => {
+    const lid = (fill: unknown) =>
+      migrateParams({ lid: { ...DEFAULT_BIN_PARAMS.lid, fill } as never }).lid;
+    expect(lid(true).fill).toBe(true);
+    expect(JSON.stringify(lid(false))).not.toContain('fill');
+    expect(JSON.stringify(lid(undefined))).not.toContain('fill');
+  });
+
   it('derives attachment from legacy rails and backfills magnet/tray defaults', () => {
     // Legacy lid predating the attachment field, with rails on → clickRails.
     const withRails = migrateParams({
@@ -1319,6 +1398,26 @@ describe('migrateParams', () => {
     expect(migrateParams({ lid: { extraHeightMm: -50 } as any }).lid.extraHeightMm).toBe(0);
     // Non-numeric / corrupt values fall back to the default.
     expect(migrateParams({ lid: { extraHeightMm: 'tall' } as any }).lid.extraHeightMm).toBe(0);
+  });
+
+  it('re-derives a units-sized lid height on load, over a stale millimetre value', () => {
+    const result = migrateParams({
+      lid: { ...DEFAULT_BIN_PARAMS.lid, enabled: true, stackableTop: true, heightUnits: 2 },
+    });
+    expect(result.lid.heightUnits).toBe(2);
+    expect(lidTopAboveRimMm(result)).toBeCloseTo(2 * result.heightUnitMm, 6);
+  });
+
+  it('keeps lid height units whole and in bounds, and drops corrupt ones', () => {
+    const units = (heightUnits: unknown): number | undefined =>
+      migrateParams({
+        lid: { ...DEFAULT_BIN_PARAMS.lid, enabled: true, heightUnits } as unknown as LidConfig,
+      }).lid.heightUnits;
+    expect(units(2.4)).toBe(2);
+    expect(units(-3)).toBe(1);
+    expect(units(999)).toBe(50);
+    expect(units('tall')).toBeUndefined();
+    expect(units(undefined)).toBeUndefined();
   });
 
   it('defaults topThicknessMm to the 0.8mm baseline for legacy lid configs', () => {
@@ -1604,6 +1703,156 @@ describe('migrateParams', () => {
       ).toEqual([{ side: 'left', widthMm: 6, tunnel: true }]);
       expect('openSides' in migrateParams({ cutouts: [rect([])] }).cutouts[0]).toBe(false);
       expect('openSides' in migrateParams({ cutouts: [rect('right')] }).cutouts[0]).toBe(false);
+    });
+
+    describe('depth modes', () => {
+      const pocket = (fields: Record<string, unknown>) =>
+        ({
+          id: 'p',
+          shape: 'rectangle',
+          x: 0,
+          y: 0,
+          width: 10,
+          depth: 10,
+          cutDepth: 5,
+          rotation: 0,
+          cornerRadius: 0,
+          label: '',
+          groupId: null,
+          ...fields,
+        }) as unknown as BinParams['cutouts'][number];
+
+      // The default bin: 3u on a 4.75mm socket, 16.25mm of fill.
+      it('re-derives a stored depth from its mode on load', () => {
+        const [floored, through] = migrateParams({
+          cutouts: [
+            pocket({ depthMode: 'floor', floorMm: 8, cutDepth: 2 }),
+            pocket({ id: 'q', depthMode: 'through', cutDepth: 2 }),
+          ],
+        }).cutouts;
+        expect([floored.cutDepth, through.cutDepth]).toEqual([13, 16.25]);
+      });
+
+      it('reads an unknown mode as a fixed depth, floor and all', () => {
+        const [unknown] = migrateParams({
+          cutouts: [pocket({ depthMode: 'deep', floorMm: 8 })],
+        }).cutouts;
+        expect('depthMode' in unknown).toBe(false);
+        expect('floorMm' in unknown).toBe(false);
+        expect(unknown.cutDepth).toBe(5);
+      });
+
+      // 3u on a 4.75mm socket: the default floor is the socket, all 16.25mm of fill.
+      it('falls back to the default floor when the stored one is broken', () => {
+        const [badFloor] = migrateParams({
+          cutouts: [pocket({ depthMode: 'floor', floorMm: -3 })],
+        }).cutouts;
+        expect(badFloor.depthMode).toBe('floor');
+        expect('floorMm' in badFloor).toBe(false);
+        expect(badFloor.cutDepth).toBe(16.25);
+      });
+
+      it('drops an entry edge shape the generator does not know', () => {
+        const [unknown, round] = migrateParams({
+          cutouts: [pocket({ entryProfile: 'ogee' }), pocket({ id: 'q', entryProfile: 'round' })],
+        }).cutouts;
+        expect('entryProfile' in unknown).toBe(false);
+        expect(round.entryProfile).toBe('round');
+      });
+
+      it('keeps a finger cut only on a slot or round with a known bottom', () => {
+        const [slot, round, rect, unknown, broken] = migrateParams({
+          cutouts: [
+            pocket({ shape: 'slot', finger: { bottom: 'curved' } }),
+            pocket({ id: 'q', shape: 'circle', finger: { bottom: 'flat' } }),
+            pocket({ id: 'r', finger: { bottom: 'curved' } }),
+            pocket({ id: 's', shape: 'slot', finger: { bottom: 'pointed' } }),
+            pocket({ id: 't', shape: 'slot', finger: null }),
+          ],
+        }).cutouts;
+        expect(slot.finger).toEqual({ bottom: 'curved' });
+        expect(round.finger).toEqual({ bottom: 'flat' });
+        for (const dropped of [rect, unknown, broken]) expect('finger' in dropped).toBe(false);
+      });
+
+      it('keeps islands only on a path, rebuilt from real points', () => {
+        const at = (x: number, y: number) => ({
+          x,
+          y,
+          handleIn: null,
+          handleOut: null,
+          symmetric: false,
+        });
+        const ring = [at(2, 2), at(4, 2), at(4, 4)];
+        const [clean, messy, onRect, empty] = migrateParams({
+          cutouts: [
+            pocket({ shape: 'path', path: [at(0, 0), at(9, 0), at(9, 9)], holes: [ring] }),
+            pocket({
+              id: 'q',
+              shape: 'path',
+              path: [at(0, 0), at(9, 0), at(9, 9)],
+              holes: [
+                [{ x: 1, y: 1 }, at(3, 1), { ...at(3, 3), handleIn: { dx: 'a' } }, { y: 1 }],
+                [at(1, 1)],
+                'not a ring',
+              ],
+            }),
+            pocket({ id: 'r', holes: [ring] }),
+            pocket({ id: 's', shape: 'path', path: [at(0, 0), at(9, 0), at(9, 9)], holes: [] }),
+          ],
+        }).cutouts;
+        expect(clean.holes).toEqual([ring]);
+        // A bad point is dropped, a bad handle cleared, a ring under two points dropped.
+        expect(messy.holes).toEqual([[at(1, 1), at(3, 1), at(3, 3)]]);
+        for (const dropped of [onRect, empty]) expect('holes' in dropped).toBe(false);
+      });
+
+      it('keeps a whole split by reference and drops a broken one', () => {
+        const line = { a: { x: 0, y: -10 }, b: { x: 0, y: 10 }, cutDepth: 6 };
+        const kept = pocket({ split: line });
+        const [same, noPoint, noDepth, farOff, junk] = migrateParams({
+          cutouts: [
+            kept,
+            pocket({ id: 'q', split: { ...line, b: { x: 0 } } }),
+            pocket({ id: 'r', split: { ...line, cutDepth: 0 } }),
+            pocket({ id: 's', split: { ...line, a: { x: 0, y: -5000 } } }),
+            pocket({ id: 't', split: 'line' }),
+          ],
+        }).cutouts;
+        expect(same.split).toBe(kept.split);
+        for (const dropped of [noPoint, noDepth, farOff, junk]) {
+          expect('split' in dropped).toBe(false);
+        }
+      });
+
+      it('keeps side B deeper than any fixed ceiling', () => {
+        const deep = { a: { x: 0, y: -10 }, b: { x: 0, y: 10 }, cutDepth: 398 };
+        expect(migrateParams({ cutouts: [pocket({ split: deep })] }).cutouts[0].split).toEqual(
+          deep
+        );
+      });
+
+      it('reads a split with an unknown side B mode as a fixed depth', () => {
+        const line = { a: { x: 0, y: -10, z: 1 }, b: { x: 0, y: 10 }, cutDepth: 6 };
+        const [through, badFloor, floor] = migrateParams({
+          cutouts: [
+            pocket({ split: { ...line, depthMode: 'through', floorMm: 2 } }),
+            pocket({ id: 'q', split: { ...line, depthMode: 'floor', floorMm: -1 } }),
+            pocket({ id: 'r', split: { ...line, depthMode: 'floor', floorMm: 2, extra: true } }),
+          ],
+        }).cutouts;
+        const clean = { a: { x: 0, y: -10 }, b: { x: 0, y: 10 }, cutDepth: 6 };
+        expect(through.split).toEqual(clean);
+        const { cutDepth: _bad, ...badRest } = badFloor.split ?? clean;
+        expect(badRest).toEqual({ a: clean.a, b: clean.b, depthMode: 'floor' });
+        const { cutDepth: _floor, ...floorRest } = floor.split ?? clean;
+        expect(floorRest).toEqual({ a: clean.a, b: clean.b, depthMode: 'floor', floorMm: 2 });
+      });
+
+      it('leaves a cutout without a mode exactly as stored', () => {
+        const stored = pocket({});
+        expect(migrateParams({ cutouts: [stored] }).cutouts[0]).toEqual(stored);
+      });
     });
 
     it('leaves a knife already carrying width and height untouched', () => {
@@ -2057,5 +2306,65 @@ describe('migrateParams - low-profile flag', () => {
     expect('lowProfile' in migrateParams({ base: DEFAULT_BIN_PARAMS.base }).base).toBe(false);
     const stale = migrateParams({ base: { ...DEFAULT_BIN_PARAMS.base, lowProfile: false } });
     expect('lowProfile' in stale.base).toBe(false);
+  });
+});
+
+describe('migrateParams - lip notches flag', () => {
+  it('keeps notches that are on', () => {
+    const migrated = migrateParams({ base: { ...DEFAULT_BIN_PARAMS.base, lipNotches: true } });
+    expect(migrated.base.lipNotches).toBe(true);
+  });
+
+  it('stores nothing when off, absent or false', () => {
+    expect('lipNotches' in migrateParams({ base: DEFAULT_BIN_PARAMS.base }).base).toBe(false);
+    const stale = migrateParams({ base: { ...DEFAULT_BIN_PARAMS.base, lipNotches: false } });
+    expect('lipNotches' in stale.base).toBe(false);
+  });
+});
+
+describe('migrateParams - corner holes flag', () => {
+  it('keeps corner-only holes that are on', () => {
+    const migrated = migrateParams({ base: { ...DEFAULT_BIN_PARAMS.base, cornerHolesOnly: true } });
+    expect(migrated.base.cornerHolesOnly).toBe(true);
+  });
+
+  it('stores nothing when off, absent or false', () => {
+    expect('cornerHolesOnly' in migrateParams({ base: DEFAULT_BIN_PARAMS.base }).base).toBe(false);
+    const stale = migrateParams({ base: { ...DEFAULT_BIN_PARAMS.base, cornerHolesOnly: false } });
+    expect('cornerHolesOnly' in stale.base).toBe(false);
+  });
+});
+
+describe('migrateParams slant', () => {
+  it('leaves no slant key on an upright design', () => {
+    expect(migrateParams({ ...DEFAULT_BIN_PARAMS }).slant).toBeUndefined();
+  });
+
+  it('normalizes a stored slant and drops the stacking lip it rules out', () => {
+    const migrated = migrateParams({
+      ...DEFAULT_BIN_PARAMS,
+      slant: { angleDeg: 70, side: 'back', endSupport: false },
+    });
+    expect(migrated.slant).toEqual({ angleDeg: 60, side: 'back' });
+    expect(migrated.base.stackingLip).toBe(false);
+  });
+
+  it('strips a malformed slant and keeps the lip', () => {
+    const migrated = migrateParams({
+      ...DEFAULT_BIN_PARAMS,
+      slant: { angleDeg: 30, side: 'sideways' },
+    } as unknown as Parameters<typeof migrateParams>[0]);
+    expect(migrated.slant).toBeUndefined();
+    expect(migrated.base.stackingLip).toBe(true);
+  });
+
+  it('keeps the lip when a blocker cancels the slant', () => {
+    const migrated = migrateParams({
+      ...DEFAULT_BIN_PARAMS,
+      slide: { ...DEFAULT_BIN_PARAMS.slide, enabled: true },
+      slant: { angleDeg: 30, side: 'back' },
+    });
+    expect(migrated.slant).toEqual({ angleDeg: 30, side: 'back' });
+    expect(migrated.base.stackingLip).toBe(true);
   });
 });

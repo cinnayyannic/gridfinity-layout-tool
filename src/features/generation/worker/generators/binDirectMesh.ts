@@ -19,7 +19,7 @@
  * Coordinate system (matches the exact mesh after `translateStage`):
  * - Z=0: foot underside (absolute bottom).
  * - Z=socketHeight: foot top / socket interface (mates with the body).
- * - Z=socketHeight + wallThickness: interior cavity floor.
+ * - Z=socketHeight + resolveBinFloorMm: interior cavity floor.
  * - Z=totalHeight (= socketHeight + wallHeight): body wall top.
  * - With a lip: the outer wall extends to totalHeight + LIP_HEIGHT.
  * - XY centered at the origin; per-cell feet are CLEARANCE smaller than the
@@ -30,6 +30,7 @@ import type { BinParams } from '@/shared/types/bin';
 import { isUndersideRelief } from '@/shared/types/bin';
 import { CONSTRAINTS } from '@/core/constants';
 import { isPartialMask } from '@/shared/utils/cellMask';
+import { resolveBinFloorMm } from '@/shared/utils/slotMath';
 import type { MeshData } from '../../bridge/types';
 import type { ProgressFn } from './meshUtils';
 import { MeshBuilder, CORNER_SEGMENTS } from './directMeshBuilder';
@@ -37,6 +38,8 @@ import { roundedRectPoints } from './directMeshShapes';
 import { addOuterWalls } from './directMeshWalls';
 import { creaseEdges } from './utils/creaseEdges';
 import { forEachSocketCell, resolveSocketCellPlan } from './socketBuilder';
+import { resolveSlant } from '@/shared/utils/slantPlan';
+import { resolveLipNotches } from '@/shared/utils/lipNotchPlan';
 import {
   SIZE,
   HEIGHT_UNIT,
@@ -192,6 +195,7 @@ interface BinBodyDims {
   readonly outerW: number;
   readonly outerD: number;
   readonly wallThickness: number;
+  readonly floorThickness: number;
   readonly totalHeight: number;
   readonly socketHeight: number;
   readonly hasLip: boolean;
@@ -203,7 +207,7 @@ interface BinBodyDims {
  * (no lip) or a tapered stacking-lip collar.
  */
 function addBinBody(mb: MeshBuilder, dims: BinBodyDims): void {
-  const { outerW, outerD, wallThickness, totalHeight, socketHeight, hasLip } = dims;
+  const { outerW, outerD, wallThickness, floorThickness, totalHeight, socketHeight, hasLip } = dims;
 
   const innerW = Math.max(outerW - 2 * wallThickness, MIN_RING_DIM);
   const innerD = Math.max(outerD - 2 * wallThickness, MIN_RING_DIM);
@@ -213,7 +217,7 @@ function addBinBody(mb: MeshBuilder, dims: BinBodyDims): void {
   const innerPts = roundedRectPoints(innerW, innerD, innerR, CORNER_SEGMENTS);
 
   const zBodyBot = socketHeight;
-  const zFloorTop = socketHeight + wallThickness;
+  const zFloorTop = socketHeight + floorThickness;
   const zWallTop = totalHeight; // = socketHeight + wallHeight
   const zOuterTop = hasLip ? totalHeight + LIP_HEIGHT : zWallTop;
 
@@ -301,6 +305,7 @@ export function generateBinDirect(
     outerW: width * gridUnit - CLEARANCE,
     outerD: depth * gridUnitY - CLEARANCE,
     wallThickness: params.wallThickness,
+    floorThickness: resolveBinFloorMm(params),
     totalHeight,
     socketHeight,
     hasLip: params.base.stackingLip,
@@ -374,7 +379,12 @@ const DIRECT_MESH_BASE_STYLES: ReadonlySet<BinParams['base']['style']> = new Set
  * instant draft, never correctness.
  */
 export function canBinUseDirectMesh(params: BinParams): boolean {
+  if (params.pullTab?.enabled) return false;
+  if (resolveSlant(params)) return false;
+  // The procedural lip is one ring; it has no notches to emit.
+  if (resolveLipNotches(params)) return false;
   const { base } = params;
+  if (base.rimFillet && !base.stackingLip) return false;
 
   // Base style: magnet/screw/magnet_and_screw share the same body + feet as
   // standard — they only add holes to the foot UNDERSIDE, which the preview
@@ -439,6 +449,7 @@ export function canBinUseDirectMesh(params: BinParams): boolean {
   if (wallTexts && Object.values(wallTexts).some((t) => typeof t === 'string' && t.trim() !== '')) {
     return false;
   }
+  if ((params.surfaceText?.floorText?.trim() ?? '') !== '') return false;
 
   // Exterior-wall collar raises the walls + lip above the
   // nominal height; the direct-mesh builder models a fixed wall/lip Z, so a

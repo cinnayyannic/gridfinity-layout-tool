@@ -7,7 +7,9 @@
  */
 
 import { DESIGNER_CONSTRAINTS } from '@/features/bin-designer/constants';
-import { Button, InfoIcon, Stepper, Switch } from '@/design-system';
+import { Button, Stepper } from '@/design-system';
+import { FieldLabel, Hint } from '../panel/shared';
+import { FeatureToggle } from '../panel/FeatureToggle';
 import { RulerIcon } from '@/design-system/Icon';
 import {
   DIVIDER_FLOOR_GROOVE_DEPTH,
@@ -256,9 +258,7 @@ export function SlotConfigurator() {
 
       {/* Height */}
       <div>
-        <span className="mb-1 block text-xs text-content-tertiary">
-          {t('binDesigner.dividerHeight')}
-        </span>
+        <FieldLabel>{t('binDesigner.dividerHeight')}</FieldLabel>
         <Stepper
           value={dividerPieces.height === 'auto' ? maxDividerHeight : dividerPieces.height}
           displayValue={
@@ -298,19 +298,18 @@ export function SlotConfigurator() {
           aria-label={t('binDesigner.dividerHeight')}
         />
         {dividerPieces.height === 'auto' && stackingLip && (
-          <p className="mt-1 flex items-start gap-1 text-xs text-content-tertiary">
-            <InfoIcon size="xs" className="mt-0.5 shrink-0" />
-            <span>{t('binDesigner.dividerHeightLipCeiling')}</span>
-          </p>
+          <div className="mt-1">
+            <Hint info={t('binDesigner.dividerHeightLipCeiling')}>
+              {t('binDesigner.dividerHeightLipCeilingShort')}
+            </Hint>
+          </div>
         )}
       </div>
 
       {/* Thickness + Fit tolerance side by side */}
       <div className="flex items-end gap-2">
         <div className="flex-1 min-w-0">
-          <span className="mb-1 block text-xs text-content-tertiary">
-            {t('binDesigner.dividerThickness')}
-          </span>
+          <FieldLabel>{t('binDesigner.dividerThickness')}</FieldLabel>
           <Stepper
             value={dividerPieces.thickness}
             onChange={(v) =>
@@ -344,9 +343,7 @@ export function SlotConfigurator() {
           />
         </div>
         <div className="flex-1 min-w-0">
-          <span className="mb-1 block text-xs text-content-tertiary">
-            {t('binDesigner.dividerClearance')}
-          </span>
+          <FieldLabel>{t('binDesigner.dividerClearance')}</FieldLabel>
           <Stepper
             value={dividerPieces.clearance}
             onChange={(v) =>
@@ -382,24 +379,14 @@ export function SlotConfigurator() {
       </div>
 
       {/* Floor groove */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <span className="block text-xs text-content-tertiary">
-            {t('binDesigner.dividerFloorGroove')}
-          </span>
-          <p className="mt-0.5 text-xs text-content-tertiary">
-            {t('binDesigner.dividerFloorGrooveHint', {
-              depth: String(DIVIDER_FLOOR_GROOVE_DEPTH),
-            })}
-          </p>
-        </div>
-        <Switch
-          checked={dividerPieces.floorGroove}
-          onChange={(next) => updateDividerPieces({ floorGroove: next })}
-          size="sm"
-          aria-label={t('binDesigner.dividerFloorGroove')}
-        />
-      </div>
+      <FeatureToggle
+        label={t('binDesigner.dividerFloorGroove')}
+        checked={dividerPieces.floorGroove}
+        onChange={() => updateDividerPieces({ floorGroove: !dividerPieces.floorGroove })}
+        info={t('binDesigner.dividerFloorGrooveHint', {
+          depth: String(DIVIDER_FLOOR_GROOVE_DEPTH),
+        })}
+      />
 
       {/* Calculated divider dimensions (parametric readout; custom shows its own) */}
       {layout === 'even' && (

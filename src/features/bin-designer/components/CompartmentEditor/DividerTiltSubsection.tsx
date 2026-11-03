@@ -1,9 +1,9 @@
 import { ArrowLeftIcon, RotateCcwIcon } from '@/design-system/Icon';
+import { MoreDisclosure } from '@/shared/components/MoreDisclosure';
 import { Slider } from '@/design-system/Slider';
-import { Switch } from '@/design-system/Switch';
-import { Collapsible } from '@/design-system/Collapsible';
 import { Button, Stepper } from '@/design-system';
-import { InfoDot } from '../panel/shared';
+import { Hint } from '../panel/shared';
+import { FeatureToggle } from '../panel/FeatureToggle';
 import { useSettingsStore } from '@/core/store/settings';
 import { trackEvent } from '@/shared/analytics/posthog/trackEvent';
 import { getCompartmentBounds } from '@/features/bin-designer/utils/compartments';
@@ -58,20 +58,12 @@ export function DividerTiltSubsection() {
 
   return (
     <div className="mt-3 border-t border-stroke-subtle/40 pt-3">
-      <div className={`flex items-center justify-between ${enabled ? 'mb-2' : ''}`}>
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-medium uppercase tracking-wide text-content-tertiary">
-            {t('binDesigner.angledDividers.title')}
-          </span>
-          <InfoDot aria-label={t('binDesigner.angledDividers.helpButtonLabel')}>
-            <p>{t('binDesigner.angledDividers.infoBody')}</p>
-          </InfoDot>
-        </div>
-        <Switch
+      <div className={enabled ? 'mb-2' : undefined}>
+        <FeatureToggle
+          label={t('binDesigner.angledDividers.title')}
           checked={enabled}
           onChange={toggleEnabled}
-          size="sm"
-          aria-label={t('binDesigner.angledDividers.toggleLabel')}
+          info={t('binDesigner.angledDividers.infoBody')}
         />
       </div>
 
@@ -121,9 +113,11 @@ function Teaser({ t }: { readonly t: Translate }) {
   return (
     <div className="mt-2 flex items-start gap-2.5">
       <TeaserDiagram />
-      <p className="flex-1 text-label leading-relaxed text-content-tertiary">
-        {t('binDesigner.angledDividers.teaser')}
-      </p>
+      <div className="flex-1">
+        <Hint info={t('binDesigner.angledDividers.teaserDetail')}>
+          {t('binDesigner.angledDividers.teaser')}
+        </Hint>
+      </div>
     </div>
   );
 }
@@ -293,11 +287,7 @@ function InspectorView({
         </Button>
       )}
 
-      <Collapsible
-        title={t('binDesigner.angledDividers.fineTune')}
-        size="sm"
-        defaultExpanded={false}
-      >
+      <MoreDisclosure label={t('binDesigner.angledDividers.fineTune')}>
         <div className="flex items-center justify-between">
           <span className="text-label text-content-tertiary">
             {t('binDesigner.angledDividers.shiftLabel')}
@@ -320,7 +310,7 @@ function InspectorView({
             disabled={disabled}
           />
         </div>
-      </Collapsible>
+      </MoreDisclosure>
 
       {row.hasTilt && conflicts.length > 0 && (
         <p className="rounded bg-warning-muted px-2 py-1.5 text-label text-content-secondary">

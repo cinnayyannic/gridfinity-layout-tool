@@ -27,6 +27,7 @@ import {
   restoreHistoryEntry,
   getPendingMeshCache,
   setPendingMeshCache,
+  snapshotBodyTypeMemory,
 } from '../helpers';
 import { createCachedMesh } from '../meshCacheManager';
 
@@ -56,6 +57,7 @@ export function createHistorySlice(set: Set, get: Get) {
         const currentEntry: HistoryEntry = {
           params: current(state.params),
           mesh: getPendingMeshCache(),
+          bodyTypeMemory: snapshotBodyTypeMemory(state),
           ...(state.itemKind !== 'bin'
             ? {
                 itemKind: state.itemKind,
@@ -84,6 +86,7 @@ export function createHistorySlice(set: Set, get: Get) {
         const currentEntry: HistoryEntry = {
           params: current(state.params),
           mesh: getPendingMeshCache(),
+          bodyTypeMemory: snapshotBodyTypeMemory(state),
           ...(state.itemKind !== 'bin'
             ? {
                 itemKind: state.itemKind,
@@ -115,6 +118,13 @@ export function createHistorySlice(set: Set, get: Get) {
         if (state.transactionDepth > 0) {
           state.transactionDepth -= 1;
         }
+      });
+    },
+
+    invalidateGeometry: () => {
+      setPendingMeshCache(null);
+      set((state) => {
+        state.generation.epoch += 1;
       });
     },
 
@@ -153,7 +163,8 @@ export function createHistorySlice(set: Set, get: Get) {
             result.normals,
             result.indices,
             result.edgeVertices ?? new Float32Array(0),
-            result.indices.length / 3
+            result.indices.length / 3,
+            result
           )
         );
       } else {

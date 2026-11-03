@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { useDesignerStore } from '@/features/bin-designer/store/designer';
 import type { Cutout, CutoutArrayConfig, PathPoint } from '@/features/bin-designer/types';
 import type { MeshAsset } from '@/shared/generation/meshAsset';
-import { MAX_MESH_ASSETS_PER_DESIGN } from '@/shared/generation/meshAsset';
+import {
+  MAX_MESH_ASSET_TRIANGLES,
+  MAX_MESH_TRIANGLES_PER_DESIGN,
+} from '@/shared/generation/meshAsset';
 import { MAX_LID_CUTOUTS } from '@/features/bin-designer/types';
 
 describe('cutoutSlice - consolidated actions', () => {
@@ -494,6 +497,63 @@ describe('cutoutSlice - consolidated actions', () => {
         { x: 30, y: 15, handleIn: null, handleOut: null, symmetric: false },
         { x: 25, y: 25, handleIn: null, handleOut: null, symmetric: false },
       ]);
+    });
+
+    it("scales and moves a path cutout's islands with its outline", () => {
+      const { addCutout, updateCutout } = useDesignerStore.getState();
+      const at = (x: number, y: number): PathPoint => ({
+        x,
+        y,
+        handleIn: null,
+        handleOut: null,
+        symmetric: false,
+      });
+      addCutout(
+        createTestCutout({
+          id: 'cutout-1',
+          shape: 'path',
+          x: 10,
+          y: 10,
+          width: 20,
+          depth: 20,
+          path: [at(10, 10), at(30, 10), at(30, 30), at(10, 30)],
+          holes: [[at(15, 15), at(25, 15), at(25, 25)]],
+        })
+      );
+
+      // Twice as wide, moved 5 right.
+      updateCutout('cutout-1', { x: 15, width: 40 });
+
+      const hole = useDesignerStore.getState().params.cutouts[0].holes?.[0];
+      expect(hole?.map((p) => [p.x, p.y])).toEqual([
+        [25, 15],
+        [45, 15],
+        [45, 25],
+      ]);
+    });
+
+    it('duplicates a path cutout with its islands moved alongside', () => {
+      const { addCutout, duplicateCutouts } = useDesignerStore.getState();
+      const at = (x: number, y: number): PathPoint => ({
+        x,
+        y,
+        handleIn: null,
+        handleOut: null,
+        symmetric: false,
+      });
+      addCutout(
+        createTestCutout({
+          id: 'cutout-1',
+          shape: 'path',
+          path: [at(10, 10), at(30, 10), at(30, 30)],
+          holes: [[at(15, 15), at(20, 15), at(20, 20)]],
+        })
+      );
+
+      duplicateCutouts(['cutout-1']);
+
+      const copy = useDesignerStore.getState().params.cutouts[1];
+      expect(copy.holes?.[0][0]).toMatchObject({ x: 20, y: 20 });
     });
 
     it('path points stay unchanged when path is explicitly provided', () => {
@@ -1762,17 +1822,38 @@ describe('cutoutSlice - consolidated actions', () => {
       expect(params.meshAssets).toBeUndefined();
     });
 
-    it('addMeshCutout enforces the per-design asset cap', () => {
+    it('addMeshCutout refuses an asset past the design triangle budget', () => {
       const { addMeshCutout } = useDesignerStore.getState();
-      for (let i = 0; i < MAX_MESH_ASSETS_PER_DESIGN + 2; i++) {
+      const dense = { ...createMeshAsset(), triangleCount: MAX_MESH_ASSET_TRIANGLES };
+      const fit = MAX_MESH_TRIANGLES_PER_DESIGN / MAX_MESH_ASSET_TRIANGLES;
+      for (let i = 0; i <= fit; i++) {
+        addMeshCutout(createMeshCutout({ id: `mesh-${i}`, meshId: `asset-${i}` }), dense);
+      }
+      const { params } = useDesignerStore.getState();
+      expect(Object.keys(params.meshAssets ?? {})).toHaveLength(fit);
+      expect(params.cutouts).toHaveLength(fit);
+    });
+
+    it('addMeshCutout holds small meshes past the old count of 8', () => {
+      const { addMeshCutout } = useDesignerStore.getState();
+      for (let i = 0; i < 20; i++) {
         addMeshCutout(
           createMeshCutout({ id: `mesh-${i}`, meshId: `asset-${i}` }),
           createMeshAsset()
         );
       }
-      const { params } = useDesignerStore.getState();
-      expect(Object.keys(params.meshAssets ?? {})).toHaveLength(MAX_MESH_ASSETS_PER_DESIGN);
-      expect(params.cutouts).toHaveLength(MAX_MESH_ASSETS_PER_DESIGN);
+      expect(Object.keys(useDesignerStore.getState().params.meshAssets ?? {})).toHaveLength(20);
+    });
+
+    it('addMeshCutout counts a reused mesh id once against the budget', () => {
+      const { addMeshCutout } = useDesignerStore.getState();
+      const dense = { ...createMeshAsset(), triangleCount: MAX_MESH_ASSET_TRIANGLES };
+      const fit = MAX_MESH_TRIANGLES_PER_DESIGN / MAX_MESH_ASSET_TRIANGLES;
+      for (let i = 0; i < fit; i++) {
+        addMeshCutout(createMeshCutout({ id: `mesh-${i}`, meshId: `asset-${i}` }), dense);
+      }
+      addMeshCutout(createMeshCutout({ id: 'mesh-again', meshId: 'asset-0' }), dense);
+      expect(useDesignerStore.getState().params.cutouts).toHaveLength(fit + 1);
     });
 
     it('removeCutout GCs the asset when the last reference goes', () => {

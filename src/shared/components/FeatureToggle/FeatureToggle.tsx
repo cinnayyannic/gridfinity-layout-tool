@@ -5,9 +5,10 @@
  * the shared MoreDisclosure idiom.
  */
 
-import { type ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import { useTranslation } from '@/i18n';
 import { Button } from '@/design-system';
+import { InfoDot } from '@/shared/components/InfoDot';
 import { MoreDisclosure } from '@/shared/components/MoreDisclosure';
 
 interface FeatureToggleProps {
@@ -27,10 +28,14 @@ interface FeatureToggleProps {
   comingSoon?: boolean;
   /** Reason the feature is unavailable (disables toggle, shows explanation). Takes precedence over comingSoon. */
   disabledReason?: string;
+  /** Disabled with no reason line, for a cause the control right above already shows. */
+  disabled?: boolean;
   /** Override the "Customize" button label. Defaults to t('common.customize'). */
   customizeLabel?: string;
   /** Optional badge rendered next to the label (e.g., an "Experimental" pill). */
   badge?: ReactNode;
+  /** Evergreen explanation behind an info dot beside the label. */
+  info?: ReactNode;
 }
 
 export function FeatureToggle({
@@ -44,10 +49,13 @@ export function FeatureToggle({
   disabledReason,
   customizeLabel,
   badge,
+  info,
+  disabled = false,
 }: FeatureToggleProps) {
   const t = useTranslation();
+  const switchId = useId();
 
-  const isDisabled = !!disabledReason || comingSoon;
+  const isDisabled = disabled || !!disabledReason || comingSoon;
   const isActive = checked && !isDisabled;
   // The switch reports `checked` even while disabled: the stored value survives
   // the gate, and a switch that read "off" would claim the setting had been
@@ -68,7 +76,17 @@ export function FeatureToggle({
           toggle never adds padding on top of an already-padded section. */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-content-secondary">{label}</span>
+          <label
+            htmlFor={switchId}
+            className={`text-xs text-content-secondary ${isDisabled ? '' : 'cursor-pointer'}`}
+          >
+            {label}
+          </label>
+          {info !== undefined && (
+            <InfoDot aria-label={t('common.aboutLabel', { label })}>
+              {typeof info === 'string' ? <p>{info}</p> : info}
+            </InfoDot>
+          )}
           {!disabledReason && comingSoon && (
             <span className="rounded-full bg-surface-tertiary px-1.5 py-0.5 text-micro font-medium text-content-tertiary">
               {t('common.soon')}
@@ -77,6 +95,7 @@ export function FeatureToggle({
           {badge}
         </div>
         <Button
+          id={switchId}
           variant="ghost"
           type="button"
           role="switch"

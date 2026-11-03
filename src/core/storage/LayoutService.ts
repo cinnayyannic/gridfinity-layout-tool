@@ -59,37 +59,6 @@ export function getStorageUsage(): number {
   return backend.getStorageUsagePercent();
 }
 /**
- * Migrate old layout data to current schema.
- * Adds default values for any missing fields.
- */
-function migrateLayout(data: Record<string, unknown>): Record<string, unknown> {
-  if (data.gridUnitMm === undefined) {
-    data.gridUnitMm = 42;
-  }
-  if (data.heightUnitMm === undefined) {
-    data.heightUnitMm = 7;
-  }
-  // Migrate maxPrintSize (grid units) -> printBedSize (mm)
-  const gridUnitMm = (data.gridUnitMm as number) || 42;
-  if (data.maxPrintSize !== undefined && data.printBedSize === undefined) {
-    data.printBedSize = (data.maxPrintSize as number) * gridUnitMm;
-    delete data.maxPrintSize;
-  }
-  // Fix if printBedSize was saved in grid units. A value below the minimum valid
-  // mm bed dimension can't be a real mm bed, so treat it as grid units.
-  if (
-    data.printBedSize !== undefined &&
-    (data.printBedSize as number) < CONSTRAINTS.PRINT_BED_MM_MIN
-  ) {
-    data.printBedSize = (data.printBedSize as number) * gridUnitMm;
-  }
-  if (data.printBedSize === undefined) {
-    data.printBedSize = CONSTRAINTS.PRINT_BED_MM_DEFAULT;
-  }
-  return data;
-}
-
-/**
  * Result of parsing storage data into a Layout.
  */
 type ParseResult = { success: true; layout: Layout } | { success: false; errors: string[] };
@@ -105,8 +74,7 @@ function parseLayoutData(data: unknown): ParseResult {
     return { success: false, errors: ['No data or invalid type'] };
   }
 
-  const migrated = migrateLayout(data as Record<string, unknown>);
-  const result = salvageImport(migrated);
+  const result = salvageImport(data);
 
   if (!result.valid) {
     return { success: false, errors: ['Layout structure is invalid'] };
@@ -531,6 +499,21 @@ async function persistNewLayoutAsync(
   }
 }
 
+let seededThisLoad = false;
+
+/**
+ * Whether this page load created the starting layout because no library existed.
+ * A migrated library also gets fresh timestamps, so `createdAt` cannot tell.
+ */
+export function wasLibrarySeededThisLoad(): boolean {
+  return seededThisLoad;
+}
+
+/** @internal Test-only. */
+export function _setLibrarySeededThisLoad(value: boolean): void {
+  seededThisLoad = value;
+}
+
 /**
  * Initialize the layout library system.
  * Handles migration from legacy storage if needed.
@@ -585,6 +568,7 @@ export async function initializeLayoutLibrary(): Promise<{
 
     library = createLibraryWithLayout(layoutId, defaultLayout);
     await persistNewLayoutAsync(layoutId, defaultLayout, library);
+    seededThisLoad = true;
   }
 
   // Load active layout from IndexedDB, then localStorage fallback

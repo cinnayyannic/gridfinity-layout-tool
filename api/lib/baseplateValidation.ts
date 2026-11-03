@@ -17,6 +17,7 @@ import {
   isString,
   validationError,
 } from './validationUtils.js';
+import { isValidShareId } from './shared.js';
 
 /** 100 KB — generous for a flat params object; a guard against smuggled bloat. */
 const MAX_PAYLOAD_BYTES = 100_000;
@@ -41,6 +42,7 @@ const MIN_SCREW_HEAD_DIAMETER_MM = 3;
 const MAX_SCREW_HEAD_DIAMETER_MM = 16;
 const MIN_SCREWS_PER_PIECE = 1;
 const MAX_SCREWS_PER_PIECE = 8;
+const MAX_SCREW_EDGE_INSET_CELLS = 4;
 /**
  * The counterbore pocket IS the head recess, and a floor-sited screw grows the
  * plate's slab by that recess plus its retaining floor, so an unbounded depth is
@@ -53,7 +55,24 @@ const MAX_SCREWS_PER_PIECE = 8;
  */
 const MAX_COUNTERBORE_DEPTH_MM = 6;
 
+/** Mount-magnet bounds, mirroring `MOUNT_MAGNET_*` in `src/core/baseplateDefaults.ts`. */
+const MIN_MOUNT_MAGNET_DIAMETER_MM = 2;
+const MAX_MOUNT_MAGNET_DIAMETER_MM = 6.5;
+const MIN_MOUNT_MAGNET_DEPTH_MM = 0.5;
+const MAX_MOUNT_MAGNET_DEPTH_MM = 2.5;
+const MIN_MOUNT_MAGNETS_PER_PIECE = 1;
+const MAX_MOUNT_MAGNETS_PER_PIECE = 64;
+
+const ALLOWED_MOUNT_MAGNET_KEYS = new Set<string>([
+  'enabled',
+  'diameter',
+  'depth',
+  'perPiece',
+  'chamfer',
+]);
+
 const VALID_SCREW_HEAD_STYLES = ['countersink', 'counterbore'] as const;
+const VALID_SCREW_CELL_CORNERS = ['outer', 'inner'] as const;
 
 /**
  * Keys allowed inside `screwHoles`. The nested object is closed rather than
@@ -67,6 +86,8 @@ const ALLOWED_SCREW_HOLE_KEYS = new Set<string>([
   'headDiameter',
   'counterboreDepth',
   'screwsPerPiece',
+  'edgeInsetCells',
+  'cellCorner',
 ]);
 
 /**
@@ -93,6 +114,7 @@ const ALLOWED_PARAM_KEYS = new Set<string>([
   'wholeCellsOnly',
   'connectorNubs',
   'lightweight',
+  'ecoPlate',
   'solidFloor',
   'solidFloorThickness',
   'syncWithLayout',
@@ -112,16 +134,109 @@ const ALLOWED_PARAM_KEYS = new Set<string>([
   'stackPrint',
   'splitOverride',
   'screwHoles',
+  'mountMagnets',
 ]);
+
+const BOOLEAN_PARAM_KEYS = new Set<string>([
+  'overTile',
+  'overTileHalfGrid',
+  'overTileHalfGridSolidLeftover',
+  'wholeCellsOnly',
+  'connectorNubs',
+  'lightweight',
+  'ecoPlate',
+  'solidFloor',
+  'syncWithLayout',
+  'invertDovetails',
+  'preferIdenticalPieces',
+  'connectorSlotsAllEdges',
+  'detachMargins',
+  'detachMarginConnector',
+]);
+
+export const PADDING_ANCHORS = ['tl', 'tc', 'tr', 'ml', 'c', 'mr', 'bl', 'bc', 'br', 'custom'];
+export const CONNECTOR_STYLES = ['dovetail', 'puzzle', 'dovetailKey', 'snapClip'];
+export const FRACTIONAL_EDGES = ['start', 'end'];
+
+const ENUM_PARAM_VALUES = new Map<string, ReadonlySet<string>>([
+  ['paddingAnchor', new Set(PADDING_ANCHORS)],
+  ['connectorStyle', new Set(CONNECTOR_STYLES)],
+  ['fractionalEdgeX', new Set(FRACTIONAL_EDGES)],
+  ['fractionalEdgeY', new Set(FRACTIONAL_EDGES)],
+]);
+
+/** Mirrors STACK_PRINT_* in src/core/types/baseplate.ts. */
+function isValidStackPrint(value: unknown): boolean {
+  if (!isObject(value) || !isBoolean(value.enabled)) return false;
+  if (value.gapMm !== undefined && !(isNumber(value.gapMm) && inRange(value.gapMm, 0.1, 1))) {
+    return false;
+  }
+  if (
+    value.copies !== undefined &&
+    !(isNumber(value.copies) && Number.isInteger(value.copies) && inRange(value.copies, 1, 20))
+  ) {
+    return false;
+  }
+  return Object.keys(value).every(
+    (key) => key === 'enabled' || key === 'gapMm' || key === 'copies'
+  );
+}
+
+function isValidMountMagnets(value: unknown): boolean {
+  if (!isObject(value) || !isBoolean(value.enabled)) return false;
+  if (!Object.keys(value).every((key) => ALLOWED_MOUNT_MAGNET_KEYS.has(key))) return false;
+  if (
+    !isNumber(value.diameter) ||
+    !inRange(value.diameter, MIN_MOUNT_MAGNET_DIAMETER_MM, MAX_MOUNT_MAGNET_DIAMETER_MM)
+  ) {
+    return false;
+  }
+  if (
+    !isNumber(value.depth) ||
+    !inRange(value.depth, MIN_MOUNT_MAGNET_DEPTH_MM, MAX_MOUNT_MAGNET_DEPTH_MM)
+  ) {
+    return false;
+  }
+  if (
+    value.perPiece !== undefined &&
+    !(
+      isNumber(value.perPiece) &&
+      Number.isInteger(value.perPiece) &&
+      inRange(value.perPiece, MIN_MOUNT_MAGNETS_PER_PIECE, MAX_MOUNT_MAGNETS_PER_PIECE)
+    )
+  ) {
+    return false;
+  }
+  return value.chamfer === undefined || isBoolean(value.chamfer);
+}
+
+/**
+ * Optional settings the required checks above don't cover. A malformed one is
+ * dropped rather than failing the plate, so one bad option can't stop a design
+ * or a layout from syncing.
+ */
+function isWellFormedParam(key: string, value: unknown): boolean {
+  if (BOOLEAN_PARAM_KEYS.has(key)) return isBoolean(value);
+  const values = ENUM_PARAM_VALUES.get(key);
+  if (values) return isString(value) && values.has(value);
+  if (key === 'stackPrint') return isValidStackPrint(value);
+  if (key === 'mountMagnets') return isValidMountMagnets(value);
+  return true;
+}
 
 function pickAllowedParams(params: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const key of Object.keys(params)) {
-    if (ALLOWED_PARAM_KEYS.has(key)) {
+    if (ALLOWED_PARAM_KEYS.has(key) && isWellFormedParam(key, params[key])) {
       out[key] = params[key];
     }
   }
   return out;
+}
+
+/** Share-format ids too: a design keeps the id it was shared under when it round-trips. */
+export function isValidBaseplateId(id: unknown): id is string {
+  return typeof id === 'string' && (/^baseplate_\d+_[a-z0-9]{1,8}$/.test(id) || isValidShareId(id));
 }
 
 export interface BaseplateSharePayload {
@@ -322,6 +437,29 @@ export function validateBaseplateShare(
       return validationError(
         'INVALID_PARAMS',
         `screwHoles.screwsPerPiece must be a whole number ${MIN_SCREWS_PER_PIECE}-${MAX_SCREWS_PER_PIECE}`
+      );
+    }
+    if (
+      screwHoles.edgeInsetCells !== undefined &&
+      (!isNumber(screwHoles.edgeInsetCells) ||
+        !Number.isInteger(screwHoles.edgeInsetCells) ||
+        !inRange(screwHoles.edgeInsetCells, 0, MAX_SCREW_EDGE_INSET_CELLS))
+    ) {
+      return validationError(
+        'INVALID_PARAMS',
+        `screwHoles.edgeInsetCells must be a whole number 0-${MAX_SCREW_EDGE_INSET_CELLS}`
+      );
+    }
+    if (
+      screwHoles.cellCorner !== undefined &&
+      (!isString(screwHoles.cellCorner) ||
+        !VALID_SCREW_CELL_CORNERS.includes(
+          screwHoles.cellCorner as (typeof VALID_SCREW_CELL_CORNERS)[number]
+        ))
+    ) {
+      return validationError(
+        'INVALID_PARAMS',
+        `screwHoles.cellCorner must be one of: ${VALID_SCREW_CELL_CORNERS.join(', ')}`
       );
     }
   }

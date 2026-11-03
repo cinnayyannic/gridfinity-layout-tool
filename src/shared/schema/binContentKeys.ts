@@ -31,6 +31,7 @@ import type {
   TextStyleDefaults,
   TextStyleOverride,
 } from '@/shared/types/bin';
+import type { SlantConfig } from '@/core/types';
 import type { Assert, KeysMatch } from './assert';
 
 export const FEATURE_COLOR_KEYS = [
@@ -94,11 +95,17 @@ export type _TextOffsetKeys = Assert<
 
 export const SURFACE_TEXT_KEYS = [
   'lidText',
+  'lidTextRotation',
+  'floorText',
+  'floorTextRotation',
   'walls',
   'wallAlign',
   'style',
   'lidStyle',
+  'floorStyle',
   'wallStyles',
+  'wallFaces',
+  'insideStyle',
 ] as const;
 export type _SurfaceTextKeys = Assert<
   KeysMatch<keyof SurfaceTextConfig, (typeof SURFACE_TEXT_KEYS)[number]>
@@ -114,11 +121,13 @@ export const LID_CONFIG_KEYS = [
   'clickRails',
   'clickRailCoverage',
   'extraHeightMm',
+  'heightUnits',
   'topThicknessMm',
   'retentionMagnet',
   'tray',
   'grip',
   'relieveInterior',
+  'fill',
   'slide',
   'hinge',
   'cutouts',
@@ -158,6 +167,9 @@ export type _KnifeRestKeys = Assert<
   KeysMatch<keyof KnifeRestConfig, (typeof KNIFE_REST_KEYS)[number]>
 >;
 
+export const SLANT_KEYS = ['angleDeg', 'side', 'endSupport'] as const;
+export type _SlantKeys = Assert<KeysMatch<keyof SlantConfig, (typeof SLANT_KEYS)[number]>>;
+
 export const CUTOUT_CONFIG_KEYS = ['topOffset', 'fillReference'] as const;
 export type _CutoutConfigKeys = Assert<
   KeysMatch<keyof CutoutConfig, (typeof CUTOUT_CONFIG_KEYS)[number]>
@@ -171,6 +183,8 @@ export const CUTOUT_KEYS = [
   'width',
   'depth',
   'cutDepth',
+  'depthMode',
+  'floorMm',
   'rotation',
   'cornerRadius',
   'label',
@@ -186,9 +200,13 @@ export const CUTOUT_KEYS = [
   'hidden',
   'zIndex',
   'path',
+  'holes',
   'sides',
   'clearance',
   'chamferWidth',
+  'entryProfile',
+  'finger',
+  'split',
   'leanDeg',
   'array',
   'engraveLabel',
@@ -260,6 +278,21 @@ export type _BezierHandleKeys = Assert<
 export const CUTOUT_OPEN_SIDE_SPEC_KEYS = ['side', 'widthMm', 'tunnel'] as const;
 export type _CutoutOpenSideSpecKeys = Assert<
   KeysMatch<keyof CutoutOpenSideSpec, (typeof CUTOUT_OPEN_SIDE_SPEC_KEYS)[number]>
+>;
+
+export const CUTOUT_FINGER_KEYS = ['bottom'] as const;
+export type _CutoutFingerKeys = Assert<
+  KeysMatch<keyof NonNullable<Cutout['finger']>, (typeof CUTOUT_FINGER_KEYS)[number]>
+>;
+
+export const CUTOUT_SPLIT_KEYS = ['a', 'b', 'cutDepth', 'depthMode', 'floorMm'] as const;
+export type _CutoutSplitKeys = Assert<
+  KeysMatch<keyof NonNullable<Cutout['split']>, (typeof CUTOUT_SPLIT_KEYS)[number]>
+>;
+
+export const CUTOUT_SPLIT_POINT_KEYS = ['x', 'y'] as const;
+export type _CutoutSplitPointKeys = Assert<
+  KeysMatch<keyof NonNullable<Cutout['split']>['a'], (typeof CUTOUT_SPLIT_POINT_KEYS)[number]>
 >;
 
 export const CUTOUT_SCOOP_EDGES_KEYS = ['left', 'right', 'front', 'back'] as const;

@@ -11,6 +11,7 @@ import type {
 import type { StoredBaseplateParams } from './baseplate';
 import type { DrawerOutline, FractionalEdge, MeasuredDrawerMm } from './drawerOutline';
 import type { OverhangConfig, WallTaperProfile } from './overhang';
+import type { SlantConfig } from './slant';
 /**
  * Where magnet holes anchor within each grid cell.
  * - `edge` (default): a constant 8mm from the cell edge, so holes track the
@@ -111,6 +112,17 @@ export interface Layer {
   height: HeightUnits; // >= 1
 }
 
+/**
+ * One thing a bin holds, for finding it later. A map, not an inventory: there
+ * is no stock level or check-out, and `qty` is only what the user typed.
+ */
+export interface BinItem {
+  id: string; // unique within its bin
+  name: string; // 1..ITEM_NAME_MAX_LENGTH chars
+  qty?: number; // whole number, 0..ITEM_QTY_MAX
+  note?: string; // max ITEM_NOTE_MAX_LENGTH chars
+}
+
 export interface Bin {
   id: BinId;
   layerId: LayerId; // base layer ID or STAGING_ID
@@ -124,6 +136,7 @@ export interface Bin {
   label: string; // max 24 chars
   notes: string; // max 256 chars
   customProperties?: Record<string, string>; // custom key-value properties for user-defined metadata
+  items?: BinItem[]; // max ITEMS_PER_BIN_MAX; absent when empty
   linkedDesignId?: DesignId; // reference to saved design in bin-designer (for one-to-many linking)
   // Opt-in for this instance to extend its walls into the baseplate's drawer-fit
   // margin on every drawer edge it abuts. A flag, not mm: the actual
@@ -150,6 +163,10 @@ export interface Bin {
   // moves or is resized, since the values only hold for the position they were
   // computed for.
   overhang?: OverhangConfig;
+  // A per-placement slant. Wins over the linked design's own, so the last bin
+  // of a slanted row can carry the end support its design does not. Unlike
+  // `overhang` it survives a move: nothing in it depends on the position.
+  slant?: SlantConfig;
   // Freezes the bin's size: while set, `width`, `depth` and `height`
   // are rejected by `bin.update`, and the bin is skipped by every flow that
   // resizes on the user's behalf (rotation, linked-design dimension sync,
@@ -177,9 +194,10 @@ export interface Bin {
  * indistinguishable from omission once it crosses the command boundary.
  */
 export type BinUpdates = Partial<
-  Omit<Bin, 'overhang' | 'pairId' | 'pairRole' | 'linkedDesignId'>
+  Omit<Bin, 'overhang' | 'slant' | 'pairId' | 'pairRole' | 'linkedDesignId'>
 > & {
   overhang?: OverhangConfig | null;
+  slant?: SlantConfig | null;
   pairId?: string | null;
   pairRole?: 'block' | 'rest' | null;
   linkedDesignId?: DesignId | null;
@@ -197,10 +215,4 @@ export interface Rect {
   y: GridUnits;
   width: GridUnits;
   depth: GridUnits;
-}
-
-/** 3D bounding box extending a grid rect with a vertical range (in height units). */
-export interface Rect3D extends Rect {
-  zStart: HeightUnits;
-  zEnd: HeightUnits;
 }

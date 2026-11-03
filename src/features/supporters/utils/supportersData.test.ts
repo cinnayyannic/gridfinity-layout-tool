@@ -5,7 +5,6 @@ import {
   getSupporterCount,
   isSupportersData,
   joinedThisMonth,
-  supportHistogram,
   type SupportersData,
 } from './supportersData';
 import supportersData from '../data/supporters.json';
@@ -87,6 +86,20 @@ describe('supportersData', () => {
       );
       expect(bins[0].message).toBeUndefined();
     });
+
+    it('carries the department onto a named bin and never onto an anonymous one', () => {
+      const bins = buildSupporterBins(
+        {
+          supporters: [
+            { name: 'Ada', department: 3 },
+            { name: null, department: 5 },
+          ],
+        },
+        () => 0.99
+      );
+      expect(bins.find((b) => b.name === 'Ada')?.department).toBe(3);
+      expect(bins.find((b) => b.name === null)?.department).toBeUndefined();
+    });
   });
 
   describe('with live data', () => {
@@ -134,33 +147,21 @@ describe('joinedThisMonth', () => {
   });
 });
 
-describe('supportHistogram', () => {
-  const now = new Date('2026-07-19T00:00:00Z');
-  const data: SupportersData = {
-    supporters: [
-      { name: 'A', joinedAt: '2026-05-10T00:00:00Z' },
-      { name: 'B', joinedAt: '2026-07-01T00:00:00Z' },
-      { name: 'C', joinedAt: '2026-07-18T00:00:00Z' },
-      { name: 'D' },
-    ],
-  };
-
-  it('returns a gap-free trailing window, oldest first', () => {
-    const buckets = supportHistogram(data, 4, now);
-    expect(buckets.map((b) => b.key)).toEqual(['2026-04', '2026-05', '2026-06', '2026-07']);
-    expect(buckets.map((b) => b.count)).toEqual([0, 1, 0, 2]);
-  });
-
-  it('ignores joins outside the window and undated supporters', () => {
-    const buckets = supportHistogram(data, 1, now);
-    expect(buckets).toEqual([{ key: '2026-07', count: 2 }]);
-  });
-});
-
 describe('isSupportersData', () => {
   it('accepts a well-formed payload', () => {
     expect(
       isSupportersData({ supporters: [{ name: 'Ada', joinedAt: '2026-07-01T00:00:00Z' }] })
+    ).toBe(true);
+  });
+
+  it('accepts a department on every boundary of the range', () => {
+    expect(
+      isSupportersData({
+        supporters: [
+          { name: 'Ada', department: 0 },
+          { name: 'Grace', department: 7 },
+        ],
+      })
     ).toBe(true);
   });
 
@@ -180,6 +181,10 @@ describe('isSupportersData', () => {
     ['a non-string message', { supporters: [{ name: 'Ada', message: 5 }] }],
     ['a message on an anonymous record', { supporters: [{ name: null, message: 'leak' }] }],
     ['a message on an empty-name record', { supporters: [{ name: '', message: 'leak' }] }],
+    ['a department past the last one', { supporters: [{ name: 'Ada', department: 8 }] }],
+    ['a negative department', { supporters: [{ name: 'Ada', department: -1 }] }],
+    ['a fractional department', { supporters: [{ name: 'Ada', department: 1.5 }] }],
+    ['a string department', { supporters: [{ name: 'Ada', department: '2' }] }],
   ])('rejects %s', (_label, value) => {
     expect(isSupportersData(value)).toBe(false);
   });

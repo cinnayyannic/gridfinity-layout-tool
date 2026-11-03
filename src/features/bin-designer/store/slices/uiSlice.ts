@@ -2,11 +2,13 @@
  * UI slice: tabs, dialogs, wireframe, half-bin mode, preview states.
  */
 
+import { castDraft } from 'immer';
 import type { Draft } from 'immer';
 import type { AssemblyPartType } from '@/shared/types/assembly';
 import type {
   DesignerState,
   BinParams,
+  BodyTypeMemory,
   ColorTool,
   CutoutTarget,
   DesignerCategory,
@@ -202,6 +204,36 @@ export function createUISlice(set: Set) {
     setShowLabelPlates: (show: boolean) => {
       set((state) => {
         state.ui.showLabelPlates = show;
+      });
+    },
+
+    queueDepthPrompt: (ids: readonly string[]) => {
+      if (ids.length === 0) return;
+      set((state) => {
+        const queued = new Set(state.ui.depthPromptIds);
+        const additions = ids.filter((id) => {
+          if (queued.has(id)) return false;
+          queued.add(id);
+          return true;
+        });
+        state.ui.depthPromptIds = [...state.ui.depthPromptIds, ...additions];
+      });
+    },
+
+    clearDepthPrompt: (ids?: readonly string[]) => {
+      set((state) => {
+        if (ids === undefined) {
+          state.ui.depthPromptIds = [];
+          return;
+        }
+        const done = new Set(ids);
+        state.ui.depthPromptIds = state.ui.depthPromptIds.filter((id) => !done.has(id));
+      });
+    },
+
+    setBodyTypeMemory: (memory: BodyTypeMemory | null) => {
+      set((state) => {
+        state.ui.bodyTypeMemory = castDraft(memory);
       });
     },
 

@@ -26,11 +26,11 @@ description: 'SEO/content pages: adding a landing page end-to-end (content/*.md 
 
 1. Write `content/<slug>.md`. Frontmatter (`Frontmatter` interface in `scripts/build-content.ts`): `title` (≤55 chars), `description` (≤155), `keywords`, `schema: Article | HowTo`, optional `faqs` (emits FAQPage JSON-LD; answers allow inline markdown), `breadcrumbs`, `howTo`, `softwareApplication`, `navCta`. Copy `content/gridfinity-calculator.md` as a template. Body conventions: `[CTA: text](url)` renders the orange CTA button; `![alt](src "1200x675")` sets intrinsic dimensions (CLS); blockquotes render as callouts.
 2. Register the slug in `SITEMAP_PAGES` in `scripts/build-content.ts` — pages not listed there build fine but never enter `sitemap.xml` (`privacy`/`terms` are deliberately absent).
-3. Add the slug to the English rewrite group in `vercel.json` (`/:slug(what-is-gridfinity|guide|...)`) and to `SLUGS` in `scripts/vite-plugin-content-routes.ts`.
+3. Add the slug to the English rewrite group in `vercel.json` (`/:slug(what-is-gridfinity|guide|...)`) plus a Cache-Control header block, to `SLUGS` in `scripts/vite-plugin-content-routes.ts`, to `CONTENT_SLUGS` in `scripts/contentRoutes.ts`, and to both alternations and the `# vercel:` header markers in `docker/nginx.conf` (`scripts/check-docker-parity.test.ts` fails on any drift).
 4. Add `public/<slug>/` to `.gitignore` (match the existing block).
 5. Internal linking: add an entry to `LEARN_LINKS` in `src/shell/Sidebar/learnLinks.ts` (`localized: false` for English-only) plus its `sidebar.learn.*` key — see the **i18n-changes** skill. Consider a footer link too: `FOOTER_LINKS` in `build-content.ts` is hardcoded per locale and the footer template lists each link explicitly.
 6. Optional OG card: append to `OG_CARDS` in `scripts/gen-seo-images.ts`, regenerate (recipe below), commit `public/og/<slug>.png` — `build:content` picks it up automatically.
-7. Bump `CONTENT_LASTMOD` in `build-content.ts` (hardcoded on purpose; `new Date()` would advertise the whole sitemap as updated every build).
+7. Set `lastmod: YYYY-MM-DD` in the page's frontmatter and move it on each substantive edit (translations carry their own). It dates the sitemap entry and Article `dateModified`; without a valid one the page falls back to `CONTENT_LASTMOD` (malformed ones warn).
 8. Translations later: drop `content/<locale>/<slug>.md` files, then add the slug to `LOCALIZED_SLUGS` in `vite-plugin-content-routes.ts`, the localized rewrite group in `vercel.json`, and flip `localized: true` in `learnLinks.ts`.
 
 ## Recipe: regenerate SEO images / thumbnails
@@ -40,10 +40,11 @@ Both scripts drive a real browser against a **separately running dev server** (W
 ```bash
 pnpm run dev                        # terminal 1, leave running
 pnpm run gen:seo-images             # terminal 2; BASE_URL=... if not :5173
-ONLY=og pnpm run gen:seo-images     # steps: planner, renders, baseplate, og
+ONLY=og pnpm run gen:seo-images     # steps: planner, renders, serp, baseplate, drawers, og
+ONLY=og OG_SLUGS=a,b pnpm run gen:seo-images   # only these cards
 ```
 
-Outputs are committed: `public/images/landing/` (in-page screenshots) and `public/og/` (1200x630 cards). OG cards embed the landing screenshots as insets, so when a screenshot changes run its step **before** `ONLY=og`. Designer renders use the dev-only `?devThumbnails=1` route (`src/features/bin-designer/components/DevThumbnailRoute/`).
+Outputs are committed: `public/images/landing/` (in-page screenshots) and `public/og/` (1200x630 cards). After changing a landing image a page uses, run `pnpm run gen:webp` (needs `cwebp`): it writes the 720w/1440w WebP variants that `scripts/contentImage.ts` serves through `<picture>`; a page whose image lacks them falls back to the PNG. OG cards embed the landing screenshots as insets, so when a screenshot changes run its step **before** `ONLY=og`. Designer renders use the dev-only `?devThumbnails=1` route (`src/features/bin-designer/components/DevThumbnailRoute/`).
 
 Gallery thumbnails are the same workflow: `pnpm run gen:example-thumbnails` (filter with `EXAMPLE_ID=<id>,<id>`) writes committed PNGs and draco-compressed meshes into `src/features/bin-designer/data/examples/thumbnails/` and `meshes/`.
 
@@ -73,7 +74,7 @@ pnpm vitest run api/lib/scanSession.test.ts        # after scan-session changes
 | `build-route-entries: pattern not found for <label>` fails the build            | A head tag in `index.html` that `scripts/build-route-entries.ts` regex-swaps was edited/removed                              | Keep those meta/link tags matchable, or update the corresponding `replaceOnce` pattern in the same PR                 |
 | `git status` shows `public/privacy/index.html` / `terms` modified after a build | Committed pages regenerated with a new CSS hash or footer year (`new Date().getFullYear()`)                                  | Real diff — commit it                                                                                                 |
 | Page renders but is missing from `sitemap.xml`                                  | Not registered in `SITEMAP_PAGES` (`APP_ROUTES` covers only `/designer`, `/baseplate`)                                       | Add the entry                                                                                                         |
-| Search engines never re-crawl an updated page                                   | `CONTENT_LASTMOD` is hardcoded and was not bumped                                                                            | Bump it in `scripts/build-content.ts`                                                                                 |
+| Search engines never re-crawl an updated page                                   | The page's frontmatter `lastmod` was not moved                                                                               | Set it to the edit date                                                                                               |
 | `gen:seo-images` / `gen:example-thumbnails` hang then time out                  | No dev server on the expected port                                                                                           | Start `pnpm run dev` first; set `BASE_URL` otherwise                                                                  |
 | Localized content page links its logo/CTA to a 404                              | Someone "fixed" `homeUrl` to `/{locale}/` — no localized SPA root exists                                                     | Keep it `/`; in-app i18n auto-detects language (comment in `generateHtml`)                                            |
 
